@@ -62,8 +62,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   char exe_path[MAX_PATH];
   char base_dir[MAX_PATH];
   char zip_path[MAX_PATH];
+  char zip_path_dist[MAX_PATH];
+  char chosen_zip_path[MAX_PATH];
   char ext_dir[MAX_PATH];
   char html_path[MAX_PATH];
+  char html_path_dist[MAX_PATH];
   char extract_cmd[4096];
   char message[4096];
 
@@ -77,27 +80,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   dirname_inplace(base_dir);
 
   snprintf(zip_path, sizeof(zip_path), "%s\\target-checkout-helper.zip", base_dir);
+  snprintf(zip_path_dist, sizeof(zip_path_dist), "%s\\dist\\target-checkout-helper.zip", base_dir);
   snprintf(ext_dir, sizeof(ext_dir), "%s\\target-checkout-helper", base_dir);
   snprintf(html_path, sizeof(html_path), "%s\\INSTALL.html", base_dir);
-
-  if (!path_exists(zip_path)) {
-    snprintf(message, sizeof(message),
-      "Missing installer payload:\n\n%s\n\n"
-      "Put this .exe next to target-checkout-helper.zip and run again.",
-      zip_path);
-    MessageBoxA(NULL, message, "Target Checkout Helper Installer", MB_OK | MB_ICONERROR);
-    return 1;
-  }
+  snprintf(html_path_dist, sizeof(html_path_dist), "%s\\dist\\INSTALL.html", base_dir);
 
   if (!dir_exists(ext_dir)) {
+    if (path_exists(zip_path)) {
+      strncpy(chosen_zip_path, zip_path, sizeof(chosen_zip_path) - 1);
+      chosen_zip_path[sizeof(chosen_zip_path) - 1] = '\0';
+    } else if (path_exists(zip_path_dist)) {
+      strncpy(chosen_zip_path, zip_path_dist, sizeof(chosen_zip_path) - 1);
+      chosen_zip_path[sizeof(chosen_zip_path) - 1] = '\0';
+    } else {
+      snprintf(message, sizeof(message),
+        "Missing installer payload.\n\n"
+        "Looked for:\n"
+        "1) %s\n"
+        "2) %s\n\n"
+        "Fix:\n"
+        "- Keep this .exe in the extracted repo root, OR\n"
+        "- Put target-checkout-helper.zip next to this .exe.",
+        zip_path, zip_path_dist);
+      MessageBoxA(NULL, message, "Target Checkout Helper Installer", MB_OK | MB_ICONERROR);
+      return 1;
+    }
+
     snprintf(extract_cmd, sizeof(extract_cmd),
       "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath \\\"%s\\\" -DestinationPath \\\"%s\\\" -Force\"",
-      zip_path, base_dir);
+      chosen_zip_path, base_dir);
     if (!run_and_wait(extract_cmd) || !dir_exists(ext_dir)) {
       snprintf(message, sizeof(message),
         "Failed to extract extension files.\n\n"
         "Try manually extracting:\n%s\n\nto:\n%s",
-        zip_path, base_dir);
+        chosen_zip_path, base_dir);
       MessageBoxA(NULL, message, "Target Checkout Helper Installer", MB_OK | MB_ICONERROR);
       return 1;
     }
@@ -106,6 +122,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   open_url_or_path("chrome://extensions");
   if (path_exists(html_path)) {
     open_url_or_path(html_path);
+  } else if (path_exists(html_path_dist)) {
+    open_url_or_path(html_path_dist);
   }
 
   snprintf(message, sizeof(message),

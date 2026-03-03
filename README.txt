@@ -19,6 +19,14 @@ After using GitHub "Code -> Download ZIP":
 
 No terminal commands or admin/root access are required for this Windows flow.
 
+Important:
+- Keep installer files in the extracted repo folder.
+- The installer can use either:
+  - target-checkout-helper/ (already unpacked), or
+  - target-checkout-helper.zip (payload ZIP in repo root), or
+  - dist/target-checkout-helper.zip (fallback location)
+- If you move the .exe elsewhere, move target-checkout-helper.zip with it.
+
 Alternative Windows package:
 - dist/target-checkout-helper-installer-bundle.zip
   (contains installer.exe + target-checkout-helper.zip + INSTALL.html)

@@ -69,6 +69,16 @@
 </div>
 
 <div class="step">
+  <h3>Keep payload files together</h3>
+  <p>The installer will use one of these payload locations:</p>
+  <div class="path-box">
+    <span id="path-exe-payloads">target-checkout-helper/ or target-checkout-helper.zip or dist/target-checkout-helper.zip</span>
+    <button class="copy-btn" onclick="copyText('path-exe-payloads')">Copy</button>
+  </div>
+  <p style="margin-top:8px">If you move the installer .exe out of the repo folder, move <code>target-checkout-helper.zip</code> next to it.</p>
+</div>
+
+<div class="step">
   <h3>Alternative: single Windows bundle in <code>dist/</code></h3>
   <p>If needed, use:</p>
   <div class="path-box">
@@ -215,6 +225,7 @@
   <thead><tr><th>File</th><th>Purpose</th></tr></thead>
   <tbody>
     <tr><td>target-checkout-helper-installer.exe</td><td>Top-level Windows installer (easy after GitHub ZIP download)</td></tr>
+    <tr><td>target-checkout-helper.zip</td><td>Top-level payload ZIP used by installer if extension folder is missing</td></tr>
     <tr><td>dist/target-checkout-helper-installer-bundle.zip</td><td>Single download package for Windows users</td></tr>
     <tr><td>dist/target-checkout-helper-installer.exe</td><td>One-click Windows installer launcher</td></tr>
     <tr><td>target-checkout-helper/</td><td>Extension source (load this as unpacked)</td></tr>

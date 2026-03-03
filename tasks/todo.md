@@ -47,3 +47,9 @@
 - [x] Place `target-checkout-helper-installer.exe` at repo root for GitHub ZIP users.
 - [x] Convert install readme from `README.md` to `README.txt`.
 - [x] Rebuild artifacts, stage, commit, and push.
+
+## Follow-up: Installer payload error fix
+- [x] Update Windows installer to accept payload in repo root or `dist/` and skip ZIP requirement when folder already exists.
+- [x] Copy `target-checkout-helper.zip` to repo root during build for easy GitHub ZIP usage.
+- [x] Clarify payload requirements in `README.txt` and `INSTALL.html`.
+- [x] Rebuild artifacts, stage, commit, and push.
