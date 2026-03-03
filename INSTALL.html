@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Install — Target Checkout Helper</title>
+<style>
+  :root { --red: #cc0000; --green: #1a7340; --bg: #f5f5f5; --card: #fff; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: #222; line-height: 1.6; }
+  .hero { background: var(--red); color: #fff; padding: 48px 24px 40px; text-align: center; }
+  .hero h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+  .hero p { margin-top: 8px; font-size: 15px; opacity: 0.9; }
+  .container { max-width: 680px; margin: -24px auto 48px; padding: 0 16px; }
+  .methods { display: flex; gap: 12px; margin-bottom: 32px; }
+  .tab { flex: 1; padding: 12px; text-align: center; background: var(--card); border: 2px solid #ddd; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.15s; }
+  .tab:hover { border-color: #bbb; }
+  .tab.active { border-color: var(--red); color: var(--red); box-shadow: 0 2px 8px rgba(204,0,0,0.12); }
+  .method-content { display: none; }
+  .method-content.active { display: block; }
+  .step { background: var(--card); border-radius: 12px; padding: 24px 28px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: relative; counter-increment: step; }
+  .step::before { content: counter(step); position: absolute; left: -12px; top: 20px; width: 32px; height: 32px; background: var(--red); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+  .step h3 { font-size: 16px; margin-bottom: 6px; }
+  .step p { font-size: 14px; color: #555; }
+  code, .path { background: #f0f0f0; padding: 2px 8px; border-radius: 4px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; color: #333; }
+  .path-box { background: #f8f8f0; border: 1px dashed #ccc; border-radius: 8px; padding: 12px 16px; margin-top: 10px; font-family: 'SF Mono', monospace; font-size: 13px; word-break: break-all; color: var(--green); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .path-box .copy-btn { background: var(--red); color: #fff; border: none; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .path-box .copy-btn:hover { background: #a30000; }
+  kbd { display: inline-block; background: #eee; border: 1px solid #ccc; border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: inherit; }
+  .note { background: #fff8e1; border-left: 4px solid #ffc107; border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 20px 0; font-size: 13px; color: #665100; }
+  .note strong { color: #c49000; }
+  .success-note { background: #e8f5e9; border-left: 4px solid var(--green); border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 20px 0; font-size: 13px; color: #1b5e20; }
+  .file-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  .file-table th { text-align: left; padding: 8px 12px; background: #f5f5f5; border-bottom: 2px solid #ddd; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; }
+  .file-table td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+  .file-table td:first-child { font-family: 'SF Mono', monospace; font-weight: 600; }
+  .badge { display: inline-block; background: var(--green); color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+  footer { text-align: center; padding: 24px; font-size: 12px; color: #999; }
+  footer a { color: var(--red); text-decoration: none; }
+  @media (max-width: 600px) { .methods { flex-direction: column; } .step::before { left: 8px; top: -14px; width: 28px; height: 28px; font-size: 13px; } .step { padding-left: 20px; } }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Target Checkout Helper</h1>
+  <p>Local Chrome extension installer &nbsp;·&nbsp; v1.1.0</p>
+</div>
+
+<div class="container">
+
+<div class="methods">
+  <div class="tab active" onclick="switchMethod('unpacked')">Load Unpacked <span class="badge">recommended</span></div>
+  <div class="tab" onclick="switchMethod('script')">Run Installer Script</div>
+  <div class="tab" onclick="switchMethod('crx')">Use .crx File</div>
+</div>
+
+<!-- ==================== METHOD 1: LOAD UNPACKED ==================== -->
+<div id="method-unpacked" class="method-content active" style="counter-reset: step">
+
+<div class="step">
+  <h3>Get the extension files</h3>
+  <p>Clone or download this repository. The extension lives in the <code>target-checkout-helper/</code> folder.</p>
+  <p style="margin-top:8px">Alternatively, extract the zip from <code>dist/target-checkout-helper.zip</code>.</p>
+</div>
+
+<div class="step">
+  <h3>Open Chrome Extensions page</h3>
+  <p>Type this into the Chrome address bar and press Enter:</p>
+  <div class="path-box">
+    <span id="url-unpacked">chrome://extensions</span>
+    <button class="copy-btn" onclick="copyText('url-unpacked')">Copy</button>
+  </div>
+</div>
+
+<div class="step">
+  <h3>Enable Developer Mode</h3>
+  <p>Toggle the <strong>Developer mode</strong> switch in the <strong>top-right corner</strong> of the page. Three new buttons will appear.</p>
+</div>
+
+<div class="step">
+  <h3>Click "Load unpacked"</h3>
+  <p>Click the <strong>Load unpacked</strong> button (top-left), then navigate to and select the <code>target-checkout-helper</code> folder:</p>
+  <div class="path-box">
+    <span id="path-ext">target-checkout-helper/</span>
+    <button class="copy-btn" onclick="copyText('path-ext')">Copy</button>
+  </div>
+  <div class="note"><strong>Important:</strong> Select the <code>target-checkout-helper</code> folder itself, not a file inside it.</div>
+</div>
+
+<div class="step">
+  <h3>Pin &amp; configure</h3>
+  <p>Click the puzzle-piece <strong>Extensions</strong> icon in the Chrome toolbar, then click the pin icon next to <strong>Target Checkout Helper</strong>.</p>
+  <p style="margin-top:6px">Click the extension icon to open the popup. Toggle <strong>ON</strong>, fill in your shipping &amp; payment details, and click <strong>Save Settings</strong>.</p>
+</div>
+
+<div class="success-note">
+  <strong>You're all set!</strong> Visit any product page on target.com and the extension will automate the checkout flow. It will <em>never</em> click "Place Order" — that's always your call.
+</div>
+</div>
+
+<!-- ==================== METHOD 2: INSTALLER SCRIPT ==================== -->
+<div id="method-script" class="method-content" style="counter-reset: step">
+
+<div class="step">
+  <h3>Run the installer</h3>
+  <p><strong>macOS / Linux:</strong></p>
+  <div class="path-box">
+    <span id="cmd-sh">./install.sh</span>
+    <button class="copy-btn" onclick="copyText('cmd-sh')">Copy</button>
+  </div>
+  <p style="margin-top:12px"><strong>Windows:</strong></p>
+  <div class="path-box">
+    <span id="cmd-bat">install.bat</span>
+    <button class="copy-btn" onclick="copyText('cmd-bat')">Copy</button>
+  </div>
+  <p style="margin-top:8px">The script extracts the extension (if needed) and opens Chrome to the Extensions page.</p>
+</div>
+
+<div class="step">
+  <h3>Follow the prompts</h3>
+  <p>The script will print the exact folder path to select. Click <strong>Load unpacked</strong> and paste or navigate to that path.</p>
+</div>
+
+<div class="step">
+  <h3>Pin &amp; configure</h3>
+  <p>Same as the manual method — pin the extension, open the popup, enter your info, and click <strong>Save Settings</strong>.</p>
+</div>
+</div>
+
+<!-- ==================== METHOD 3: CRX FILE ==================== -->
+<div id="method-crx" class="method-content" style="counter-reset: step">
+
+<div class="note"><strong>Note:</strong> Modern Chrome restricts .crx sideloading. This method works best in Chromium, Brave, or Edge. For standard Chrome, use the "Load Unpacked" method above.</div>
+
+<div class="step">
+  <h3>Locate the .crx file</h3>
+  <p>The pre-built package is at:</p>
+  <div class="path-box">
+    <span id="path-crx">dist/target-checkout-helper.crx</span>
+    <button class="copy-btn" onclick="copyText('path-crx')">Copy</button>
+  </div>
+</div>
+
+<div class="step">
+  <h3>Open Extensions page</h3>
+  <p>Navigate to <code>chrome://extensions</code> and enable <strong>Developer mode</strong>.</p>
+</div>
+
+<div class="step">
+  <h3>Drag &amp; drop the .crx file</h3>
+  <p>Drag <code>target-checkout-helper.crx</code> from your file manager and drop it onto the Chrome Extensions page. Confirm the installation prompt.</p>
+</div>
+
+<div class="step">
+  <h3>Pin &amp; configure</h3>
+  <p>Pin the extension, open the popup, and set up your checkout info.</p>
+</div>
+</div>
+
+<!-- ==================== FILE REFERENCE ==================== -->
+<h2 style="font-size:14px; text-transform:uppercase; letter-spacing:0.5px; color:#888; margin:32px 0 12px;">Package Contents</h2>
+
+<table class="file-table">
+  <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>target-checkout-helper/</td><td>Extension source (load this as unpacked)</td></tr>
+    <tr><td>dist/target-checkout-helper.zip</td><td>Zipped copy for easy distribution</td></tr>
+    <tr><td>dist/target-checkout-helper.crx</td><td>Packed Chrome extension file</td></tr>
+    <tr><td>install.sh</td><td>One-command installer for macOS / Linux</td></tr>
+    <tr><td>install.bat</td><td>One-command installer for Windows</td></tr>
+    <tr><td>INSTALL.html</td><td>This guide</td></tr>
+  </tbody>
+</table>
+
+</div>
+
+<footer>
+  Target Checkout Helper v1.1.0 &nbsp;·&nbsp; Data stored locally — never sent anywhere.
+</footer>
+
+<script>
+function switchMethod(id) {
+  document.querySelectorAll('.method-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('method-' + id).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+function copyText(id) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.currentTarget;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1200);
+  });
+}
+</script>
+</body>
+</html>
