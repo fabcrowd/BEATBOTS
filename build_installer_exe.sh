@@ -13,6 +13,8 @@ SRC_FILE="$SCRIPT_DIR/installer/windows_installer.c"
 OUT_FILE="$DIST_DIR/target-checkout-helper-installer.exe"
 ZIP_FILE="$DIST_DIR/target-checkout-helper.zip"
 INSTALL_HTML="$SCRIPT_DIR/INSTALL.html"
+BUNDLE_FILE="$DIST_DIR/target-checkout-helper-installer-bundle.zip"
+BUNDLE_TEMP_DIR="$DIST_DIR/.installer-bundle-temp"
 
 echo "==> Building Windows installer .exe"
 
@@ -46,10 +48,25 @@ echo "==> Compiling installer executable..."
 echo "==> Copying INSTALL.html next to installer..."
 cp "$INSTALL_HTML" "$DIST_DIR/INSTALL.html"
 
+echo "==> Building single-file installer bundle ZIP..."
+rm -rf "$BUNDLE_TEMP_DIR"
+mkdir -p "$BUNDLE_TEMP_DIR"
+cp "$OUT_FILE" "$BUNDLE_TEMP_DIR/"
+cp "$ZIP_FILE" "$BUNDLE_TEMP_DIR/"
+cp "$DIST_DIR/INSTALL.html" "$BUNDLE_TEMP_DIR/"
+(
+  cd "$BUNDLE_TEMP_DIR"
+  zip -q -r "$BUNDLE_FILE" .
+)
+rm -rf "$BUNDLE_TEMP_DIR"
+
 echo "==> Build complete:"
-ls -lh "$OUT_FILE"
+ls -lh "$OUT_FILE" "$BUNDLE_FILE"
 echo ""
-echo "Distribute these files together to Windows users:"
+echo "Option A (single download for users):"
+echo "  - dist/target-checkout-helper-installer-bundle.zip"
+echo ""
+echo "Option B (three files together):"
 echo "  - dist/target-checkout-helper-installer.exe"
 echo "  - dist/target-checkout-helper.zip"
 echo "  - dist/INSTALL.html"

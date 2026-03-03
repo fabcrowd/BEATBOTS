@@ -6,13 +6,29 @@ Chrome extension to automate Target checkout flow from product page to order rev
 
 ### Windows (recommended: `.exe` installer)
 
-Download these files from `dist/` and keep them together in the same folder:
+#### Easiest (single ZIP bundle)
+
+Use:
+
+- `dist/target-checkout-helper-installer-bundle.zip`
+
+Steps:
+
+1. Extract `target-checkout-helper-installer-bundle.zip`
+2. Double-click `target-checkout-helper-installer.exe`
+3. In Chrome, turn on **Developer mode**
+4. Click **Load unpacked**
+5. Select the extracted `target-checkout-helper/` folder shown by the installer
+
+#### Manual 3-file package (equivalent)
+
+If needed, keep these files together in one folder:
 
 - `target-checkout-helper-installer.exe`
 - `target-checkout-helper.zip`
 - `INSTALL.html`
 
-Install steps:
+Then:
 
 1. Double-click `target-checkout-helper-installer.exe`
 2. Chrome opens to `chrome://extensions`
@@ -21,6 +37,13 @@ Install steps:
 5. Select the extracted `target-checkout-helper/` folder shown by the installer
 
 This is the easiest path for average Windows users (no terminal needed).
+
+#### If you used GitHub "Code → Download ZIP"
+
+After extracting the repo ZIP, go to `dist/` and use:
+
+- `target-checkout-helper-installer-bundle.zip` (recommended), or
+- the 3-file package listed above.
 
 ### macOS / Linux (`install.sh`)
 
@@ -65,6 +88,7 @@ From repo root:
 This produces:
 - `dist/target-checkout-helper-installer.exe`
 - `dist/INSTALL.html` (copied for distribution)
+- `dist/target-checkout-helper-installer-bundle.zip` (single downloadable installer package)
 
 ## Notes
 

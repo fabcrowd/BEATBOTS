@@ -60,8 +60,18 @@
 <div id="method-exe" class="method-content" style="counter-reset: step">
 
 <div class="step">
-  <h3>Keep installer files together</h3>
-  <p>Put these files in the same folder:</p>
+  <h3>Download the single Windows bundle</h3>
+  <p>Use this file from <code>dist/</code>:</p>
+  <div class="path-box">
+    <span id="path-exe-bundle">target-checkout-helper-installer-bundle.zip</span>
+    <button class="copy-btn" onclick="copyText('path-exe-bundle')">Copy</button>
+  </div>
+  <p style="margin-top:8px">Extract it to any folder on your PC.</p>
+</div>
+
+<div class="step">
+  <h3>Bundle contents</h3>
+  <p>The extracted folder includes:</p>
   <div class="path-box">
     <span id="path-exe-files">target-checkout-helper-installer.exe + target-checkout-helper.zip + INSTALL.html</span>
     <button class="copy-btn" onclick="copyText('path-exe-files')">Copy</button>
@@ -195,6 +205,7 @@
 <table class="file-table">
   <thead><tr><th>File</th><th>Purpose</th></tr></thead>
   <tbody>
+    <tr><td>dist/target-checkout-helper-installer-bundle.zip</td><td>Single download package for Windows users</td></tr>
     <tr><td>dist/target-checkout-helper-installer.exe</td><td>One-click Windows installer launcher</td></tr>
     <tr><td>target-checkout-helper/</td><td>Extension source (load this as unpacked)</td></tr>
     <tr><td>dist/target-checkout-helper.zip</td><td>Zipped copy for easy distribution</td></tr>

@@ -36,3 +36,9 @@
 - [x] Update `README.md` with explicit Windows installer and macOS/Linux script sections.
 - [x] Update `INSTALL.html` tabs/content to emphasize Windows `.exe` vs macOS/Linux `install.sh`.
 - [x] Rebuild bundled `dist/INSTALL.html`, stage, commit, and push.
+
+## Follow-up: Downloadable bundle in repo ZIP
+- [x] Add a single bundled installer ZIP in `dist/` that contains all Windows install files.
+- [x] Update build script to regenerate this bundle automatically.
+- [x] Update docs so users can find the bundle after GitHub "Code → Download ZIP".
+- [ ] Verify bundle contents and push to `main`.
