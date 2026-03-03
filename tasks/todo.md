@@ -9,7 +9,7 @@
 - [x] Expose retry telemetry in popup monitor status.
 - [x] Validate automatic success path and forced failure/retry path in Chrome.
 - [x] Run syntax checks for touched JS files.
-- [ ] Stage, commit, and push changes.
+- [x] Stage, commit, and push changes.
 
 ## Notes
 - Never click Place Order automatically; always stop at review.
