@@ -24,3 +24,10 @@
 ## Follow-up: README + Main Sync Confirmation
 - [x] Add root `README.md` with install instructions using `install.sh` / `install.bat` and `INSTALL.html`.
 - [x] Confirm local `main` is pushed and matches GitHub `origin/main`.
+
+## Follow-up: Windows `.exe` Installer Package
+- [x] Add native Windows installer launcher source (`installer/windows_installer.c`).
+- [x] Add reproducible builder script (`build_installer_exe.sh`) that outputs installer artifacts.
+- [x] Generate `dist/target-checkout-helper-installer.exe` and bundled `dist/INSTALL.html`.
+- [x] Update `README.md` and `INSTALL.html` with `.exe` install instructions.
+- [ ] Stage, commit, and push changes.
