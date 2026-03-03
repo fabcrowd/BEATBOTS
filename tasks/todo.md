@@ -23,4 +23,4 @@
 
 ## Follow-up: README + Main Sync Confirmation
 - [x] Add root `README.md` with install instructions using `install.sh` / `install.bat` and `INSTALL.html`.
-- [ ] Confirm local `main` is pushed and matches GitHub `origin/main`.
+- [x] Confirm local `main` is pushed and matches GitHub `origin/main`.
