@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Target Checkout Helper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Automates Target.com checkout steps — Add to Cart through Order Review. You place the final order.",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["*://*.target.com/*"],
   "background": {
     "service_worker": "background.js"

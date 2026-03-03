@@ -82,7 +82,7 @@ h1 {
 /* Main content */
 main {
   padding: 10px 12px;
-  max-height: 420px;
+  max-height: 520px;
   overflow-y: auto;
 }
 
@@ -105,6 +105,8 @@ h2 {
 
 input[type="text"],
 input[type="tel"],
+input[type="url"],
+input[type="number"],
 select {
   width: 100%;
   padding: 8px 10px;
@@ -188,4 +190,155 @@ footer {
   font-size: 10px;
   color: #aaa;
   margin-top: 8px;
+}
+
+/* Product Monitor */
+.product-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.product-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-icon {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 18px;
+  font-weight: 600;
+  color: #cc0000;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.btn-icon:hover {
+  background: #eee;
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.product-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.product-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 12px;
+}
+
+.product-item:last-child {
+  border-bottom: none;
+}
+
+.product-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #555;
+}
+
+.qty-select {
+  width: 44px;
+  padding: 3px 4px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.btn-remove {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: #aaa;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btn-remove:hover {
+  color: #cc0000;
+  background: #fee;
+}
+
+.monitor-interval {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.monitor-interval input {
+  width: 48px;
+  padding: 4px 6px;
+  text-align: center;
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
+.btn-monitor {
+  width: 100%;
+  padding: 8px;
+  background: #1a7340;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-monitor:hover {
+  background: #145c33;
+}
+
+.btn-monitor.active {
+  background: #cc0000;
+}
+
+.btn-monitor.active:hover {
+  background: #a30000;
+}
+
+.monitor-status {
+  font-size: 11px;
+  color: #888;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+input.error {
+  border-color: #cc0000 !important;
+  animation: shake 0.3s;
+}
+
+@keyframes shake {
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
 }

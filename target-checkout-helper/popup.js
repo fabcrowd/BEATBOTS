@@ -68,3 +68,204 @@ enableToggle.addEventListener('change', () => {
 saveBtn.addEventListener('click', save);
 
 chrome.storage.local.get(['enabled', 'shipping', 'payment'], populateFields);
+
+// ─── PRODUCT MONITOR ─────────────────────────────────────────────────────────
+
+const productUrlInput    = $('productUrl');
+const addProductBtn      = $('addProductBtn');
+const productListEl      = $('productList');
+const monitorControls    = $('monitorControls');
+const monitorBtn         = $('monitorBtn');
+const monitorStatusEl    = $('monitorStatus');
+const refreshIntervalIn  = $('refreshInterval');
+
+let products = [];
+let monitorActive = false;
+let statusPollId = null;
+
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+function extractProductName(url) {
+  try {
+    const path = new URL(url).pathname;
+    const match = path.match(/^\/p\/([^/]+)/);
+    if (match) {
+      const name = match[1].replace(/-/g, ' ');
+      return name.length > 28 ? name.slice(0, 28) + '…' : name;
+    }
+    return 'Product';
+  } catch {
+    return 'Product';
+  }
+}
+
+function renderProducts() {
+  productListEl.innerHTML = '';
+  monitorControls.style.display = products.length ? '' : 'none';
+
+  products.forEach((p, i) => {
+    const li = document.createElement('li');
+    li.className = 'product-item';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'product-name';
+    nameSpan.title = p.url;
+    nameSpan.textContent = extractProductName(p.url);
+
+    const qtySelect = document.createElement('select');
+    qtySelect.className = 'qty-select';
+    qtySelect.disabled = monitorActive;
+    for (let n = 1; n <= 5; n++) {
+      const opt = document.createElement('option');
+      opt.value = n;
+      opt.textContent = n;
+      if (n === p.qty) opt.selected = true;
+      qtySelect.appendChild(opt);
+    }
+    qtySelect.addEventListener('change', () => {
+      products[i].qty = parseInt(qtySelect.value);
+      saveProducts();
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn-remove';
+    removeBtn.textContent = '×';
+    removeBtn.disabled = monitorActive;
+    removeBtn.addEventListener('click', () => {
+      products.splice(i, 1);
+      saveProducts();
+      renderProducts();
+    });
+
+    li.appendChild(nameSpan);
+    li.appendChild(qtySelect);
+    li.appendChild(removeBtn);
+    productListEl.appendChild(li);
+  });
+}
+
+async function saveProducts() {
+  const { monitor } = await chrome.storage.local.get('monitor');
+  await chrome.storage.local.set({
+    monitor: { ...(monitor || {}), products },
+  });
+}
+
+function addProduct() {
+  const url = productUrlInput.value.trim();
+  if (!url) return;
+
+  if (!/^https?:\/\/(www\.)?target\.com\/p\//i.test(url)) {
+    productUrlInput.classList.add('error');
+    setTimeout(() => productUrlInput.classList.remove('error'), 1500);
+    return;
+  }
+
+  const norm = normalizeProductUrl(url);
+  if (products.some((p) => normalizeProductUrl(p.url) === norm)) {
+    productUrlInput.value = '';
+    return;
+  }
+
+  products.push({ url, qty: 1 });
+  productUrlInput.value = '';
+  saveProducts();
+  renderProducts();
+}
+
+addProductBtn.addEventListener('click', addProduct);
+productUrlInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addProduct();
+});
+
+// Monitor start / stop
+
+async function toggleMonitor() {
+  if (monitorActive) {
+    await chrome.runtime.sendMessage({ type: 'STOP_MONITOR' });
+    monitorActive = false;
+    updateMonitorUI();
+    stopStatusPoll();
+    monitorStatusEl.textContent = '';
+  } else {
+    if (!products.length) return;
+    await chrome.runtime.sendMessage({
+      type: 'START_MONITOR',
+      products,
+      refreshInterval: parseInt(refreshIntervalIn.value) || 5,
+    });
+    monitorActive = true;
+    updateMonitorUI();
+    startStatusPoll();
+  }
+}
+
+function updateMonitorUI() {
+  monitorBtn.textContent = monitorActive ? 'Stop Monitoring' : 'Start Monitoring';
+  monitorBtn.classList.toggle('active', monitorActive);
+  productUrlInput.disabled = monitorActive;
+  addProductBtn.disabled = monitorActive;
+  refreshIntervalIn.disabled = monitorActive;
+  renderProducts();
+}
+
+monitorBtn.addEventListener('click', toggleMonitor);
+
+// Status polling
+
+async function pollStatus() {
+  try {
+    const m = await chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' });
+    if (!m) return;
+
+    if (m.active) {
+      const parts = (m.products || []).map((p) => {
+        const name = extractProductName(p.url);
+        const count = m.counts?.[normalizeProductUrl(p.url)] || 0;
+        return `${name}: ${count}/${p.qty}`;
+      });
+      monitorStatusEl.textContent = parts.join(' · ');
+    } else if (monitorActive) {
+      monitorActive = false;
+      updateMonitorUI();
+      stopStatusPoll();
+      monitorStatusEl.textContent = 'Done — proceeding to checkout!';
+    }
+  } catch {}
+}
+
+function startStatusPoll() {
+  pollStatus();
+  statusPollId = setInterval(pollStatus, 1500);
+}
+
+function stopStatusPoll() {
+  if (statusPollId) {
+    clearInterval(statusPollId);
+    statusPollId = null;
+  }
+}
+
+// Load monitor data on popup open
+
+async function loadMonitorData() {
+  const { monitor } = await chrome.storage.local.get('monitor');
+  if (!monitor) return;
+
+  products = monitor.products || [];
+  monitorActive = !!monitor.active;
+  if (monitor.refreshInterval) refreshIntervalIn.value = monitor.refreshInterval;
+
+  renderProducts();
+  updateMonitorUI();
+  if (monitorActive) startStatusPoll();
+}
+
+loadMonitorData();

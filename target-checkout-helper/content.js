@@ -75,6 +75,15 @@ function findFirst(...selectors) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
 // Show a floating toast on the page
 function showToast(message, type = 'info') {
   const existing = document.getElementById('tch-toast');
@@ -398,10 +407,81 @@ async function handlePaymentStep(settings) {
   }
 }
 
+// ─── MONITOR MODE ────────────────────────────────────────────────────────────
+
+async function handleMonitoredATC(monitor, product) {
+  const normUrl = normalizeProductUrl(product.url);
+  const currentCount = monitor.counts?.[normUrl] || 0;
+
+  if (currentCount >= product.qty) {
+    showToast(`Monitor: Already added ${currentCount}/${product.qty}`, 'success');
+    return;
+  }
+
+  showToast(`Monitor: Adding to cart (${currentCount + 1}/${product.qty})…`);
+
+  let addBtn;
+  try {
+    addBtn = await waitForElement(SEL.shipIt, 10000);
+  } catch {
+    try {
+      addBtn = await waitForElement(SEL.pickup, 5000);
+    } catch {
+      const interval = monitor.refreshInterval || 5;
+      showToast(`Monitor: Unavailable — retrying in ${interval}s…`, 'error');
+      setTimeout(() => location.reload(), interval * 1000);
+      return;
+    }
+  }
+
+  if (addBtn.disabled) {
+    const interval = monitor.refreshInterval || 5;
+    showToast(`Monitor: Button disabled — retrying in ${interval}s…`, 'error');
+    setTimeout(() => location.reload(), interval * 1000);
+    return;
+  }
+
+  addBtn.click();
+  await sleep(T.postClickDelay);
+
+  // Decline optional coverage popup
+  try {
+    const coverageBtn = await waitForElement(SEL.declineCoverage, 4000);
+    coverageBtn.click();
+    await sleep(T.postClickDelay);
+  } catch {}
+
+  // Wait for ATC confirmation modal (viewCart button means item was added)
+  try {
+    await waitForElement(SEL.viewCart, 10000);
+  } catch {
+    const interval = monitor.refreshInterval || 5;
+    showToast(`Monitor: Add to cart uncertain — retrying in ${interval}s…`, 'error');
+    setTimeout(() => location.reload(), interval * 1000);
+    return;
+  }
+
+  showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
+  chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 async function init() {
-  const data = await chrome.storage.local.get(['enabled', 'shipping', 'payment']);
+  const data = await chrome.storage.local.get(['enabled', 'shipping', 'payment', 'monitor']);
+  const page = getPageType();
+
+  // Monitor mode: on a monitored product page, try ATC without navigating away
+  if (data.monitor?.active && page === 'product') {
+    const normUrl = normalizeProductUrl(location.href);
+    const product = (data.monitor.products || []).find(
+      (p) => normalizeProductUrl(p.url) === normUrl
+    );
+    if (product) {
+      await handleMonitoredATC(data.monitor, product);
+      return;
+    }
+  }
 
   if (!data.enabled) return;
 
@@ -414,7 +494,6 @@ async function init() {
   }
 
   const settings = { shipping: data.shipping || {}, payment: data.payment || {} };
-  const page = getPageType();
 
   switch (page) {
     case 'product':      await handleProductPage(settings); break;
