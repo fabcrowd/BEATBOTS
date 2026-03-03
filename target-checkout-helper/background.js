@@ -69,7 +69,7 @@ async function startMonitor(products, refreshInterval) {
   const monitor = {
     active: true,
     products,
-    refreshInterval: refreshInterval || 5,
+    refreshInterval: refreshInterval || 1,
     counts,
     tabIds: [],
   };
@@ -115,7 +115,7 @@ async function handleATCSuccess(url, tabId) {
   if (product && currentCount < product.qty) {
     setTimeout(() => {
       chrome.tabs.reload(tabId).catch(() => {});
-    }, (monitor.refreshInterval || 5) * 1000);
+    }, (monitor.refreshInterval || 1) * 1000);
     return;
   }
 
@@ -125,7 +125,7 @@ async function handleATCSuccess(url, tabId) {
   });
 
   if (allDone) {
-    chrome.tabs.update(tabId, { url: 'https://www.target.com/cart' });
+    chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
 
     for (const tid of monitor.tabIds || []) {
       if (tid !== tabId) {

@@ -4,14 +4,16 @@
 // ─── SELECTORS (confirmed via PhoenixBot & BuyBot source analysis) ───────────
 
 const SEL = {
-  shipIt:          '[data-test="shipItButton"]',
+  shipIt:          '[data-test="shipItButton"], [data-test="shippingButton"]',
   pickup:          '[data-test="orderPickupButton"]',
+  preorder:        '[data-test="preorderButton"]',
   declineCoverage: '[data-test="espModalContent-declineCoverageButton"]',
   viewCart:        '[data-test="addToCartModalViewCartCheckout"]',
   cartCheckout:    '[data-test="checkout-button"]',
   placeOrder:      '[data-test="placeOrderButton"]',
   cardNumber:      '#creditCardInput-cardNumber',
   cvv:             '#creditCardInput-cvv',
+  stickyATC:       '[data-test="StickyAddToCart"] button',
 };
 
 // ─── TIMING ──────────────────────────────────────────────────────────────────
@@ -206,59 +208,71 @@ function getCheckoutStep() {
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
 async function handleProductPage(settings) {
-  showToast('Detecting Add to Cart...');
+  console.log('[TCH] handleProductPage: starting');
+  showToast('Detecting Add to Cart…');
 
-  // Try "Ship It" first, fall back to "Pickup"
   let addBtn;
   try {
-    addBtn = await waitForElement(SEL.shipIt);
+    addBtn = await Promise.any([
+      waitForElement(SEL.shipIt, 8000),
+      waitForElement(SEL.pickup, 8000),
+      waitForElement(SEL.preorder, 8000),
+      waitForElement(SEL.stickyATC, 8000),
+      waitForByText('add to cart', 8000),
+      waitForByText('preorder', 8000),
+    ]);
   } catch {
-    try {
-      addBtn = await waitForElement(SEL.pickup, 8000);
-    } catch {
-      showToast('Add to Cart button not found', 'error');
-      return;
-    }
+    showToast('Add to Cart button not found', 'error');
+    return;
+  }
+
+  if (addBtn.disabled) {
+    showToast('Button disabled — item may be unavailable', 'error');
+    return;
   }
 
   addBtn.click();
-  showToast('Added to cart...');
+  showToast('Added to cart…');
   await sleep(T.postClickDelay);
 
   // Decline optional coverage/protection plan popup
   try {
-    const coverageBtn = await waitForElement(SEL.declineCoverage, 5000);
+    const coverageBtn = await waitForElement(SEL.declineCoverage, 3000);
     coverageBtn.click();
     await sleep(T.postClickDelay);
-  } catch {
-    // Not present — continue
-  }
+  } catch {}
 
-  // Click "View Cart & Check Out" — try data-test selector first, fall back to text match
+  // Wait for ATC confirmation, then go straight to checkout (skip cart page)
   try {
-    const viewCartBtn = await Promise.any([
-      waitForElement(SEL.viewCart),
-      waitForByText('view cart'),
+    await Promise.any([
+      waitForElement(SEL.viewCart, 8000),
+      waitForByText('view cart', 8000),
+      waitForByText('continue shopping', 8000),
+      waitForByText('added to cart', 8000),
     ]);
-    await sleep(300);
-    viewCartBtn.click();
-    showToast('Heading to checkout...');
-  } catch {
-    showToast('Could not find "View Cart & Check Out" button', 'error');
-  }
+  } catch {}
+
+  // Navigate directly to checkout — saves an entire cart page load
+  showToast('Heading straight to checkout…');
+  window.location.href = 'https://www.target.com/checkout';
 }
 
 async function handleCartPage(settings) {
+  console.log('[TCH] handleCartPage: starting');
   showToast('Proceeding to checkout…');
   try {
     const checkoutBtn = await Promise.any([
-      waitForElement(SEL.cartCheckout, 10000),
-      waitForByText('check out', 10000),
+      waitForElement(SEL.cartCheckout, 8000),
+      waitForByText('check out', 8000),
+      waitForByText('sign in to check out', 8000),
     ]);
-    await sleep(150);
+    await sleep(100);
     checkoutBtn.click();
+    showToast('Checkout clicked — signing in…');
   } catch {
-    showToast('Checkout button not found', 'error');
+    // Fallback: try direct navigation to checkout
+    showToast('Navigating directly to checkout…');
+    window.location.href = 'https://www.target.com/checkout';
   }
 }
 
@@ -366,10 +380,20 @@ async function handleShippingStep(settings) {
     }
   }
 
-  await sleep(200);
+  await sleep(150);
   const clicked = await clickContinue();
   if (clicked) {
     showToast('Shipping filled — advancing…');
+
+    // Handle address suggestion popup — accept suggested address or use entered
+    setTimeout(async () => {
+      const useAddr = findByText('use this address') || findByText('save and continue')
+        || findByText('use as entered') || findByText('suggested address');
+      if (useAddr && !useAddr.disabled) {
+        useAddr.click();
+      }
+    }, 1500);
+
     setTimeout(() => watchForCheckoutStep(settings), 500);
   } else {
     showToast('Could not find Continue button on shipping step', 'error');
@@ -485,6 +509,7 @@ async function handleReviewStep() {
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
 
 async function handleMonitoredATC(monitor, product) {
+  console.log('[TCH] handleMonitoredATC: starting for', product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;
 
@@ -500,9 +525,12 @@ async function handleMonitoredATC(monitor, product) {
   let addBtn;
   try {
     addBtn = await Promise.any([
-      waitForElement(SEL.shipIt, 6000),
-      waitForElement(SEL.pickup, 6000),
-      waitForByText('add to cart', 6000),
+      waitForElement(SEL.shipIt, 5000),
+      waitForElement(SEL.pickup, 5000),
+      waitForElement(SEL.preorder, 5000),
+      waitForElement(SEL.stickyATC, 5000),
+      waitForByText('add to cart', 5000),
+      waitForByText('preorder', 5000),
     ]);
   } catch {
     showToast(`Monitor: Unavailable — retrying in ${interval}s…`, 'error');
@@ -552,8 +580,11 @@ async function handleMonitoredATC(monitor, product) {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 async function init() {
+  // Small delay to let React finish rendering after document_idle
+  await sleep(300);
   const data = await chrome.storage.local.get(['enabled', 'shipping', 'payment', 'monitor']);
   const page = getPageType();
+  console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
   // Monitor mode: on a monitored product page, try ATC without navigating away
   if (data.monitor?.active && page === 'product') {
