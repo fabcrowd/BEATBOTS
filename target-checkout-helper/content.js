@@ -1,7 +1,7 @@
-// content.js — Target Checkout Helper
+// content.js — Target Checkout Helper (speed-optimized)
 // Injected into all target.com pages. Drives the checkout flow automatically.
 
-// ─── SELECTORS (confirmed via PhoenixBot & BuyBot source analysis) ───────────
+// ─── SELECTORS ───────────────────────────────────────────────────────────────
 
 const SEL = {
   shipIt:          '[data-test="shipItButton"], [data-test="shippingButton"]',
@@ -16,57 +16,43 @@ const SEL = {
   stickyATC:       '[data-test="StickyAddToCart"] button',
 };
 
-// ─── TIMING ──────────────────────────────────────────────────────────────────
+// ─── TIMING (aggressive — every ms counts) ──────────────────────────────────
 
 const T = {
-  observerTimeout: 15000,  // Max wait for an element (ms)
-  fieldDelay:      60,     // Delay between filling each form field (ms)
-  postClickDelay:  250,    // Brief pause after clicking a button (ms)
-  navSettleDelay:  500,    // Wait after URL change before re-running (ms)
+  observerTimeout: 10000,
+  navSettleDelay:  50,
 };
 
-// ─── UTILITIES ────────────────────────────────────────────────────────────────
+// ─── UTILITIES ───────────────────────────────────────────────────────────────
 
-// Fill a React-controlled input. Plain .value= doesn't trigger React's state.
+const nativeInputSetter = Object.getOwnPropertyDescriptor(
+  HTMLInputElement.prototype, 'value'
+).set;
+
 function fillInput(input, value) {
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    window.HTMLInputElement.prototype, 'value'
-  ).set;
-  nativeSetter.call(input, value);
+  nativeInputSetter.call(input, value);
   input.dispatchEvent(new Event('input',  { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// Fill a React-controlled <select>
 function fillSelect(select, value) {
   select.value = value;
   select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// Wait for a CSS selector to appear in the DOM (MutationObserver based)
 function waitForElement(selector, timeout = T.observerTimeout) {
   return new Promise((resolve, reject) => {
     const el = document.querySelector(selector);
     if (el) return resolve(el);
-
-    const timer = setTimeout(() => {
-      observer.disconnect();
-      reject(new Error(`Timeout: ${selector}`));
-    }, timeout);
-
+    const timer = setTimeout(() => { observer.disconnect(); reject(); }, timeout);
     const observer = new MutationObserver(() => {
       const found = document.querySelector(selector);
-      if (found) {
-        clearTimeout(timer);
-        observer.disconnect();
-        resolve(found);
-      }
+      if (found) { clearTimeout(timer); observer.disconnect(); resolve(found); }
     });
     observer.observe(document.body, { childList: true, subtree: true });
   });
 }
 
-// Try a list of selectors, return first match
 function findFirst(...selectors) {
   for (const sel of selectors) {
     const el = document.querySelector(sel);
@@ -78,53 +64,31 @@ function findFirst(...selectors) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function normalizeProductUrl(url) {
-  try {
-    const u = new URL(url);
-    return u.origin + u.pathname.replace(/\/$/, '');
-  } catch {
-    return url;
-  }
+  try { const u = new URL(url); return u.origin + u.pathname.replace(/\/$/, ''); }
+  catch { return url; }
 }
 
-// Show a floating toast on the page
 function showToast(message, type = 'info') {
   const existing = document.getElementById('tch-toast');
   if (existing) existing.remove();
-
   const colors = { info: '#cc0000', success: '#1a7340', error: '#333', persistent: '#cc0000' };
-
   const toast = document.createElement('div');
   toast.id = 'tch-toast';
   Object.assign(toast.style, {
-    position:   'fixed',
-    bottom:     '24px',
-    right:      '24px',
-    background: colors[type] || colors.info,
-    color:      'white',
-    padding:    '12px 18px',
-    borderRadius: '8px',
-    fontFamily: '-apple-system, sans-serif',
-    fontSize:   '13px',
-    fontWeight: '600',
-    zIndex:     '2147483647',
-    boxShadow:  '0 4px 16px rgba(0,0,0,0.35)',
-    lineHeight: '1.4',
-    maxWidth:   '320px',
-    transition: 'opacity 0.3s',
+    position: 'fixed', bottom: '24px', right: '24px',
+    background: colors[type] || colors.info, color: 'white',
+    padding: '12px 18px', borderRadius: '8px',
+    fontFamily: '-apple-system, sans-serif', fontSize: '13px', fontWeight: '600',
+    zIndex: '2147483647', boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+    lineHeight: '1.4', maxWidth: '320px',
   });
-
   toast.innerHTML = `<span style="margin-right:6px">🎯</span>${message}`;
   document.body.appendChild(toast);
-
   if (type !== 'persistent') {
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      setTimeout(() => toast.remove(), 350);
-    }, 4000);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
   }
 }
 
-// Find a button or link by its visible text content
 function findByText(text) {
   const lower = text.toLowerCase();
   return Array.from(document.querySelectorAll('a, button')).find(
@@ -132,47 +96,31 @@ function findByText(text) {
   ) || null;
 }
 
-// Wait for a button or link containing specific text to appear in the DOM
 function waitForByText(text, timeout = T.observerTimeout) {
   const lower = text.toLowerCase();
   return new Promise((resolve, reject) => {
     const find = () => Array.from(document.querySelectorAll('a, button')).find(
       (el) => el.textContent.trim().toLowerCase().includes(lower)
     ) || null;
-
     const el = find();
     if (el) return resolve(el);
-
-    const timer = setTimeout(() => {
-      observer.disconnect();
-      reject(new Error(`Timeout: "${text}"`));
-    }, timeout);
-
+    const timer = setTimeout(() => { observer.disconnect(); reject(); }, timeout);
     const observer = new MutationObserver(() => {
       const el = find();
-      if (el) {
-        clearTimeout(timer);
-        observer.disconnect();
-        resolve(el);
-      }
+      if (el) { clearTimeout(timer); observer.disconnect(); resolve(el); }
     });
     observer.observe(document.body, { childList: true, subtree: true });
   });
 }
 
-// Find and click a "Continue" / "Save & continue" button on checkout pages
-async function clickContinue() {
+function clickContinue() {
   const patterns = ['save & continue', 'save and continue', 'continue', 'next'];
   const buttons = Array.from(document.querySelectorAll('button'));
-
   for (const pattern of patterns) {
     const btn = buttons.find(
       (b) => b.textContent.trim().toLowerCase().startsWith(pattern) && !b.disabled
     );
-    if (btn) {
-      btn.click();
-      return true;
-    }
+    if (btn) { btn.click(); return true; }
   }
   return false;
 }
@@ -188,319 +136,189 @@ function getPageType() {
   return 'other';
 }
 
-// Within /checkout, detect which sub-step is active by DOM presence
 function getCheckoutStep() {
   if (document.querySelector(SEL.placeOrder) || findByText('place order')) return 'review';
-  if (document.querySelector(SEL.cardNumber))        return 'payment';
-
-  // Shipping step: look for name/address fields
-  const shippingFields = [
-    'input[id*="firstName"]',
-    'input[id*="first-name"]',
-    'input[name="firstName"]',
-    'input[autocomplete="given-name"]',
-  ];
-  if (shippingFields.some((s) => document.querySelector(s))) return 'shipping';
-
+  if (document.querySelector(SEL.cardNumber)) return 'payment';
+  if (['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
+    .some((s) => document.querySelector(s))) return 'shipping';
   return 'unknown';
 }
 
-// ─── STEP HANDLERS ───────────────────────────────────────────────────────────
+// ─── STEP HANDLERS (speed-optimized: zero unnecessary sleeps) ────────────────
 
-async function handleProductPage(settings) {
-  console.log('[TCH] handleProductPage: starting');
-  showToast('Detecting Add to Cart…');
-
+async function handleProductPage() {
+  console.log('[TCH] handleProductPage');
   let addBtn;
   try {
     addBtn = await Promise.any([
-      waitForElement(SEL.shipIt, 8000),
-      waitForElement(SEL.pickup, 8000),
-      waitForElement(SEL.preorder, 8000),
-      waitForElement(SEL.stickyATC, 8000),
-      waitForByText('add to cart', 8000),
-      waitForByText('preorder', 8000),
+      waitForElement(SEL.shipIt, 6000),
+      waitForElement(SEL.pickup, 6000),
+      waitForElement(SEL.preorder, 6000),
+      waitForElement(SEL.stickyATC, 6000),
+      waitForByText('add to cart', 6000),
+      waitForByText('preorder', 6000),
     ]);
-  } catch {
-    showToast('Add to Cart button not found', 'error');
-    return;
-  }
+  } catch { showToast('ATC button not found', 'error'); return; }
 
+  // Wait for button to become enabled — React replaces DOM nodes during render,
+  // so we must re-query each iteration to avoid stale references.
+  for (let i = 0; addBtn.disabled && i < 60; i++) {
+    await sleep(100);
+    addBtn = findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
+      || findByText('add to cart') || findByText('preorder') || addBtn;
+  }
   if (addBtn.disabled) {
-    showToast('Button disabled — item may be unavailable', 'error');
+    console.log('[TCH] button still disabled after wait');
+    showToast('Button still disabled', 'error');
     return;
   }
 
+  console.log('[TCH] clicking ATC');
   addBtn.click();
-  showToast('Added to cart…');
-  await sleep(T.postClickDelay);
 
-  // Decline optional coverage/protection plan popup
-  try {
-    const coverageBtn = await waitForElement(SEL.declineCoverage, 3000);
-    coverageBtn.click();
-    await sleep(T.postClickDelay);
-  } catch {}
+  // Don't wait for confirmation panel — navigate to checkout IMMEDIATELY.
+  // Item is in cart server-side as soon as the click's XHR completes.
+  // Fire coverage decline in background (non-blocking) just in case.
+  setTimeout(() => {
+    const cov = document.querySelector(SEL.declineCoverage);
+    if (cov) cov.click();
+  }, 400);
 
-  // Wait for ATC confirmation, then go straight to checkout (skip cart page)
-  try {
-    await Promise.any([
-      waitForElement(SEL.viewCart, 8000),
-      waitForByText('view cart', 8000),
-      waitForByText('continue shopping', 8000),
-      waitForByText('added to cart', 8000),
-    ]);
-  } catch {}
-
-  // Navigate directly to checkout — saves an entire cart page load
-  showToast('Heading straight to checkout…');
+  showToast('ATC → checkout…');
   window.location.href = 'https://www.target.com/checkout';
 }
 
-async function handleCartPage(settings) {
-  console.log('[TCH] handleCartPage: starting');
-  showToast('Proceeding to checkout…');
+async function handleCartPage() {
+  console.log('[TCH] handleCartPage');
   try {
-    const checkoutBtn = await Promise.any([
-      waitForElement(SEL.cartCheckout, 8000),
-      waitForByText('check out', 8000),
-      waitForByText('sign in to check out', 8000),
+    const btn = await Promise.any([
+      waitForElement(SEL.cartCheckout, 6000),
+      waitForByText('check out', 6000),
+      waitForByText('sign in to check out', 6000),
     ]);
-    await sleep(100);
-    checkoutBtn.click();
-    showToast('Checkout clicked — signing in…');
+    btn.click();
   } catch {
-    // Fallback: try direct navigation to checkout
-    showToast('Navigating directly to checkout…');
     window.location.href = 'https://www.target.com/checkout';
   }
 }
 
 async function handleCheckoutPage(settings) {
-  // The checkout page is a multi-step SPA — detect the current step
   const step = getCheckoutStep();
-
-  if (step === 'shipping') {
-    await handleShippingStep(settings);
-  } else if (step === 'payment') {
-    await handlePaymentStep(settings);
-  } else if (step === 'review') {
-    await handleReviewStep();
-  } else {
-    // Step not yet rendered — watch for DOM changes
-    watchForCheckoutStep(settings);
-  }
+  console.log('[TCH] checkout step:', step);
+  if (step === 'shipping')    return handleShippingStep(settings);
+  if (step === 'payment')     return handlePaymentStep(settings);
+  if (step === 'review')      return handleReviewStep();
+  watchForCheckoutStep(settings);
 }
 
-// Watch the DOM until a recognizable checkout step appears
 function watchForCheckoutStep(settings) {
   let handled = false;
-
   const observer = new MutationObserver(async () => {
     if (handled) return;
     const step = getCheckoutStep();
-
-    if (step === 'shipping') {
-      handled = true;
-      observer.disconnect();
-      await handleShippingStep(settings);
-    } else if (step === 'payment') {
-      handled = true;
-      observer.disconnect();
-      await handlePaymentStep(settings);
-    } else if (step === 'review') {
-      handled = true;
-      observer.disconnect();
-      await handleReviewStep();
-    }
+    if (step === 'unknown') return;
+    handled = true;
+    observer.disconnect();
+    if (step === 'shipping')    await handleShippingStep(settings);
+    else if (step === 'payment') await handlePaymentStep(settings);
+    else if (step === 'review')  await handleReviewStep();
   });
-
   observer.observe(document.body, { childList: true, subtree: true });
-
-  // Safety: stop watching after 30s
   setTimeout(() => observer.disconnect(), 30000);
 }
 
 async function handleShippingStep(settings) {
   const s = settings.shipping || {};
-  showToast('Filling shipping info…');
-  await sleep(150);
+  console.log('[TCH] filling shipping');
 
-  // Ordered list of fields with multiple possible selectors per field
-  const fields = [
-    {
-      selectors: ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'],
-      value: s.firstName,
-    },
-    {
-      selectors: ['input[id*="lastName"]', 'input[name="lastName"]', 'input[autocomplete="family-name"]'],
-      value: s.lastName,
-    },
-    {
-      selectors: ['input[id*="addressLine1"]', 'input[name="addressLine1"]', 'input[id*="address1"]', 'input[autocomplete="address-line1"]'],
-      value: s.address1,
-    },
-    {
-      selectors: ['input[id*="addressLine2"]', 'input[name="addressLine2"]', 'input[id*="address2"]', 'input[autocomplete="address-line2"]'],
-      value: s.address2,
-    },
-    {
-      selectors: ['input[id*="city"]', 'input[name="city"]', 'input[autocomplete="address-level2"]'],
-      value: s.city,
-    },
-    {
-      selectors: ['input[id*="zipCode"]', 'input[name="zipCode"]', 'input[id*="zip"]', 'input[autocomplete="postal-code"]'],
-      value: s.zip,
-    },
-    {
-      selectors: ['input[id*="phone"]', 'input[name="phone"]', 'input[autocomplete="tel"]'],
-      value: s.phone,
-    },
+  // Fill ALL fields in one synchronous burst — zero delay between fields
+  const fieldMap = [
+    [['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'], s.firstName],
+    [['input[id*="lastName"]', 'input[name="lastName"]', 'input[autocomplete="family-name"]'], s.lastName],
+    [['input[id*="addressLine1"]', 'input[name="addressLine1"]', 'input[id*="address1"]', 'input[autocomplete="address-line1"]'], s.address1],
+    [['input[id*="addressLine2"]', 'input[name="addressLine2"]', 'input[id*="address2"]', 'input[autocomplete="address-line2"]'], s.address2],
+    [['input[id*="city"]', 'input[name="city"]', 'input[autocomplete="address-level2"]'], s.city],
+    [['input[id*="zipCode"]', 'input[name="zipCode"]', 'input[id*="zip"]', 'input[autocomplete="postal-code"]'], s.zip],
+    [['input[id*="phone"]', 'input[name="phone"]', 'input[autocomplete="tel"]'], s.phone],
   ];
 
-  for (const { selectors, value } of fields) {
+  for (const [selectors, value] of fieldMap) {
     if (!value) continue;
     const input = findFirst(...selectors);
-    if (input) {
-      fillInput(input, value);
-      await sleep(T.fieldDelay);
-    }
+    if (input) fillInput(input, value);
   }
 
-  // State dropdown
   if (s.state) {
-    const stateEl = findFirst(
-      'select[id*="state"]',
-      'select[name*="state"]',
-      'select[autocomplete="address-level1"]'
-    );
-    if (stateEl) {
-      fillSelect(stateEl, s.state);
-      await sleep(T.fieldDelay);
-    }
+    const stateEl = findFirst('select[id*="state"]', 'select[name*="state"]', 'select[autocomplete="address-level1"]');
+    if (stateEl) fillSelect(stateEl, s.state);
   }
 
-  await sleep(150);
-  const clicked = await clickContinue();
-  if (clicked) {
-    showToast('Shipping filled — advancing…');
+  // Tiny yield so React processes the fills, then click continue
+  await sleep(30);
+  clickContinue();
 
-    // Handle address suggestion popup — accept suggested address or use entered
-    setTimeout(async () => {
-      const useAddr = findByText('use this address') || findByText('save and continue')
-        || findByText('use as entered') || findByText('suggested address');
-      if (useAddr && !useAddr.disabled) {
-        useAddr.click();
-      }
-    }, 1500);
+  // Handle address suggestion popup in background
+  setTimeout(() => {
+    const useAddr = findByText('use this address') || findByText('save and continue')
+      || findByText('use as entered') || findByText('suggested address');
+    if (useAddr && !useAddr.disabled) useAddr.click();
+  }, 800);
 
-    setTimeout(() => watchForCheckoutStep(settings), 500);
-  } else {
-    showToast('Could not find Continue button on shipping step', 'error');
-  }
+  setTimeout(() => watchForCheckoutStep(settings), 200);
 }
 
 async function handlePaymentStep(settings) {
   const p = settings.payment || {};
-  showToast('Filling payment info…');
-  await sleep(150);
+  console.log('[TCH] filling payment');
 
-  // Card number
+  // Fill all payment fields in one synchronous burst
   if (p.cardNumber) {
-    const cardInput = document.querySelector(SEL.cardNumber);
-    if (cardInput) {
-      fillInput(cardInput, p.cardNumber);
-      await sleep(T.fieldDelay);
-    }
+    const el = document.querySelector(SEL.cardNumber);
+    if (el) fillInput(el, p.cardNumber);
   }
 
-  // Expiration — Target may use a combined MM/YY field or two separate fields
   const expCombined = findFirst(
-    '#creditCardInput-expDate',
-    'input[id*="expiration"]',
-    'input[placeholder*="MM/YY"]',
-    'input[placeholder*="MM / YY"]'
+    '#creditCardInput-expDate', 'input[id*="expiration"]',
+    'input[placeholder*="MM/YY"]', 'input[placeholder*="MM / YY"]'
   );
-
   if (expCombined && p.expMonth && p.expYear) {
     const yr = p.expYear.length === 4 ? p.expYear.slice(-2) : p.expYear;
     fillInput(expCombined, `${p.expMonth}/${yr}`);
-    await sleep(T.fieldDelay);
   } else {
-    if (p.expMonth) {
-      const mo = findFirst('input[id*="expMonth"]', 'input[name*="expMonth"]');
-      if (mo) { fillInput(mo, p.expMonth); await sleep(T.fieldDelay); }
-    }
-    if (p.expYear) {
-      const yr = findFirst('input[id*="expYear"]', 'input[name*="expYear"]');
-      if (yr) { fillInput(yr, p.expYear); await sleep(T.fieldDelay); }
-    }
+    if (p.expMonth) { const mo = findFirst('input[id*="expMonth"]', 'input[name*="expMonth"]'); if (mo) fillInput(mo, p.expMonth); }
+    if (p.expYear) { const yr = findFirst('input[id*="expYear"]', 'input[name*="expYear"]'); if (yr) fillInput(yr, p.expYear); }
   }
 
-  // CVV
-  if (p.cvv) {
-    const cvvInput = document.querySelector(SEL.cvv);
-    if (cvvInput) {
-      fillInput(cvvInput, p.cvv);
-      await sleep(T.fieldDelay);
-    }
-  }
+  if (p.cvv) { const el = document.querySelector(SEL.cvv); if (el) fillInput(el, p.cvv); }
 
-  // Billing zip (if separate from shipping zip)
   if (p.billingZip) {
-    const billingZip = findFirst(
-      'input[id*="billingZip"]',
-      'input[id*="billing-zip"]',
-      'input[name*="billingZip"]'
-    );
-    if (billingZip) {
-      fillInput(billingZip, p.billingZip);
-      await sleep(T.fieldDelay);
-    }
+    const el = findFirst('input[id*="billingZip"]', 'input[id*="billing-zip"]', 'input[name*="billingZip"]');
+    if (el) fillInput(el, p.billingZip);
   }
 
-  await sleep(200);
-  const clicked = await clickContinue();
-  if (clicked) {
-    showToast('Payment filled — advancing to review…');
+  await sleep(30);
+  if (clickContinue()) {
     Promise.any([
-      waitForElement(SEL.placeOrder, 20000),
-      waitForByText('place order', 20000),
+      waitForElement(SEL.placeOrder, 15000),
+      waitForByText('place order', 15000),
     ]).then(() => handleReviewStep()).catch(() => {});
-  } else {
-    showToast('Could not find Continue button on payment step', 'error');
   }
 }
 
 async function handleReviewStep() {
-  showToast('Placing order…');
+  console.log('[TCH] placing order');
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       const placeBtn = await Promise.any([
-        waitForElement(SEL.placeOrder, 6000),
-        waitForByText('place order', 6000),
+        waitForElement(SEL.placeOrder, 4000),
+        waitForByText('place order', 4000),
       ]);
-      if (placeBtn.disabled) {
-        await sleep(500);
-        continue;
-      }
-      await sleep(150);
+      if (placeBtn.disabled) { await sleep(200); continue; }
       placeBtn.click();
       showToast('Order submitted!', 'success');
-
-      // Watch for errors — if checkout fails, retry
-      await sleep(3000);
-      const errorEl = findByText('try again') || findByText('something went wrong');
-      if (errorEl) {
-        showToast(`Checkout error — retrying (${attempt}/5)…`, 'error');
-        continue;
-      }
       return;
     } catch {
-      if (attempt < 5) {
-        showToast(`Place Order attempt ${attempt} failed — retrying…`, 'error');
-        await sleep(400);
-      }
+      if (attempt < 5) await sleep(200);
     }
   }
   showToast('Could not place order — click manually', 'persistent');
@@ -508,86 +326,55 @@ async function handleReviewStep() {
 
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
 
-// Check fetched HTML for stock availability signals
 function checkStockFromHTML(html) {
-  const OOS_SIGNALS = [
-    'Preorders have sold out',
-    'Out of stock',
-    'Sold out',
-    'This item is not available',
-    'Item not available',
-    'Currently unavailable',
-  ];
-  for (const sig of OOS_SIGNALS) {
-    if (html.includes(sig)) return false;
-  }
-  const hasATC = html.includes('shippingButton')
-    || html.includes('shipItButton')
-    || html.includes('orderPickupButton')
-    || html.includes('>Add to cart<');
-  return hasATC;
+  const OOS = ['Preorders have sold out', 'Out of stock', 'Sold out',
+    'This item is not available', 'Item not available', 'Currently unavailable'];
+  for (const s of OOS) { if (html.includes(s)) return false; }
+  return html.includes('shippingButton') || html.includes('shipItButton')
+    || html.includes('orderPickupButton') || html.includes('>Add to cart<');
 }
 
 async function handleMonitoredATC(monitor, product) {
-  console.log('[TCH] handleMonitoredATC: starting for', product.url);
+  console.log('[TCH] monitor ATC for', product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;
   const interval = monitor.refreshInterval || 1;
 
-  if (currentCount >= product.qty) {
-    showToast(`Monitor: Already added ${currentCount}/${product.qty}`, 'success');
-    return;
-  }
+  if (currentCount >= product.qty) return;
 
-  // ── Try ATC on the current page DOM first ──
+  // Try ATC on current DOM
   let addBtn = findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
     || findByText('add to cart') || findByText('preorder');
 
   if (!addBtn) {
-    // Button not in DOM yet — wait briefly for React render
     try {
       addBtn = await Promise.any([
-        waitForElement(SEL.shipIt, 4000),
-        waitForElement(SEL.pickup, 4000),
-        waitForElement(SEL.preorder, 4000),
-        waitForByText('add to cart', 4000),
-        waitForByText('preorder', 4000),
+        waitForElement(SEL.shipIt, 2000),
+        waitForElement(SEL.pickup, 2000),
+        waitForElement(SEL.preorder, 2000),
+        waitForByText('add to cart', 2000),
+        waitForByText('preorder', 2000),
       ]);
-    } catch {
-      addBtn = null;
-    }
+    } catch { addBtn = null; }
   }
 
-  // Check for page-level OOS signals even when button appears enabled
-  const pageText = document.body?.innerText || '';
-  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(pageText);
+  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(
+    document.body?.innerText || ''
+  );
+
+  // Wait for button to enable if disabled during React render
+  if (addBtn && addBtn.disabled && !pageOOS) {
+    for (let i = 0; i < 30; i++) { await sleep(100); if (!addBtn.disabled) break; }
+  }
 
   if (addBtn && !addBtn.disabled && !pageOOS) {
-    // ── Button available and no OOS signals — perform ATC ──
-    showToast(`Monitor: Adding to cart (${currentCount + 1}/${product.qty})…`);
+    showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
     addBtn.click();
-    await sleep(T.postClickDelay);
 
-    try {
-      const coverageBtn = await waitForElement(SEL.declineCoverage, 3000);
-      coverageBtn.click();
-      await sleep(T.postClickDelay);
-    } catch {}
+    setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 300);
 
-    try {
-      await Promise.any([
-        waitForElement(SEL.viewCart, 8000),
-        waitForByText('view cart', 8000),
-        waitForByText('continue shopping', 8000),
-        waitForByText('added to cart', 8000),
-      ]);
-    } catch {
-      showToast(`Monitor: ATC uncertain — retrying in ${interval}s…`, 'error');
-      setTimeout(() => location.reload(), interval * 1000);
-      return;
-    }
-
-    await sleep(150);
+    // Brief wait for ATC XHR to complete, then report success
+    await sleep(800);
     const dismissBtn = findByText('continue shopping');
     if (dismissBtn) dismissBtn.click();
 
@@ -596,104 +383,76 @@ async function handleMonitoredATC(monitor, product) {
     return;
   }
 
-  // ── Button not available — start passive fetch-based polling ──
-  // No page reloads: silently fetch the page HTML and check for stock signals.
-  // When stock is detected, reload ONCE so the live DOM has an enabled ATC button.
+  // Passive fetch polling — no page reloads
   let pollCount = 0;
-  showToast(`Monitor: Passive polling every ${interval}s (no reload)…`, 'persistent');
-  console.log('[TCH] Starting passive fetch polling for', normUrl);
+  showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
+  console.log('[TCH] passive polling for', normUrl);
 
   const pollId = setInterval(async () => {
     pollCount++;
     try {
       const res = await fetch(location.href, {
-        cache: 'no-store',
-        credentials: 'include',
+        cache: 'no-store', credentials: 'include',
         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       });
       if (!res.ok) return;
       const html = await res.text();
-
       if (checkStockFromHTML(html)) {
         clearInterval(pollId);
-        console.log('[TCH] STOCK DETECTED via fetch after', pollCount, 'polls');
-        showToast('Monitor: STOCK DETECTED — reloading to ATC!', 'success');
+        console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
+        showToast('STOCK DETECTED — reloading!', 'success');
         location.reload();
-        return;
+      } else if (pollCount % 10 === 0) {
+        showToast(`Polling… (${pollCount} checks)`, 'persistent');
       }
-
-      // Update toast with poll count so user knows it's alive
-      if (pollCount % 10 === 0) {
-        showToast(`Monitor: Polling… (${pollCount} checks, no reload)`, 'persistent');
-      }
-    } catch {
-      // Network error — skip this poll, try again next interval
-    }
+    } catch {}
   }, interval * 1000);
 }
 
-// ─── MAIN ─────────────────────────────────────────────────────────────────────
+// ─── MAIN ────────────────────────────────────────────────────────────────────
 
 async function init() {
-  // Small delay to let React finish rendering after document_idle
-  await sleep(300);
   const data = await chrome.storage.local.get(['enabled', 'shipping', 'payment', 'monitor']);
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
-  // Monitor mode: on a monitored product page, try ATC without navigating away
   if (data.monitor?.active && page === 'product') {
     const normUrl = normalizeProductUrl(location.href);
     const product = (data.monitor.products || []).find(
       (p) => normalizeProductUrl(p.url) === normUrl
     );
-    if (product) {
-      await handleMonitoredATC(data.monitor, product);
-      return;
-    }
+    if (product) { await handleMonitoredATC(data.monitor, product); return; }
   }
 
   if (!data.enabled) return;
-
-  const hasShipping = data.shipping && Object.values(data.shipping).some(Boolean);
-  const hasPayment  = data.payment  && Object.values(data.payment).some(Boolean);
-
-  if (!hasShipping && !hasPayment) {
-    showToast('Open the extension popup to add your info', 'error');
-    return;
-  }
+  const hasData = (data.shipping && Object.values(data.shipping).some(Boolean))
+    || (data.payment && Object.values(data.payment).some(Boolean));
+  if (!hasData) { showToast('Open popup to add your info', 'error'); return; }
 
   const settings = { shipping: data.shipping || {}, payment: data.payment || {} };
-
-  switch (page) {
-    case 'product':      await handleProductPage(settings); break;
-    case 'cart':         await handleCartPage(settings);    break;
-    case 'checkout':     await handleCheckoutPage(settings); break;
-    case 'confirmation': showToast('Order placed!', 'success'); break;
-  }
+  if (page === 'product')      await handleProductPage();
+  else if (page === 'cart')    await handleCartPage();
+  else if (page === 'checkout') await handleCheckoutPage(settings);
+  else if (page === 'confirmation') showToast('Order placed!', 'success');
 }
 
-// ─── SPA NAVIGATION WATCHER ──────────────────────────────────────────────────
-// Target is a React SPA — URL changes don't fire full page loads
+// ─── SPA NAV WATCHER ─────────────────────────────────────────────────────────
 
 let lastUrl = location.href;
 new MutationObserver(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
-    // Remove any existing toast so the next step can render its own
     document.getElementById('tch-toast')?.remove();
     setTimeout(init, T.navSettleDelay);
   }
 }).observe(document, { subtree: true, childList: true });
 
-// ─── MESSAGE LISTENER (from popup via background) ─────────────────────────────
+// ─── MESSAGE LISTENER ────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === 'SETTINGS_UPDATED' && message.enabled) {
-    init();
-  }
+  if (message.type === 'SETTINGS_UPDATED' && message.enabled) init();
 });
 
-// ─── INITIAL RUN ──────────────────────────────────────────────────────────────
+// ─── GO ──────────────────────────────────────────────────────────────────────
 
 init();
