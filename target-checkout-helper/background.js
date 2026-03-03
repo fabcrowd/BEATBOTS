@@ -76,12 +76,12 @@ async function startMonitor(products, refreshInterval) {
 
   await chrome.storage.local.set({ monitor });
 
-  for (const p of products) {
-    try {
-      const tab = await chrome.tabs.create({ url: p.url, active: false });
-      monitor.tabIds.push(tab.id);
-    } catch {}
-  }
+  const tabResults = await Promise.allSettled(
+    products.map(p => chrome.tabs.create({ url: p.url, active: false }))
+  );
+  monitor.tabIds = tabResults
+    .filter(r => r.status === 'fulfilled')
+    .map(r => r.value.id);
 
   await chrome.storage.local.set({ monitor });
 }

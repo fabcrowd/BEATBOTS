@@ -1,5 +1,5 @@
-// content.js — Target Checkout Helper (speed-optimized)
-// Injected into all target.com pages. Drives the checkout flow automatically.
+// content.js — Target Checkout Helper (speed-optimized v3)
+// Injected at document_end into all target.com pages.
 
 // ─── SELECTORS ───────────────────────────────────────────────────────────────
 
@@ -16,12 +16,20 @@ const SEL = {
   stickyATC:       '[data-test="StickyAddToCart"] button',
 };
 
-// ─── TIMING (aggressive — every ms counts) ──────────────────────────────────
+const T = { observerTimeout: 10000 };
 
-const T = {
-  observerTimeout: 10000,
-  navSettleDelay:  50,
-};
+// ─── SETTINGS CACHE ─────────────────────────────────────────────────────────
+
+let settingsCache = null;
+
+async function getSettings() {
+  if (!settingsCache) {
+    settingsCache = await chrome.storage.local.get(['enabled', 'shipping', 'payment', 'monitor']);
+  }
+  return settingsCache;
+}
+
+function invalidateCache() { settingsCache = null; }
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
@@ -40,18 +48,8 @@ function fillSelect(select, value) {
   select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function waitForElement(selector, timeout = T.observerTimeout) {
-  return new Promise((resolve, reject) => {
-    const el = document.querySelector(selector);
-    if (el) return resolve(el);
-    const timer = setTimeout(() => { observer.disconnect(); reject(); }, timeout);
-    const observer = new MutationObserver(() => {
-      const found = document.querySelector(selector);
-      if (found) { clearTimeout(timer); observer.disconnect(); resolve(found); }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
-}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
 function findFirst(...selectors) {
   for (const sel of selectors) {
@@ -61,11 +59,52 @@ function findFirst(...selectors) {
   return null;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function findByText(text) {
+  const lower = text.toLowerCase();
+  return Array.from(document.querySelectorAll('a, button')).find(
+    el => el.textContent.trim().toLowerCase().includes(lower)
+  ) || null;
+}
 
 function normalizeProductUrl(url) {
   try { const u = new URL(url); return u.origin + u.pathname.replace(/\/$/, ''); }
   catch { return url; }
+}
+
+function waitForAny(specs, timeout = T.observerTimeout) {
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      for (const s of specs) {
+        if (s.sel)  { const el = document.querySelector(s.sel); if (el) return el; }
+        if (s.text) { const el = findByText(s.text); if (el) return el; }
+      }
+      return null;
+    };
+    const found = check();
+    if (found) return resolve(found);
+    const timer = setTimeout(() => { obs.disconnect(); reject(new Error('timeout')); }, timeout);
+    const obs = new MutationObserver(() => {
+      const el = check();
+      if (el) { clearTimeout(timer); obs.disconnect(); resolve(el); }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
+function waitForEnabled(getFn, timeout = 6000) {
+  return new Promise((resolve, reject) => {
+    const el = getFn();
+    if (el && !el.disabled) return resolve(el);
+    const timer = setTimeout(() => { obs.disconnect(); reject(); }, timeout);
+    const obs = new MutationObserver(() => {
+      const el = getFn();
+      if (el && !el.disabled) { clearTimeout(timer); obs.disconnect(); resolve(el); }
+    });
+    obs.observe(document.body, {
+      childList: true, subtree: true,
+      attributes: true, attributeFilter: ['disabled'],
+    });
+  });
 }
 
 function showToast(message, type = 'info') {
@@ -82,35 +121,11 @@ function showToast(message, type = 'info') {
     zIndex: '2147483647', boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
     lineHeight: '1.4', maxWidth: '320px',
   });
-  toast.innerHTML = `<span style="margin-right:6px">🎯</span>${message}`;
+  toast.textContent = '🎯 ' + message;
   document.body.appendChild(toast);
   if (type !== 'persistent') {
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
   }
-}
-
-function findByText(text) {
-  const lower = text.toLowerCase();
-  return Array.from(document.querySelectorAll('a, button')).find(
-    (el) => el.textContent.trim().toLowerCase().includes(lower)
-  ) || null;
-}
-
-function waitForByText(text, timeout = T.observerTimeout) {
-  const lower = text.toLowerCase();
-  return new Promise((resolve, reject) => {
-    const find = () => Array.from(document.querySelectorAll('a, button')).find(
-      (el) => el.textContent.trim().toLowerCase().includes(lower)
-    ) || null;
-    const el = find();
-    if (el) return resolve(el);
-    const timer = setTimeout(() => { observer.disconnect(); reject(); }, timeout);
-    const observer = new MutationObserver(() => {
-      const el = find();
-      if (el) { clearTimeout(timer); observer.disconnect(); resolve(el); }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
 }
 
 function clickContinue() {
@@ -118,11 +133,20 @@ function clickContinue() {
   const buttons = Array.from(document.querySelectorAll('button'));
   for (const pattern of patterns) {
     const btn = buttons.find(
-      (b) => b.textContent.trim().toLowerCase().startsWith(pattern) && !b.disabled
+      b => b.textContent.trim().toLowerCase().startsWith(pattern) && !b.disabled
     );
     if (btn) { btn.click(); return true; }
   }
   return false;
+}
+
+function prefetchCheckout() {
+  if (document.querySelector('link[data-tch-prefetch]')) return;
+  const link = document.createElement('link');
+  link.rel = 'prefetch';
+  link.href = 'https://www.target.com/checkout';
+  link.setAttribute('data-tch-prefetch', '1');
+  document.head.appendChild(link);
 }
 
 // ─── PAGE DETECTION ──────────────────────────────────────────────────────────
@@ -140,50 +164,39 @@ function getCheckoutStep() {
   if (document.querySelector(SEL.placeOrder) || findByText('place order')) return 'review';
   if (document.querySelector(SEL.cardNumber)) return 'payment';
   if (['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
-    .some((s) => document.querySelector(s))) return 'shipping';
+    .some(s => document.querySelector(s))) return 'shipping';
   return 'unknown';
 }
 
-// ─── STEP HANDLERS (speed-optimized: zero unnecessary sleeps) ────────────────
+// ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
 async function handleProductPage() {
   console.log('[TCH] handleProductPage');
+  prefetchCheckout();
+
   let addBtn;
   try {
-    addBtn = await Promise.any([
-      waitForElement(SEL.shipIt, 6000),
-      waitForElement(SEL.pickup, 6000),
-      waitForElement(SEL.preorder, 6000),
-      waitForElement(SEL.stickyATC, 6000),
-      waitForByText('add to cart', 6000),
-      waitForByText('preorder', 6000),
-    ]);
+    addBtn = await waitForAny([
+      { sel: SEL.shipIt }, { sel: SEL.pickup }, { sel: SEL.preorder },
+      { sel: SEL.stickyATC }, { text: 'add to cart' }, { text: 'preorder' },
+    ], 6000);
   } catch { showToast('ATC button not found', 'error'); return; }
 
-  // Wait for button to become enabled — React replaces DOM nodes during render,
-  // so we must re-query each iteration to avoid stale references.
-  for (let i = 0; addBtn.disabled && i < 60; i++) {
-    await sleep(100);
-    addBtn = findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
-      || findByText('add to cart') || findByText('preorder') || addBtn;
-  }
   if (addBtn.disabled) {
-    console.log('[TCH] button still disabled after wait');
-    showToast('Button still disabled', 'error');
-    return;
+    try {
+      addBtn = await waitForEnabled(
+        () => findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
+              || findByText('add to cart') || findByText('preorder'),
+        6000
+      );
+    } catch {
+      showToast('Button still disabled', 'error');
+      return;
+    }
   }
 
   console.log('[TCH] clicking ATC');
   addBtn.click();
-
-  // Don't wait for confirmation panel — navigate to checkout IMMEDIATELY.
-  // Item is in cart server-side as soon as the click's XHR completes.
-  // Fire coverage decline in background (non-blocking) just in case.
-  setTimeout(() => {
-    const cov = document.querySelector(SEL.declineCoverage);
-    if (cov) cov.click();
-  }, 400);
-
   showToast('ATC → checkout…');
   window.location.href = 'https://www.target.com/checkout';
 }
@@ -191,11 +204,9 @@ async function handleProductPage() {
 async function handleCartPage() {
   console.log('[TCH] handleCartPage');
   try {
-    const btn = await Promise.any([
-      waitForElement(SEL.cartCheckout, 6000),
-      waitForByText('check out', 6000),
-      waitForByText('sign in to check out', 6000),
-    ]);
+    const btn = await waitForAny([
+      { sel: SEL.cartCheckout }, { text: 'check out' }, { text: 'sign in to check out' },
+    ], 6000);
     btn.click();
   } catch {
     window.location.href = 'https://www.target.com/checkout';
@@ -231,7 +242,6 @@ async function handleShippingStep(settings) {
   const s = settings.shipping || {};
   console.log('[TCH] filling shipping');
 
-  // Fill ALL fields in one synchronous burst — zero delay between fields
   const fieldMap = [
     [['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'], s.firstName],
     [['input[id*="lastName"]', 'input[name="lastName"]', 'input[autocomplete="family-name"]'], s.lastName],
@@ -253,25 +263,24 @@ async function handleShippingStep(settings) {
     if (stateEl) fillSelect(stateEl, s.state);
   }
 
-  // Tiny yield so React processes the fills, then click continue
-  await sleep(30);
+  await nextFrame();
   clickContinue();
 
-  // Handle address suggestion popup in background
-  setTimeout(() => {
+  const addrObs = new MutationObserver(() => {
     const useAddr = findByText('use this address') || findByText('save and continue')
       || findByText('use as entered') || findByText('suggested address');
-    if (useAddr && !useAddr.disabled) useAddr.click();
-  }, 800);
+    if (useAddr && !useAddr.disabled) { useAddr.click(); addrObs.disconnect(); }
+  });
+  addrObs.observe(document.body, { childList: true, subtree: true });
+  setTimeout(() => addrObs.disconnect(), 5000);
 
-  setTimeout(() => watchForCheckoutStep(settings), 200);
+  watchForCheckoutStep(settings);
 }
 
 async function handlePaymentStep(settings) {
   const p = settings.payment || {};
   console.log('[TCH] filling payment');
 
-  // Fill all payment fields in one synchronous burst
   if (p.cardNumber) {
     const el = document.querySelector(SEL.cardNumber);
     if (el) fillInput(el, p.cardNumber);
@@ -296,12 +305,11 @@ async function handlePaymentStep(settings) {
     if (el) fillInput(el, p.billingZip);
   }
 
-  await sleep(30);
+  await nextFrame();
   if (clickContinue()) {
-    Promise.any([
-      waitForElement(SEL.placeOrder, 15000),
-      waitForByText('place order', 15000),
-    ]).then(() => handleReviewStep()).catch(() => {});
+    waitForAny([
+      { sel: SEL.placeOrder }, { text: 'place order' },
+    ], 15000).then(() => handleReviewStep()).catch(() => {});
   }
 }
 
@@ -309,16 +317,15 @@ async function handleReviewStep() {
   console.log('[TCH] placing order');
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      const placeBtn = await Promise.any([
-        waitForElement(SEL.placeOrder, 4000),
-        waitForByText('place order', 4000),
-      ]);
-      if (placeBtn.disabled) { await sleep(200); continue; }
+      const placeBtn = await waitForAny([
+        { sel: SEL.placeOrder }, { text: 'place order' },
+      ], 4000);
+      if (placeBtn.disabled) { await sleep(50); continue; }
       placeBtn.click();
       showToast('Order submitted!', 'success');
       return;
     } catch {
-      if (attempt < 5) await sleep(200);
+      if (attempt < 5) await sleep(50);
     }
   }
   showToast('Could not place order — click manually', 'persistent');
@@ -326,12 +333,53 @@ async function handleReviewStep() {
 
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
 
+const OOS_STRINGS = ['Preorders have sold out', 'Out of stock', 'Sold out',
+  'This item is not available', 'Item not available', 'Currently unavailable'];
+const IN_STOCK_STRINGS = ['shippingButton', 'shipItButton', 'orderPickupButton', '>Add to cart<'];
+
 function checkStockFromHTML(html) {
-  const OOS = ['Preorders have sold out', 'Out of stock', 'Sold out',
-    'This item is not available', 'Item not available', 'Currently unavailable'];
-  for (const s of OOS) { if (html.includes(s)) return false; }
-  return html.includes('shippingButton') || html.includes('shipItButton')
-    || html.includes('orderPickupButton') || html.includes('>Add to cart<');
+  for (const s of OOS_STRINGS) { if (html.includes(s)) return false; }
+  for (const s of IN_STOCK_STRINGS) { if (html.includes(s)) return true; }
+  return false;
+}
+
+// Streaming stock check — reads the response in chunks and terminates early
+// as soon as a stock-status string is found, avoiding full page download.
+async function streamingStockCheck(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store', credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      for (const s of OOS_STRINGS) {
+        if (buf.includes(s)) { reader.cancel(); return false; }
+      }
+      for (const s of IN_STOCK_STRINGS) {
+        if (buf.includes(s)) { reader.cancel(); return true; }
+      }
+    }
+
+    return checkStockFromHTML(buf);
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
 }
 
 async function handleMonitoredATC(monitor, product) {
@@ -342,29 +390,30 @@ async function handleMonitoredATC(monitor, product) {
 
   if (currentCount >= product.qty) return;
 
-  // Try ATC on current DOM
   let addBtn = findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
     || findByText('add to cart') || findByText('preorder');
 
   if (!addBtn) {
     try {
-      addBtn = await Promise.any([
-        waitForElement(SEL.shipIt, 2000),
-        waitForElement(SEL.pickup, 2000),
-        waitForElement(SEL.preorder, 2000),
-        waitForByText('add to cart', 2000),
-        waitForByText('preorder', 2000),
-      ]);
+      addBtn = await waitForAny([
+        { sel: SEL.shipIt }, { sel: SEL.pickup }, { sel: SEL.preorder },
+        { text: 'add to cart' }, { text: 'preorder' },
+      ], 2000);
     } catch { addBtn = null; }
   }
 
   const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(
-    document.body?.innerText || ''
+    document.body?.textContent || ''
   );
 
-  // Wait for button to enable if disabled during React render
   if (addBtn && addBtn.disabled && !pageOOS) {
-    for (let i = 0; i < 30; i++) { await sleep(100); if (!addBtn.disabled) break; }
+    try {
+      addBtn = await waitForEnabled(
+        () => findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
+              || findByText('add to cart') || findByText('preorder'),
+        3000
+      );
+    } catch { /* stays disabled */ }
   }
 
   if (addBtn && !addBtn.disabled && !pageOOS) {
@@ -373,7 +422,6 @@ async function handleMonitoredATC(monitor, product) {
 
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 300);
 
-    // Brief wait for ATC XHR to complete, then report success
     await sleep(800);
     const dismissBtn = findByText('continue shopping');
     if (dismissBtn) dismissBtn.click();
@@ -383,43 +431,38 @@ async function handleMonitoredATC(monitor, product) {
     return;
   }
 
-  // Passive fetch polling — no page reloads
+  // Streaming fetch polling — reads chunks, terminates early on match
   let pollCount = 0;
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
 
   const pollId = setInterval(async () => {
     pollCount++;
-    try {
-      const res = await fetch(location.href, {
-        cache: 'no-store', credentials: 'include',
-        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
-      });
-      if (!res.ok) return;
-      const html = await res.text();
-      if (checkStockFromHTML(html)) {
-        clearInterval(pollId);
-        console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
-        showToast('STOCK DETECTED — reloading!', 'success');
-        location.reload();
-      } else if (pollCount % 10 === 0) {
-        showToast(`Polling… (${pollCount} checks)`, 'persistent');
-      }
-    } catch {}
+    const result = await streamingStockCheck(location.href);
+    if (result === true) {
+      clearInterval(pollId);
+      console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
+      showToast('STOCK DETECTED — reloading!', 'success');
+      location.reload();
+    } else if (result === null) {
+      // network error — skip this poll
+    } else if (pollCount % 10 === 0) {
+      showToast(`Polling… (${pollCount} checks)`, 'persistent');
+    }
   }, interval * 1000);
 }
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 
 async function init() {
-  const data = await chrome.storage.local.get(['enabled', 'shipping', 'payment', 'monitor']);
+  const data = await getSettings();
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
   if (data.monitor?.active && page === 'product') {
     const normUrl = normalizeProductUrl(location.href);
     const product = (data.monitor.products || []).find(
-      (p) => normalizeProductUrl(p.url) === normUrl
+      p => normalizeProductUrl(p.url) === normUrl
     );
     if (product) { await handleMonitoredATC(data.monitor, product); return; }
   }
@@ -430,6 +473,9 @@ async function init() {
   if (!hasData) { showToast('Open popup to add your info', 'error'); return; }
 
   const settings = { shipping: data.shipping || {}, payment: data.payment || {} };
+
+  if (page === 'product' || page === 'cart') prefetchCheckout();
+
   if (page === 'product')      await handleProductPage();
   else if (page === 'cart')    await handleCartPage();
   else if (page === 'checkout') await handleCheckoutPage(settings);
@@ -442,17 +488,25 @@ let lastUrl = location.href;
 new MutationObserver(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
+    invalidateCache();
     document.getElementById('tch-toast')?.remove();
-    setTimeout(init, T.navSettleDelay);
+    requestAnimationFrame(init);
   }
 }).observe(document, { subtree: true, childList: true });
 
 // ─── MESSAGE LISTENER ────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === 'SETTINGS_UPDATED' && message.enabled) init();
+  if (message.type === 'SETTINGS_UPDATED') {
+    invalidateCache();
+    if (message.enabled) init();
+  }
 });
 
 // ─── GO ──────────────────────────────────────────────────────────────────────
 
-init();
+if (document.body) {
+  init();
+} else {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+}
