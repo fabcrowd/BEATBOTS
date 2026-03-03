@@ -122,6 +122,42 @@ function showToast(message, type = 'info') {
   }
 }
 
+// Find a button or link by its visible text content
+function findByText(text) {
+  const lower = text.toLowerCase();
+  return Array.from(document.querySelectorAll('a, button')).find(
+    (el) => el.textContent.trim().toLowerCase().includes(lower)
+  ) || null;
+}
+
+// Wait for a button or link containing specific text to appear in the DOM
+function waitForByText(text, timeout = T.observerTimeout) {
+  const lower = text.toLowerCase();
+  return new Promise((resolve, reject) => {
+    const find = () => Array.from(document.querySelectorAll('a, button')).find(
+      (el) => el.textContent.trim().toLowerCase().includes(lower)
+    ) || null;
+
+    const el = find();
+    if (el) return resolve(el);
+
+    const timer = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error(`Timeout: "${text}"`));
+    }, timeout);
+
+    const observer = new MutationObserver(() => {
+      const el = find();
+      if (el) {
+        clearTimeout(timer);
+        observer.disconnect();
+        resolve(el);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
 // Find and click a "Continue" / "Save & continue" button on checkout pages
 async function clickContinue() {
   const patterns = ['save & continue', 'save and continue', 'continue', 'next'];
@@ -198,9 +234,12 @@ async function handleProductPage(settings) {
     // Not present — continue
   }
 
-  // Click "View Cart & Check Out"
+  // Click "View Cart & Check Out" — try data-test selector first, fall back to text match
   try {
-    const viewCartBtn = await waitForElement(SEL.viewCart);
+    const viewCartBtn = await Promise.any([
+      waitForElement(SEL.viewCart),
+      waitForByText('view cart'),
+    ]);
     await sleep(300);
     viewCartBtn.click();
     showToast('Heading to checkout...');
@@ -451,15 +490,24 @@ async function handleMonitoredATC(monitor, product) {
     await sleep(T.postClickDelay);
   } catch {}
 
-  // Wait for ATC confirmation modal (viewCart button means item was added)
+  // Wait for ATC confirmation — try data-test selector and text-based matches in parallel
   try {
-    await waitForElement(SEL.viewCart, 10000);
+    await Promise.any([
+      waitForElement(SEL.viewCart, 10000),
+      waitForByText('view cart', 10000),
+      waitForByText('continue shopping', 10000),
+    ]);
   } catch {
     const interval = monitor.refreshInterval || 5;
     showToast(`Monitor: Add to cart uncertain — retrying in ${interval}s…`, 'error');
     setTimeout(() => location.reload(), interval * 1000);
     return;
   }
+
+  // Dismiss the confirmation panel so the page is clean for next reload
+  await sleep(300);
+  const dismissBtn = findByText('continue shopping');
+  if (dismissBtn) dismissBtn.click();
 
   showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
   chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });

@@ -58,6 +58,9 @@ function broadcastToTarget(message) {
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
 
 async function startMonitor(products, refreshInterval) {
+  // Clean up any previous monitoring session first
+  await stopMonitor();
+
   const counts = {};
   for (const p of products) {
     counts[normalizeProductUrl(p.url)] = 0;
