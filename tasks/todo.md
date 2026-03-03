@@ -10,7 +10,7 @@
 - [x] Expose new retry/watch statuses in popup telemetry text.
 - [x] Validate success path and infinite-watch/retry path in Chrome.
 - [x] Run syntax checks for touched JS files.
-- [ ] Stage, commit, and push changes.
+- [x] Stage, commit, and push changes.
 
 ## Notes
 - Never click Place Order automatically; always stop at review.
