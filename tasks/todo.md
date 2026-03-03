@@ -20,3 +20,7 @@
 - Verified retries run indefinitely in `(until canceled)` mode with `retries=0`, and stop immediately on manual cancel.
 - Verified stock-watch mode uses passive polling (`no reload spam`) and reports watch/cancel status in popup.
 - Success-path sanity still reaches checkout but can be blocked by Target auth challenge; retry loop handles this without exhausting.
+
+## Follow-up: README + Main Sync Confirmation
+- [x] Add root `README.md` with install instructions using `install.sh` / `install.bat` and `INSTALL.html`.
+- [ ] Confirm local `main` is pushed and matches GitHub `origin/main`.
