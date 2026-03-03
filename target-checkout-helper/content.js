@@ -508,73 +508,128 @@ async function handleReviewStep() {
 
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
 
+// Check fetched HTML for stock availability signals
+function checkStockFromHTML(html) {
+  const OOS_SIGNALS = [
+    'Preorders have sold out',
+    'Out of stock',
+    'Sold out',
+    'This item is not available',
+    'Item not available',
+    'Currently unavailable',
+  ];
+  for (const sig of OOS_SIGNALS) {
+    if (html.includes(sig)) return false;
+  }
+  const hasATC = html.includes('shippingButton')
+    || html.includes('shipItButton')
+    || html.includes('orderPickupButton')
+    || html.includes('>Add to cart<');
+  return hasATC;
+}
+
 async function handleMonitoredATC(monitor, product) {
   console.log('[TCH] handleMonitoredATC: starting for', product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;
+  const interval = monitor.refreshInterval || 1;
 
   if (currentCount >= product.qty) {
     showToast(`Monitor: Already added ${currentCount}/${product.qty}`, 'success');
     return;
   }
 
-  showToast(`Monitor: Adding to cart (${currentCount + 1}/${product.qty})…`);
+  // ── Try ATC on the current page DOM first ──
+  let addBtn = findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
+    || findByText('add to cart') || findByText('preorder');
 
-  const interval = monitor.refreshInterval || 1;
-
-  let addBtn;
-  try {
-    addBtn = await Promise.any([
-      waitForElement(SEL.shipIt, 5000),
-      waitForElement(SEL.pickup, 5000),
-      waitForElement(SEL.preorder, 5000),
-      waitForElement(SEL.stickyATC, 5000),
-      waitForByText('add to cart', 5000),
-      waitForByText('preorder', 5000),
-    ]);
-  } catch {
-    showToast(`Monitor: Unavailable — retrying in ${interval}s…`, 'error');
-    setTimeout(() => location.reload(), interval * 1000);
-    return;
+  if (!addBtn) {
+    // Button not in DOM yet — wait briefly for React render
+    try {
+      addBtn = await Promise.any([
+        waitForElement(SEL.shipIt, 4000),
+        waitForElement(SEL.pickup, 4000),
+        waitForElement(SEL.preorder, 4000),
+        waitForByText('add to cart', 4000),
+        waitForByText('preorder', 4000),
+      ]);
+    } catch {
+      addBtn = null;
+    }
   }
 
-  if (addBtn.disabled) {
-    showToast(`Monitor: Button disabled — retrying in ${interval}s…`, 'error');
-    setTimeout(() => location.reload(), interval * 1000);
-    return;
-  }
+  // Check for page-level OOS signals even when button appears enabled
+  const pageText = document.body?.innerText || '';
+  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(pageText);
 
-  addBtn.click();
-  await sleep(T.postClickDelay);
-
-  // Decline optional coverage popup
-  try {
-    const coverageBtn = await waitForElement(SEL.declineCoverage, 4000);
-    coverageBtn.click();
+  if (addBtn && !addBtn.disabled && !pageOOS) {
+    // ── Button available and no OOS signals — perform ATC ──
+    showToast(`Monitor: Adding to cart (${currentCount + 1}/${product.qty})…`);
+    addBtn.click();
     await sleep(T.postClickDelay);
-  } catch {}
 
-  // Wait for ATC confirmation — try data-test selector and text-based matches in parallel
-  try {
-    await Promise.any([
-      waitForElement(SEL.viewCart, 8000),
-      waitForByText('view cart', 8000),
-      waitForByText('continue shopping', 8000),
-      waitForByText('added to cart', 8000),
-    ]);
-  } catch {
-    showToast(`Monitor: Add to cart uncertain — retrying in ${interval}s…`, 'error');
-    setTimeout(() => location.reload(), interval * 1000);
+    try {
+      const coverageBtn = await waitForElement(SEL.declineCoverage, 3000);
+      coverageBtn.click();
+      await sleep(T.postClickDelay);
+    } catch {}
+
+    try {
+      await Promise.any([
+        waitForElement(SEL.viewCart, 8000),
+        waitForByText('view cart', 8000),
+        waitForByText('continue shopping', 8000),
+        waitForByText('added to cart', 8000),
+      ]);
+    } catch {
+      showToast(`Monitor: ATC uncertain — retrying in ${interval}s…`, 'error');
+      setTimeout(() => location.reload(), interval * 1000);
+      return;
+    }
+
+    await sleep(150);
+    const dismissBtn = findByText('continue shopping');
+    if (dismissBtn) dismissBtn.click();
+
+    showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
+    chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
     return;
   }
 
-  // Dismiss the confirmation panel so the page is clean for next reload
-  await sleep(200);
-  const dismissBtn = findByText('continue shopping');
-  if (dismissBtn) dismissBtn.click();
+  // ── Button not available — start passive fetch-based polling ──
+  // No page reloads: silently fetch the page HTML and check for stock signals.
+  // When stock is detected, reload ONCE so the live DOM has an enabled ATC button.
+  let pollCount = 0;
+  showToast(`Monitor: Passive polling every ${interval}s (no reload)…`, 'persistent');
+  console.log('[TCH] Starting passive fetch polling for', normUrl);
 
-  showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
-  chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+  const pollId = setInterval(async () => {
+    pollCount++;
+    try {
+      const res = await fetch(location.href, {
+        cache: 'no-store',
+        credentials: 'include',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      });
+      if (!res.ok) return;
+      const html = await res.text();
+
+      if (checkStockFromHTML(html)) {
+        clearInterval(pollId);
+        console.log('[TCH] STOCK DETECTED via fetch after', pollCount, 'polls');
+        showToast('Monitor: STOCK DETECTED — reloading to ATC!', 'success');
+        location.reload();
+        return;
+      }
+
+      // Update toast with poll count so user knows it's alive
+      if (pollCount % 10 === 0) {
+        showToast(`Monitor: Polling… (${pollCount} checks, no reload)`, 'persistent');
+      }
+    } catch {
+      // Network error — skip this poll, try again next interval
+    }
+  }, interval * 1000);
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
