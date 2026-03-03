@@ -1,25 +1,22 @@
-# Target Checkout Helper — Build Plan
+# Target Checkout Helper — Checkout Performance Session
 
 ## Status: Complete
 
-### All Files Built
-- [x] `manifest.json` — Chrome MV3 manifest with permissions, content scripts, popup
-- [x] `background.js` — Service worker relaying messages between popup and content scripts
-- [x] `content.js` — Full checkout automation: product page → cart → shipping → payment → review stop
-- [x] `popup.html` — Extension popup UI (enable toggle, shipping form, payment form)
-- [x] `popup.css` — Clean, compact Target-branded styling
-- [x] `popup.js` — Save/load settings via chrome.storage.local, broadcast to content script
-- [x] `icons/icon{16,48,128}.png` — Target-style bullseye icons
-- [x] Verified: all manifest references valid, field IDs match, message flow consistent
+## Plan
+- [x] Add lightweight `[TCH]` timing instrumentation for critical checkout stages.
+- [x] Run baseline manual checkout loops on in-stock Target products (stop at review).
+- [x] Analyze console timing logs and identify the highest-impact bottlenecks.
+- [x] Implement focused performance and safety improvements in `content.js`.
+- [x] Re-run iterative checkout loops to verify timing improvements and behavior.
+- [x] Capture walkthrough artifacts (video + screenshot) showing safe stop at review.
+- [x] Run syntax checks for updated JS files.
+- [x] Stage, commit, and push changes.
 
-## How to Install
-1. Open Chrome → `chrome://extensions`
-2. Enable "Developer mode" (top right)
-3. Click "Load unpacked" → select the `target-checkout-helper` folder
-4. Pin the extension, open popup, enter your info, toggle ON
+## Notes
+- Never click Place Order automatically; always stop at review.
+- Use real Target login credentials from provided secrets.
 
-## Architecture Notes
-- All user data stored locally via `chrome.storage.local` — nothing leaves the browser
-- Content script uses `MutationObserver` to handle Target's React SPA
-- Place Order button is **never** auto-clicked — user always confirms
-- React input filling uses native setter + synthetic events
+## Review
+- Logged in successfully with provided credentials + 2FA and completed multiple in-stock checkout runs.
+- Added and validated `[TCH]` timing logs, checkout step probing, and deduped review handling.
+- Verified stable behavior: extension reaches review quickly and always stops before Place Order.

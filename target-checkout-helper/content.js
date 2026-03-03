@@ -16,7 +16,12 @@ const SEL = {
   stickyATC:       '[data-test="StickyAddToCart"] button',
 };
 
-const T = { observerTimeout: 10000 };
+const T = {
+  observerTimeout: 10000,
+  checkoutProbeInterval: 60,
+  checkoutProbeTimeout: 2500,
+  reviewDedupWindowMs: 15000,
+};
 
 // ─── SETTINGS CACHE ─────────────────────────────────────────────────────────
 
@@ -50,6 +55,37 @@ function fillSelect(select, value) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+
+function startTiming(label, details = '') {
+  const started = performance.now();
+  if (details) {
+    console.log(`[TCH] timing start ${label}: ${details}`);
+  }
+  return (suffix = '') => {
+    const ms = Math.round(performance.now() - started);
+    console.log(`[TCH] timing ${label}: ${ms}ms${suffix ? ` (${suffix})` : ''}`);
+    return ms;
+  };
+}
+
+function setNavigationMark(key) {
+  try {
+    sessionStorage.setItem(`tch:nav:${key}`, String(Date.now()));
+  } catch {}
+}
+
+function flushNavigationTiming(key, label) {
+  try {
+    const storageKey = `tch:nav:${key}`;
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return;
+    sessionStorage.removeItem(storageKey);
+    const ms = Date.now() - Number(raw);
+    if (Number.isFinite(ms) && ms >= 0) {
+      console.log(`[TCH] timing ${label}: ${ms}ms`);
+    }
+  } catch {}
+}
 
 function findFirst(...selectors) {
   for (const sel of selectors) {
@@ -128,16 +164,31 @@ function showToast(message, type = 'info') {
   }
 }
 
-function clickContinue() {
+function findContinueButton(enabledOnly = false) {
   const patterns = ['save & continue', 'save and continue', 'continue', 'next'];
   const buttons = Array.from(document.querySelectorAll('button'));
-  for (const pattern of patterns) {
-    const btn = buttons.find(
-      b => b.textContent.trim().toLowerCase().startsWith(pattern) && !b.disabled
-    );
-    if (btn) { btn.click(); return true; }
-  }
+  return buttons.find((button) => {
+    if (enabledOnly && button.disabled) return false;
+    const text = button.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+    return patterns.some((pattern) => text === pattern || text.startsWith(pattern));
+  }) || null;
+}
+
+function clickContinue() {
+  const btn = findContinueButton(true);
+  if (btn) { btn.click(); return true; }
   return false;
+}
+
+async function waitAndClickContinue(timeout = 5000) {
+  if (clickContinue()) return true;
+  try {
+    const btn = await waitForEnabled(() => findContinueButton(true), timeout);
+    btn.click();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function prefetchCheckout() {
@@ -174,21 +225,25 @@ async function handleProductPage() {
   console.log('[TCH] handleProductPage');
   prefetchCheckout();
 
+  const stopFindAtc = startTiming('product_wait_for_atc');
   let addBtn;
   try {
     addBtn = await waitForAny([
       { sel: SEL.shipIt }, { sel: SEL.pickup }, { sel: SEL.preorder },
       { sel: SEL.stickyATC }, { text: 'add to cart' }, { text: 'preorder' },
     ], 6000);
+    stopFindAtc('found');
   } catch { showToast('ATC button not found', 'error'); return; }
 
   if (addBtn.disabled) {
+    const stopEnableAtc = startTiming('product_wait_for_enabled_atc');
     try {
       addBtn = await waitForEnabled(
         () => findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
               || findByText('add to cart') || findByText('preorder'),
         6000
       );
+      stopEnableAtc('enabled');
     } catch {
       showToast('Button still disabled', 'error');
       return;
@@ -198,22 +253,45 @@ async function handleProductPage() {
   console.log('[TCH] clicking ATC');
   addBtn.click();
   showToast('ATC → checkout…');
+  setNavigationMark('product_to_checkout');
   window.location.href = 'https://www.target.com/checkout';
 }
 
 async function handleCartPage() {
   console.log('[TCH] handleCartPage');
+  const stopCartCheckout = startTiming('cart_wait_for_checkout_button');
   try {
     const btn = await waitForAny([
       { sel: SEL.cartCheckout }, { text: 'check out' }, { text: 'sign in to check out' },
     ], 6000);
+    stopCartCheckout('clicked');
+    setNavigationMark('cart_to_checkout');
     btn.click();
   } catch {
+    stopCartCheckout('fallback_redirect');
+    setNavigationMark('cart_to_checkout');
     window.location.href = 'https://www.target.com/checkout';
   }
 }
 
+let checkoutFlowStart = null;
+let checkoutStepObserver = null;
+let checkoutStepPollId = null;
+let checkoutStepPollTimer = null;
+let lastReviewKey = null;
+let lastReviewAt = 0;
+
+function markCheckoutFlow(step) {
+  if (checkoutFlowStart === null) {
+    checkoutFlowStart = performance.now();
+    console.log('[TCH] timing checkout_flow_start: 0ms');
+  }
+  const ms = Math.round(performance.now() - checkoutFlowStart);
+  console.log(`[TCH] timing checkout_${step}: ${ms}ms`);
+}
+
 async function handleCheckoutPage(settings) {
+  markCheckoutFlow('page_ready');
   const step = getCheckoutStep();
   console.log('[TCH] checkout step:', step);
   if (step === 'shipping')    return handleShippingStep(settings);
@@ -223,25 +301,70 @@ async function handleCheckoutPage(settings) {
 }
 
 function watchForCheckoutStep(settings) {
+  if (checkoutStepObserver) {
+    checkoutStepObserver.disconnect();
+    checkoutStepObserver = null;
+  }
+  if (checkoutStepPollId) {
+    clearInterval(checkoutStepPollId);
+    checkoutStepPollId = null;
+  }
+  if (checkoutStepPollTimer) {
+    clearTimeout(checkoutStepPollTimer);
+    checkoutStepPollTimer = null;
+  }
+
   let handled = false;
-  const observer = new MutationObserver(async () => {
+  const runStep = async (step) => {
     if (handled) return;
-    const step = getCheckoutStep();
     if (step === 'unknown') return;
     handled = true;
-    observer.disconnect();
-    if (step === 'shipping')    await handleShippingStep(settings);
+    markCheckoutFlow(`${step}_detected`);
+    if (checkoutStepObserver) {
+      checkoutStepObserver.disconnect();
+      checkoutStepObserver = null;
+    }
+    if (checkoutStepPollId) {
+      clearInterval(checkoutStepPollId);
+      checkoutStepPollId = null;
+    }
+    if (checkoutStepPollTimer) {
+      clearTimeout(checkoutStepPollTimer);
+      checkoutStepPollTimer = null;
+    }
+    if (step === 'shipping') await handleShippingStep(settings);
     else if (step === 'payment') await handlePaymentStep(settings);
-    else if (step === 'review')  await handleReviewStep();
+    else if (step === 'review') await handleReviewStep();
+  };
+
+  const observer = new MutationObserver(async () => {
+    if (handled) return;
+    await runStep(getCheckoutStep());
   });
+  checkoutStepObserver = observer;
   observer.observe(document.body, { childList: true, subtree: true });
-  setTimeout(() => observer.disconnect(), 30000);
+  checkoutStepPollId = setInterval(() => {
+    runStep(getCheckoutStep());
+  }, T.checkoutProbeInterval);
+  checkoutStepPollTimer = setTimeout(() => {
+    if (!handled && checkoutStepObserver === observer) {
+      observer.disconnect();
+      checkoutStepObserver = null;
+    }
+    if (checkoutStepPollId) {
+      clearInterval(checkoutStepPollId);
+      checkoutStepPollId = null;
+    }
+    checkoutStepPollTimer = null;
+  }, T.checkoutProbeTimeout);
 }
 
 async function handleShippingStep(settings) {
   const s = settings.shipping || {};
   console.log('[TCH] filling shipping');
+  markCheckoutFlow('shipping_start');
 
+  const stopFill = startTiming('shipping_fill_fields');
   const fieldMap = [
     [['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'], s.firstName],
     [['input[id*="lastName"]', 'input[name="lastName"]', 'input[autocomplete="family-name"]'], s.lastName],
@@ -262,9 +385,12 @@ async function handleShippingStep(settings) {
     const stateEl = findFirst('select[id*="state"]', 'select[name*="state"]', 'select[autocomplete="address-level1"]');
     if (stateEl) fillSelect(stateEl, s.state);
   }
+  stopFill();
 
   await nextFrame();
-  clickContinue();
+  const stopContinue = startTiming('shipping_wait_for_continue');
+  const continueClicked = await waitAndClickContinue(5000);
+  stopContinue(continueClicked ? 'clicked' : 'not_found_or_disabled');
 
   const addrObs = new MutationObserver(() => {
     const useAddr = findByText('use this address') || findByText('save and continue')
@@ -280,7 +406,9 @@ async function handleShippingStep(settings) {
 async function handlePaymentStep(settings) {
   const p = settings.payment || {};
   console.log('[TCH] filling payment');
+  markCheckoutFlow('payment_start');
 
+  const stopFill = startTiming('payment_fill_fields');
   if (p.cardNumber) {
     const el = document.querySelector(SEL.cardNumber);
     if (el) fillInput(el, p.cardNumber);
@@ -304,31 +432,45 @@ async function handlePaymentStep(settings) {
     const el = findFirst('input[id*="billingZip"]', 'input[id*="billing-zip"]', 'input[name*="billingZip"]');
     if (el) fillInput(el, p.billingZip);
   }
+  stopFill();
 
   await nextFrame();
-  if (clickContinue()) {
+  const stopContinue = startTiming('payment_wait_for_continue');
+  const continueClicked = await waitAndClickContinue(5000);
+  stopContinue(continueClicked ? 'clicked' : 'not_found_or_disabled');
+  if (continueClicked) {
     waitForAny([
       { sel: SEL.placeOrder }, { text: 'place order' },
-    ], 15000).then(() => handleReviewStep()).catch(() => {});
+    ], 15000).then(() => handleReviewStep()).catch(() => watchForCheckoutStep(settings));
+  } else {
+    watchForCheckoutStep(settings);
   }
 }
 
 async function handleReviewStep() {
-  console.log('[TCH] placing order');
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      const placeBtn = await waitForAny([
-        { sel: SEL.placeOrder }, { text: 'place order' },
-      ], 4000);
-      if (placeBtn.disabled) { await sleep(50); continue; }
-      placeBtn.click();
-      showToast('Order submitted!', 'success');
-      return;
-    } catch {
-      if (attempt < 5) await sleep(50);
-    }
+  const reviewKey = `${location.pathname}${location.search}`;
+  const now = Date.now();
+  if (lastReviewKey === reviewKey && now - lastReviewAt < T.reviewDedupWindowMs) return;
+  lastReviewKey = reviewKey;
+  lastReviewAt = now;
+
+  const stopReviewWait = startTiming('review_wait_for_place_order');
+  markCheckoutFlow('review_start');
+  try {
+    await waitForAny([
+      { sel: SEL.placeOrder }, { text: 'place order' },
+    ], 4000);
+    stopReviewWait('found');
+  } catch {
+    stopReviewWait('not_found');
   }
-  showToast('Could not place order — click manually', 'persistent');
+
+  console.log('[TCH] review reached: safety stop before Place Order');
+  if (checkoutFlowStart !== null) {
+    const totalMs = Math.round(performance.now() - checkoutFlowStart);
+    console.log(`[TCH] timing checkout_total_to_review: ${totalMs}ms`);
+  }
+  showToast('Reached review — Place Order remains manual.', 'persistent');
 }
 
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
@@ -455,22 +597,30 @@ async function handleMonitoredATC(monitor, product) {
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 
 async function init() {
+  const stopInit = startTiming('init_total', location.pathname);
   const data = await getSettings();
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
+
+  if (page !== 'checkout') {
+    checkoutFlowStart = null;
+  } else {
+    flushNavigationTiming('product_to_checkout', 'nav_product_to_checkout');
+    flushNavigationTiming('cart_to_checkout', 'nav_cart_to_checkout');
+  }
 
   if (data.monitor?.active && page === 'product') {
     const normUrl = normalizeProductUrl(location.href);
     const product = (data.monitor.products || []).find(
       p => normalizeProductUrl(p.url) === normUrl
     );
-    if (product) { await handleMonitoredATC(data.monitor, product); return; }
+    if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
   }
 
-  if (!data.enabled) return;
+  if (!data.enabled) { stopInit('disabled'); return; }
   const hasData = (data.shipping && Object.values(data.shipping).some(Boolean))
     || (data.payment && Object.values(data.payment).some(Boolean));
-  if (!hasData) { showToast('Open popup to add your info', 'error'); return; }
+  if (!hasData) { showToast('Open popup to add your info', 'error'); stopInit('missing_settings'); return; }
 
   const settings = { shipping: data.shipping || {}, payment: data.payment || {} };
 
@@ -480,6 +630,7 @@ async function init() {
   else if (page === 'cart')    await handleCartPage();
   else if (page === 'checkout') await handleCheckoutPage(settings);
   else if (page === 'confirmation') showToast('Order placed!', 'success');
+  stopInit(`done:${page}`);
 }
 
 // ─── SPA NAV WATCHER ─────────────────────────────────────────────────────────
