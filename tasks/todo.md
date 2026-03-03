@@ -42,3 +42,8 @@
 - [x] Update build script to regenerate this bundle automatically.
 - [x] Update docs so users can find the bundle after GitHub "Code → Download ZIP".
 - [x] Verify bundle contents and push to `main`.
+
+## Follow-up: Root installer + TXT readme
+- [x] Place `target-checkout-helper-installer.exe` at repo root for GitHub ZIP users.
+- [x] Convert install readme from `README.md` to `README.txt`.
+- [x] Rebuild artifacts, stage, commit, and push.
