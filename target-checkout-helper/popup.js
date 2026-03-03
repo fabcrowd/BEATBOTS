@@ -199,7 +199,7 @@ async function toggleMonitor() {
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
       products,
-      refreshInterval: parseInt(refreshIntervalIn.value) || 5,
+      refreshInterval: parseInt(refreshIntervalIn.value) || 1,
     });
     monitorActive = true;
     updateMonitorUI();

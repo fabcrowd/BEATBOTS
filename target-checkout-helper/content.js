@@ -9,7 +9,7 @@ const SEL = {
   declineCoverage: '[data-test="espModalContent-declineCoverageButton"]',
   viewCart:        '[data-test="addToCartModalViewCartCheckout"]',
   cartCheckout:    '[data-test="checkout-button"]',
-  placeOrder:      '[data-test="placeOrderButton"]',  // NEVER auto-clicked
+  placeOrder:      '[data-test="placeOrderButton"]',
   cardNumber:      '#creditCardInput-cardNumber',
   cvv:             '#creditCardInput-cvv',
 };
@@ -17,10 +17,10 @@ const SEL = {
 // ─── TIMING ──────────────────────────────────────────────────────────────────
 
 const T = {
-  observerTimeout: 20000,  // Max wait for an element (ms)
-  fieldDelay:      150,    // Delay between filling each form field (ms)
-  postClickDelay:  600,    // Brief pause after clicking a button (ms)
-  navSettleDelay:  1200,   // Wait after URL change before re-running (ms)
+  observerTimeout: 15000,  // Max wait for an element (ms)
+  fieldDelay:      60,     // Delay between filling each form field (ms)
+  postClickDelay:  250,    // Brief pause after clicking a button (ms)
+  navSettleDelay:  500,    // Wait after URL change before re-running (ms)
 };
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ function getPageType() {
 
 // Within /checkout, detect which sub-step is active by DOM presence
 function getCheckoutStep() {
-  if (document.querySelector(SEL.placeOrder))        return 'review';
+  if (document.querySelector(SEL.placeOrder) || findByText('place order')) return 'review';
   if (document.querySelector(SEL.cardNumber))        return 'payment';
 
   // Shipping step: look for name/address fields
@@ -249,10 +249,13 @@ async function handleProductPage(settings) {
 }
 
 async function handleCartPage(settings) {
-  showToast('Proceeding to checkout...');
+  showToast('Proceeding to checkout…');
   try {
-    const checkoutBtn = await waitForElement(SEL.cartCheckout);
-    await sleep(T.postClickDelay);
+    const checkoutBtn = await Promise.any([
+      waitForElement(SEL.cartCheckout, 10000),
+      waitForByText('check out', 10000),
+    ]);
+    await sleep(150);
     checkoutBtn.click();
   } catch {
     showToast('Checkout button not found', 'error');
@@ -268,7 +271,7 @@ async function handleCheckoutPage(settings) {
   } else if (step === 'payment') {
     await handlePaymentStep(settings);
   } else if (step === 'review') {
-    showToast('Ready — review your order and click Place Order', 'persistent');
+    await handleReviewStep();
   } else {
     // Step not yet rendered — watch for DOM changes
     watchForCheckoutStep(settings);
@@ -294,7 +297,7 @@ function watchForCheckoutStep(settings) {
     } else if (step === 'review') {
       handled = true;
       observer.disconnect();
-      showToast('Ready — review your order and click Place Order', 'persistent');
+      await handleReviewStep();
     }
   });
 
@@ -306,8 +309,8 @@ function watchForCheckoutStep(settings) {
 
 async function handleShippingStep(settings) {
   const s = settings.shipping || {};
-  showToast('Filling shipping info...');
-  await sleep(400);
+  showToast('Filling shipping info…');
+  await sleep(150);
 
   // Ordered list of fields with multiple possible selectors per field
   const fields = [
@@ -363,12 +366,11 @@ async function handleShippingStep(settings) {
     }
   }
 
-  await sleep(500);
+  await sleep(200);
   const clicked = await clickContinue();
   if (clicked) {
-    showToast('Shipping filled — advancing...');
-    // Watch for next step
-    setTimeout(() => watchForCheckoutStep(settings), 1500);
+    showToast('Shipping filled — advancing…');
+    setTimeout(() => watchForCheckoutStep(settings), 500);
   } else {
     showToast('Could not find Continue button on shipping step', 'error');
   }
@@ -376,8 +378,8 @@ async function handleShippingStep(settings) {
 
 async function handlePaymentStep(settings) {
   const p = settings.payment || {};
-  showToast('Filling payment info...');
-  await sleep(400);
+  showToast('Filling payment info…');
+  await sleep(150);
 
   // Card number
   if (p.cardNumber) {
@@ -433,17 +435,51 @@ async function handlePaymentStep(settings) {
     }
   }
 
-  await sleep(500);
+  await sleep(200);
   const clicked = await clickContinue();
   if (clicked) {
-    showToast('Payment filled — advancing to review...');
-    // Watch for the review step (Place Order button)
-    waitForElement(SEL.placeOrder, 20000)
-      .then(() => showToast('Ready — review your order and click Place Order', 'persistent'))
-      .catch(() => {});
+    showToast('Payment filled — advancing to review…');
+    Promise.any([
+      waitForElement(SEL.placeOrder, 20000),
+      waitForByText('place order', 20000),
+    ]).then(() => handleReviewStep()).catch(() => {});
   } else {
     showToast('Could not find Continue button on payment step', 'error');
   }
+}
+
+async function handleReviewStep() {
+  showToast('Placing order…');
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const placeBtn = await Promise.any([
+        waitForElement(SEL.placeOrder, 6000),
+        waitForByText('place order', 6000),
+      ]);
+      if (placeBtn.disabled) {
+        await sleep(500);
+        continue;
+      }
+      await sleep(150);
+      placeBtn.click();
+      showToast('Order submitted!', 'success');
+
+      // Watch for errors — if checkout fails, retry
+      await sleep(3000);
+      const errorEl = findByText('try again') || findByText('something went wrong');
+      if (errorEl) {
+        showToast(`Checkout error — retrying (${attempt}/5)…`, 'error');
+        continue;
+      }
+      return;
+    } catch {
+      if (attempt < 5) {
+        showToast(`Place Order attempt ${attempt} failed — retrying…`, 'error');
+        await sleep(400);
+      }
+    }
+  }
+  showToast('Could not place order — click manually', 'persistent');
 }
 
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
@@ -459,22 +495,22 @@ async function handleMonitoredATC(monitor, product) {
 
   showToast(`Monitor: Adding to cart (${currentCount + 1}/${product.qty})…`);
 
+  const interval = monitor.refreshInterval || 1;
+
   let addBtn;
   try {
-    addBtn = await waitForElement(SEL.shipIt, 10000);
+    addBtn = await Promise.any([
+      waitForElement(SEL.shipIt, 6000),
+      waitForElement(SEL.pickup, 6000),
+      waitForByText('add to cart', 6000),
+    ]);
   } catch {
-    try {
-      addBtn = await waitForElement(SEL.pickup, 5000);
-    } catch {
-      const interval = monitor.refreshInterval || 5;
-      showToast(`Monitor: Unavailable — retrying in ${interval}s…`, 'error');
-      setTimeout(() => location.reload(), interval * 1000);
-      return;
-    }
+    showToast(`Monitor: Unavailable — retrying in ${interval}s…`, 'error');
+    setTimeout(() => location.reload(), interval * 1000);
+    return;
   }
 
   if (addBtn.disabled) {
-    const interval = monitor.refreshInterval || 5;
     showToast(`Monitor: Button disabled — retrying in ${interval}s…`, 'error');
     setTimeout(() => location.reload(), interval * 1000);
     return;
@@ -493,19 +529,19 @@ async function handleMonitoredATC(monitor, product) {
   // Wait for ATC confirmation — try data-test selector and text-based matches in parallel
   try {
     await Promise.any([
-      waitForElement(SEL.viewCart, 10000),
-      waitForByText('view cart', 10000),
-      waitForByText('continue shopping', 10000),
+      waitForElement(SEL.viewCart, 8000),
+      waitForByText('view cart', 8000),
+      waitForByText('continue shopping', 8000),
+      waitForByText('added to cart', 8000),
     ]);
   } catch {
-    const interval = monitor.refreshInterval || 5;
     showToast(`Monitor: Add to cart uncertain — retrying in ${interval}s…`, 'error');
     setTimeout(() => location.reload(), interval * 1000);
     return;
   }
 
   // Dismiss the confirmation panel so the page is clean for next reload
-  await sleep(300);
+  await sleep(200);
   const dismissBtn = findByText('continue shopping');
   if (dismissBtn) dismissBtn.click();
 
