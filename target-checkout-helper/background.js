@@ -33,18 +33,22 @@ async function recordCheckoutRetryEvent(event) {
     attempt: Number(event.attempt) || 0,
     maxAttempts: Number(event.maxAttempts) || 0,
     failedAttempts: Number(event.failedAttempts) || 0,
+    mode: String(event.mode || ''),
     reason: String(event.reason || ''),
     page: String(event.page || ''),
     url: String(event.url || ''),
+    watchUrl: String(event.watchUrl || ''),
     delayMs: Number(event.delayMs) || 0,
     ts: Number(event.ts) || Date.now(),
   };
 
-  if (compactEvent.status === 'scheduled') {
+  if (compactEvent.status === 'scheduled' || compactEvent.status === 'watching') {
     telemetry.failedAttemptsCurrentRun = compactEvent.attempt;
     telemetry.totalFailures = (telemetry.totalFailures || 0) + 1;
   } else if (compactEvent.status === 'exhausted') {
     telemetry.failedAttemptsCurrentRun = compactEvent.maxAttempts || telemetry.failedAttemptsCurrentRun;
+  } else if (compactEvent.status === 'cancelled') {
+    telemetry.failedAttemptsCurrentRun = 0;
   } else if (compactEvent.status === 'success') {
     telemetry.lastRunFailedAttempts = compactEvent.failedAttempts;
     telemetry.failedAttemptsCurrentRun = 0;

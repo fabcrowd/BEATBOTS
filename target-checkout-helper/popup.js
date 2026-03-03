@@ -31,8 +31,8 @@ function gatherSettings() {
   }
 
   const retryPolicy = {
-    maxAttempts: parseIntInRange(checkoutRetryMaxIn.value, 1, 20, 4),
-    delaySec: parseIntInRange(checkoutRetryDelayIn.value, 1, 60, 2),
+    maxAttempts: parseIntInRange(checkoutRetryMaxIn.value, 0, 50, 0),
+    delaySec: parseIntInRange(checkoutRetryDelayIn.value, 1, 60, 1),
   };
 
   return { enabled: enableToggle.checked, shipping, payment, retryPolicy };
@@ -57,10 +57,10 @@ function populateFields(data) {
   }
 
   if (data.retryPolicy) {
-    if (data.retryPolicy.maxAttempts) {
+    if (typeof data.retryPolicy.maxAttempts === 'number') {
       checkoutRetryMaxIn.value = String(data.retryPolicy.maxAttempts);
     }
-    if (data.retryPolicy.delaySec) {
+    if (typeof data.retryPolicy.delaySec === 'number') {
       checkoutRetryDelayIn.value = String(data.retryPolicy.delaySec);
     }
   }
@@ -277,10 +277,25 @@ function formatRetryStatus(telemetry) {
   if (!event) return '';
 
   if (event.status === 'scheduled') {
-    return `Retry ${event.attempt}/${event.maxAttempts}: ${event.reason}`;
+    if (event.maxAttempts > 0) {
+      return `Retry ${event.attempt}/${event.maxAttempts}: ${event.reason}`;
+    }
+    return `Retry #${event.attempt} (until cancel): ${event.reason}`;
+  }
+  if (event.status === 'watching') {
+    if (event.maxAttempts > 0) {
+      return `Watching stock (${event.attempt}/${event.maxAttempts}): ${event.reason}`;
+    }
+    return `Watching stock (until cancel): ${event.reason}`;
+  }
+  if (event.status === 'stock_detected') {
+    return 'Stock detected — reloading now';
   }
   if (event.status === 'exhausted') {
     return `Retries exhausted (${event.maxAttempts}): ${event.reason}`;
+  }
+  if (event.status === 'cancelled') {
+    return 'Retries canceled';
   }
   if (event.status === 'success') {
     return `Checkout completed after ${event.failedAttempts || 0} failed attempt(s)`;

@@ -306,7 +306,8 @@ footer {
   margin-bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .monitor-retry input {
@@ -315,6 +316,11 @@ footer {
   text-align: center;
   font-size: 12px;
   margin-bottom: 0;
+}
+
+.retry-note {
+  font-size: 11px;
+  color: #888;
 }
 
 .btn-monitor {

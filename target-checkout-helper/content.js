@@ -21,8 +21,12 @@ const T = {
   checkoutProbeInterval: 60,
   checkoutProbeTimeout: 2500,
   reviewDedupWindowMs: 15000,
-  retryMaxAttempts: 4,
-  retryDelayMs: 1500,
+  retryMaxAttempts: 0, // 0 => run until user cancels
+  retryDelayMs: 1000,
+  retryWatchBaseMs: 900,
+  retryWatchJitterMs: 250,
+  retryMaxDelayMs: 7000,
+  humanChallengeDelayMs: 12000,
   retryStateTtlMs: 20 * 60 * 1000,
 };
 
@@ -121,6 +125,10 @@ const LAST_PRODUCT_URL_KEY = 'tch:lastProductUrl';
 const RETRY_NAV_MARK_KEY = 'tch:checkoutRetryNav';
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
+let stockWatchTimer = null;
+let stockWatchActive = false;
+let stockWatchPolls = 0;
+let runtimeEnabled = true;
 
 function clampInt(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -131,7 +139,7 @@ function clampInt(value, min, max, fallback) {
 function getRetryPolicy(settings) {
   const policy = settings?.retryPolicy || {};
   return {
-    maxAttempts: clampInt(policy.maxAttempts, 1, 20, T.retryMaxAttempts),
+    maxAttempts: clampInt(policy.maxAttempts, 0, 50, T.retryMaxAttempts),
     delayMs: clampInt(policy.delaySec, 1, 60, Math.round(T.retryDelayMs / 1000)) * 1000,
   };
 }
@@ -170,7 +178,14 @@ function clearCheckoutRetryState() {
     clearTimeout(checkoutRetryTimer);
     checkoutRetryTimer = null;
   }
+  if (stockWatchTimer) {
+    clearTimeout(stockWatchTimer);
+    stockWatchTimer = null;
+  }
+  stockWatchActive = false;
+  stockWatchPolls = 0;
   try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
+  try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
 }
 
 function rememberProductUrl(url = location.href) {
@@ -214,6 +229,35 @@ async function reportRetryEvent(event) {
   } catch {}
 }
 
+function isStockWatchReason(reason) {
+  return /ATC button not found|ATC button stayed disabled/i.test(reason);
+}
+
+function hasHumanVerificationChallenge() {
+  const text = (document.body?.innerText || '').toLowerCase();
+  return [
+    'verify you are human',
+    'are you human',
+    'captcha',
+    'unusual traffic',
+    'security check',
+    'robot',
+  ].some((needle) => text.includes(needle));
+}
+
+function getNavigationRetryDelay(policy, attempt) {
+  const growth = 1 + Math.min(Math.max(attempt - 1, 0) * 0.35, 2.0);
+  const jitter = Math.floor(Math.random() * (T.retryWatchJitterMs + 1));
+  return Math.min(Math.round(policy.delayMs * growth) + jitter, T.retryMaxDelayMs);
+}
+
+function getStockWatchDelay(policy, nullStreak = 0) {
+  const base = Math.min(policy.delayMs, T.retryWatchBaseMs);
+  const jitter = Math.floor(Math.random() * (T.retryWatchJitterMs + 1));
+  const nullPenalty = Math.min(nullStreak * 500, 3000);
+  return Math.min(base + jitter + nullPenalty, T.retryMaxDelayMs);
+}
+
 function performRetryNavigation() {
   const remembered = getRememberedProductUrl();
   const destination = remembered || (getPageType() === 'checkout'
@@ -233,11 +277,13 @@ function performRetryNavigation() {
 }
 
 async function scheduleCheckoutRetry(settings, reason, details = {}) {
+  if (!runtimeEnabled) return false;
   if (checkoutRetryScheduled) return true;
 
   const policy = getRetryPolicy(settings);
   const state = readRetryState();
   const nextAttempt = state.failedAttempts + 1;
+  const unlimited = policy.maxAttempts === 0;
   const eventBase = {
     reason,
     page: getPageType(),
@@ -246,7 +292,7 @@ async function scheduleCheckoutRetry(settings, reason, details = {}) {
     ...details,
   };
 
-  if (nextAttempt > policy.maxAttempts) {
+  if (!unlimited && nextAttempt > policy.maxAttempts) {
     writeRetryState({
       failedAttempts: policy.maxAttempts,
       lastFailure: {
@@ -262,6 +308,7 @@ async function scheduleCheckoutRetry(settings, reason, details = {}) {
       status: 'exhausted',
       attempt: policy.maxAttempts,
       maxAttempts: policy.maxAttempts,
+      mode: 'navigation',
       ...eventBase,
     });
     return false;
@@ -276,20 +323,97 @@ async function scheduleCheckoutRetry(settings, reason, details = {}) {
       ts: eventBase.ts,
     },
   });
-  console.warn(`[TCH] retry attempt ${nextAttempt}/${policy.maxAttempts}: ${reason}`);
+  if (unlimited) {
+    console.warn(`[TCH] retry attempt #${nextAttempt} (until canceled): ${reason}`);
+  } else {
+    console.warn(`[TCH] retry attempt ${nextAttempt}/${policy.maxAttempts}: ${reason}`);
+  }
 
-  const delayMs = policy.delayMs * Math.min(nextAttempt, 3);
+  if (isStockWatchReason(reason)) {
+    if (!stockWatchActive) {
+      const watchUrl = getRememberedProductUrl() || normalizeProductUrl(location.href);
+      const policyDelay = Math.max(1, Math.round(policy.delayMs / 1000));
+      stockWatchActive = true;
+      stockWatchPolls = 0;
+      showToast(`Watching stock every ~${policyDelay}s (no reload spam)…`, 'persistent');
+      await reportRetryEvent({
+        status: 'watching',
+        attempt: nextAttempt,
+        maxAttempts: policy.maxAttempts,
+        mode: 'stock_watch',
+        watchUrl,
+        ...eventBase,
+      });
+
+      let nullStreak = 0;
+      const poll = async () => {
+        if (!runtimeEnabled || !stockWatchActive) return;
+        const result = await streamingStockCheck(watchUrl);
+        stockWatchPolls++;
+        if (result === true) {
+          stockWatchActive = false;
+          if (stockWatchTimer) {
+            clearTimeout(stockWatchTimer);
+            stockWatchTimer = null;
+          }
+          console.log(`[TCH] stock watch detected in-stock after ${stockWatchPolls} polls`);
+          await reportRetryEvent({
+            status: 'stock_detected',
+            attempt: nextAttempt,
+            maxAttempts: policy.maxAttempts,
+            mode: 'stock_watch',
+            watchUrl,
+            ...eventBase,
+          });
+          showToast('Stock detected — reloading now', 'success');
+          markRetryNavigation(watchUrl);
+          window.location.href = watchUrl;
+          return;
+        }
+
+        if (result === null) {
+          nullStreak++;
+        } else {
+          nullStreak = 0;
+        }
+        if (stockWatchPolls % 20 === 0) {
+          console.log(`[TCH] stock watch polling: ${stockWatchPolls} checks`);
+        }
+
+        let delayMs = getStockWatchDelay(policy, nullStreak);
+        if (hasHumanVerificationChallenge()) {
+          delayMs = Math.max(delayMs, T.humanChallengeDelayMs);
+          console.warn('[TCH] challenge detected; slowing stock watch polling');
+        }
+        stockWatchTimer = setTimeout(poll, delayMs);
+      };
+      stockWatchTimer = setTimeout(poll, getStockWatchDelay(policy, 0));
+    }
+    return true;
+  }
+
+  let delayMs = getNavigationRetryDelay(policy, nextAttempt);
+  if (hasHumanVerificationChallenge()) {
+    delayMs = Math.max(delayMs, T.humanChallengeDelayMs);
+    console.warn('[TCH] challenge detected; slowing retry navigation cadence');
+  }
   await reportRetryEvent({
     status: 'scheduled',
     attempt: nextAttempt,
     maxAttempts: policy.maxAttempts,
+    mode: 'navigation',
     delayMs,
     ...eventBase,
   });
-  showToast(`Retry ${nextAttempt}/${policy.maxAttempts} in ${Math.round(delayMs / 1000)}s`, 'persistent');
+  if (unlimited) {
+    showToast(`Retry #${nextAttempt} in ${Math.round(delayMs / 1000)}s`, 'persistent');
+  } else {
+    showToast(`Retry ${nextAttempt}/${policy.maxAttempts} in ${Math.round(delayMs / 1000)}s`, 'persistent');
+  }
 
   checkoutRetryScheduled = true;
   checkoutRetryTimer = setTimeout(() => {
+    if (!runtimeEnabled) return;
     checkoutRetryScheduled = false;
     checkoutRetryTimer = null;
     performRetryNavigation();
@@ -823,6 +947,7 @@ async function handleMonitoredATC(monitor, product) {
 async function init() {
   const stopInit = startTiming('init_total', location.pathname);
   const data = await getSettings();
+  runtimeEnabled = !!data.enabled;
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
@@ -841,7 +966,11 @@ async function init() {
     if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
   }
 
-  if (!data.enabled) { stopInit('disabled'); return; }
+  if (!data.enabled) {
+    clearCheckoutRetryState();
+    stopInit('disabled');
+    return;
+  }
   const hasData = (data.shipping && Object.values(data.shipping).some(Boolean))
     || (data.payment && Object.values(data.payment).some(Boolean));
   if (!hasData) { showToast('Open popup to add your info', 'error'); stopInit('missing_settings'); return; }
@@ -881,7 +1010,20 @@ new MutationObserver(() => {
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'SETTINGS_UPDATED') {
     invalidateCache();
-    if (message.enabled) init();
+    runtimeEnabled = !!message.enabled;
+    if (!runtimeEnabled) {
+      clearCheckoutRetryState();
+      document.getElementById('tch-toast')?.remove();
+      reportRetryEvent({
+        status: 'cancelled',
+        reason: 'Manual cancel',
+        page: getPageType(),
+        url: location.href,
+        ts: Date.now(),
+      });
+      return;
+    }
+    init();
   }
 });
 
