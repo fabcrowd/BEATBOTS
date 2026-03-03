@@ -30,4 +30,9 @@
 - [x] Add reproducible builder script (`build_installer_exe.sh`) that outputs installer artifacts.
 - [x] Generate `dist/target-checkout-helper-installer.exe` and bundled `dist/INSTALL.html`.
 - [x] Update `README.md` and `INSTALL.html` with `.exe` install instructions.
-- [ ] Stage, commit, and push changes.
+- [x] Stage, commit, and push changes.
+
+## Follow-up: Clarified OS-specific install docs
+- [x] Update `README.md` with explicit Windows installer and macOS/Linux script sections.
+- [x] Update `INSTALL.html` tabs/content to emphasize Windows `.exe` vs macOS/Linux `install.sh`.
+- [x] Rebuild bundled `dist/INSTALL.html`, stage, commit, and push.

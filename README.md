@@ -2,15 +2,17 @@
 
 Chrome extension to automate Target checkout flow from product page to order review.
 
-## Simplest Windows install (.exe package)
+## Install instructions by OS
 
-Download these three files from `dist/` and keep them in the same folder:
+### Windows (recommended: `.exe` installer)
+
+Download these files from `dist/` and keep them together in the same folder:
 
 - `target-checkout-helper-installer.exe`
 - `target-checkout-helper.zip`
 - `INSTALL.html`
 
-Then:
+Install steps:
 
 1. Double-click `target-checkout-helper-installer.exe`
 2. Chrome opens to `chrome://extensions`
@@ -18,33 +20,31 @@ Then:
 4. Click **Load unpacked**
 5. Select the extracted `target-checkout-helper/` folder shown by the installer
 
-No command-line or admin/root access is required for this flow.
+This is the easiest path for average Windows users (no terminal needed).
 
-## Quick install (using installer files)
+### macOS / Linux (`install.sh`)
 
-### macOS / Linux
-
-From the repository root:
+From the repo root:
 
 `chmod +x install.sh`
 
 `./install.sh`
 
-What this does:
-- Ensures `target-checkout-helper/` exists (extracts from `dist/target-checkout-helper.zip` if needed)
-- Opens Chrome to `chrome://extensions`
-- Prints the exact folder path to use for **Load unpacked**
+Then in Chrome:
 
-### Windows
+1. Open `chrome://extensions` (script can open it for you)
+2. Turn on **Developer mode**
+3. Click **Load unpacked**
+4. Select `target-checkout-helper/`
 
-From the repository root, run:
+Notes:
+- `install.sh` extracts from `dist/target-checkout-helper.zip` if needed
+- No `sudo` is required for normal usage
 
-`install.bat`
+### Windows fallback (`install.bat`)
 
-What this does:
-- Ensures `target-checkout-helper/` exists (extracts from `dist/target-checkout-helper.zip` if needed)
-- Opens Chrome to `chrome://extensions`
-- Prints the exact folder path to use for **Load unpacked**
+If you do not want to use the `.exe` package, run `install.bat` from the repo root.
+It performs the same extract + open-Chrome flow.
 
 ## Install steps in Chrome
 

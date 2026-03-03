@@ -44,7 +44,7 @@
 
 <div class="hero">
   <h1>Target Checkout Helper</h1>
-  <p>Local Chrome extension installer &nbsp;·&nbsp; v1.1.0</p>
+  <p>Windows: .exe installer &nbsp;·&nbsp; macOS/Linux: install.sh &nbsp;·&nbsp; v1.1.0</p>
 </div>
 
 <div class="container">
@@ -52,7 +52,7 @@
 <div class="methods">
   <div class="tab" onclick="switchMethod('exe')">Windows .exe Installer <span class="badge">easiest</span></div>
   <div class="tab active" onclick="switchMethod('unpacked')">Load Unpacked <span class="badge">recommended</span></div>
-  <div class="tab" onclick="switchMethod('script')">Run Installer Script</div>
+  <div class="tab" onclick="switchMethod('script')">macOS/Linux Script</div>
   <div class="tab" onclick="switchMethod('crx')">Use .crx File</div>
 </div>
 
@@ -133,18 +133,17 @@
 <div id="method-script" class="method-content" style="counter-reset: step">
 
 <div class="step">
-  <h3>Run the installer</h3>
-  <p><strong>macOS / Linux:</strong></p>
+  <h3>Run the macOS/Linux installer</h3>
+  <p>From repo root:</p>
+  <div class="path-box">
+    <span id="cmd-chmod">chmod +x install.sh</span>
+    <button class="copy-btn" onclick="copyText('cmd-chmod')">Copy</button>
+  </div>
   <div class="path-box">
     <span id="cmd-sh">./install.sh</span>
     <button class="copy-btn" onclick="copyText('cmd-sh')">Copy</button>
   </div>
-  <p style="margin-top:12px"><strong>Windows:</strong></p>
-  <div class="path-box">
-    <span id="cmd-bat">install.bat</span>
-    <button class="copy-btn" onclick="copyText('cmd-bat')">Copy</button>
-  </div>
-  <p style="margin-top:8px">The script extracts the extension (if needed) and opens Chrome to the Extensions page.</p>
+  <p style="margin-top:8px">No <code>sudo</code> is required. The script extracts the extension (if needed) and opens Chrome Extensions.</p>
 </div>
 
 <div class="step">
@@ -156,6 +155,8 @@
   <h3>Pin &amp; configure</h3>
   <p>Same as the manual method — pin the extension, open the popup, enter your info, and click <strong>Save Settings</strong>.</p>
 </div>
+
+<div class="note"><strong>Windows users:</strong> use the <strong>Windows .exe Installer</strong> tab above for the simplest setup. <code>install.bat</code> is a fallback option.</div>
 </div>
 
 <!-- ==================== METHOD 3: CRX FILE ==================== -->
@@ -200,7 +201,7 @@
     <tr><td>dist/target-checkout-helper.crx</td><td>Packed Chrome extension file</td></tr>
     <tr><td>dist/INSTALL.html</td><td>Installer guide distributed with the .exe package</td></tr>
     <tr><td>install.sh</td><td>One-command installer for macOS / Linux</td></tr>
-    <tr><td>install.bat</td><td>One-command installer for Windows</td></tr>
+    <tr><td>install.bat</td><td>Fallback script installer for Windows</td></tr>
     <tr><td>INSTALL.html</td><td>This guide</td></tr>
   </tbody>
 </table>
