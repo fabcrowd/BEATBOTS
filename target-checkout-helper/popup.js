@@ -6,6 +6,14 @@ const $ = (id) => document.getElementById(id);
 const enableToggle = $('enableToggle');
 const statusText   = $('statusText');
 const saveBtn      = $('saveBtn');
+const checkoutRetryMaxIn = $('checkoutRetryMax');
+const checkoutRetryDelayIn = $('checkoutRetryDelay');
+
+function parseIntInRange(value, min, max, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
 
 function updateStatusText(enabled) {
   statusText.textContent = enabled ? 'Extension active — ready to assist' : 'Extension disabled';
@@ -22,7 +30,12 @@ function gatherSettings() {
     payment[id] = $(id).value.trim();
   }
 
-  return { enabled: enableToggle.checked, shipping, payment };
+  const retryPolicy = {
+    maxAttempts: parseIntInRange(checkoutRetryMaxIn.value, 1, 20, 4),
+    delaySec: parseIntInRange(checkoutRetryDelayIn.value, 1, 60, 2),
+  };
+
+  return { enabled: enableToggle.checked, shipping, payment, retryPolicy };
 }
 
 function populateFields(data) {
@@ -40,6 +53,15 @@ function populateFields(data) {
   if (data.payment) {
     for (const id of PAYMENT_FIELDS) {
       if (data.payment[id]) $(id).value = data.payment[id];
+    }
+  }
+
+  if (data.retryPolicy) {
+    if (data.retryPolicy.maxAttempts) {
+      checkoutRetryMaxIn.value = String(data.retryPolicy.maxAttempts);
+    }
+    if (data.retryPolicy.delaySec) {
+      checkoutRetryDelayIn.value = String(data.retryPolicy.delaySec);
     }
   }
 }
@@ -67,7 +89,7 @@ enableToggle.addEventListener('change', () => {
 
 saveBtn.addEventListener('click', save);
 
-chrome.storage.local.get(['enabled', 'shipping', 'payment'], populateFields);
+chrome.storage.local.get(['enabled', 'shipping', 'payment', 'retryPolicy'], populateFields);
 
 // ─── PRODUCT MONITOR ─────────────────────────────────────────────────────────
 
@@ -108,7 +130,7 @@ function extractProductName(url) {
 
 function renderProducts() {
   productListEl.innerHTML = '';
-  monitorControls.style.display = products.length ? '' : 'none';
+  monitorControls.style.display = '';
 
   products.forEach((p, i) => {
     const li = document.createElement('li');
@@ -210,6 +232,7 @@ async function toggleMonitor() {
 function updateMonitorUI() {
   monitorBtn.textContent = monitorActive ? 'Stop Monitoring' : 'Start Monitoring';
   monitorBtn.classList.toggle('active', monitorActive);
+  monitorBtn.disabled = !monitorActive && !products.length;
   productUrlInput.disabled = monitorActive;
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
@@ -224,6 +247,7 @@ async function pollStatus() {
   try {
     const m = await chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' });
     if (!m) return;
+    const retryStatus = formatRetryStatus(m.checkoutTelemetry);
 
     if (m.active) {
       const parts = (m.products || []).map((p) => {
@@ -231,14 +255,37 @@ async function pollStatus() {
         const count = m.counts?.[normalizeProductUrl(p.url)] || 0;
         return `${name}: ${count}/${p.qty}`;
       });
-      monitorStatusEl.textContent = parts.join(' · ');
+      const textParts = [];
+      if (parts.length) textParts.push(parts.join(' · '));
+      if (retryStatus) textParts.push(retryStatus);
+      monitorStatusEl.textContent = textParts.join(' | ');
     } else if (monitorActive) {
       monitorActive = false;
       updateMonitorUI();
       stopStatusPoll();
-      monitorStatusEl.textContent = 'Done — proceeding to checkout!';
+      monitorStatusEl.textContent = retryStatus
+        ? `Done — proceeding to checkout! | ${retryStatus}`
+        : 'Done — proceeding to checkout!';
+    } else if (retryStatus) {
+      monitorStatusEl.textContent = retryStatus;
     }
   } catch {}
+}
+
+function formatRetryStatus(telemetry) {
+  const event = telemetry?.lastEvent;
+  if (!event) return '';
+
+  if (event.status === 'scheduled') {
+    return `Retry ${event.attempt}/${event.maxAttempts}: ${event.reason}`;
+  }
+  if (event.status === 'exhausted') {
+    return `Retries exhausted (${event.maxAttempts}): ${event.reason}`;
+  }
+  if (event.status === 'success') {
+    return `Checkout completed after ${event.failedAttempts || 0} failed attempt(s)`;
+  }
+  return '';
 }
 
 function startStatusPoll() {
@@ -257,7 +304,10 @@ function stopStatusPoll() {
 
 async function loadMonitorData() {
   const { monitor } = await chrome.storage.local.get('monitor');
-  if (!monitor) return;
+  if (!monitor) {
+    pollStatus();
+    return;
+  }
 
   products = monitor.products || [];
   monitorActive = !!monitor.active;
@@ -266,6 +316,7 @@ async function loadMonitorData() {
   renderProducts();
   updateMonitorUI();
   if (monitorActive) startStatusPoll();
+  else pollStatus();
 }
 
 loadMonitorData();

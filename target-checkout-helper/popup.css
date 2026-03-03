@@ -300,6 +300,23 @@ footer {
   margin-bottom: 0;
 }
 
+.monitor-retry {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.monitor-retry input {
+  width: 44px;
+  padding: 4px 6px;
+  text-align: center;
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
 .btn-monitor {
   width: 100%;
   padding: 8px;
@@ -316,6 +333,11 @@ footer {
 
 .btn-monitor:hover {
   background: #145c33;
+}
+
+.btn-monitor:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .btn-monitor.active {

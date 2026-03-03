@@ -10,6 +10,51 @@ function normalizeProductUrl(url) {
   }
 }
 
+const RETRY_EVENT_LIMIT = 30;
+
+function getDefaultCheckoutTelemetry() {
+  return {
+    failedAttemptsCurrentRun: 0,
+    lastRunFailedAttempts: 0,
+    totalFailures: 0,
+    lastEvent: null,
+    events: [],
+  };
+}
+
+async function recordCheckoutRetryEvent(event) {
+  if (!event || typeof event !== 'object') return;
+
+  const { checkoutTelemetry } = await chrome.storage.local.get('checkoutTelemetry');
+  const telemetry = { ...getDefaultCheckoutTelemetry(), ...(checkoutTelemetry || {}) };
+
+  const compactEvent = {
+    status: String(event.status || 'unknown'),
+    attempt: Number(event.attempt) || 0,
+    maxAttempts: Number(event.maxAttempts) || 0,
+    failedAttempts: Number(event.failedAttempts) || 0,
+    reason: String(event.reason || ''),
+    page: String(event.page || ''),
+    url: String(event.url || ''),
+    delayMs: Number(event.delayMs) || 0,
+    ts: Number(event.ts) || Date.now(),
+  };
+
+  if (compactEvent.status === 'scheduled') {
+    telemetry.failedAttemptsCurrentRun = compactEvent.attempt;
+    telemetry.totalFailures = (telemetry.totalFailures || 0) + 1;
+  } else if (compactEvent.status === 'exhausted') {
+    telemetry.failedAttemptsCurrentRun = compactEvent.maxAttempts || telemetry.failedAttemptsCurrentRun;
+  } else if (compactEvent.status === 'success') {
+    telemetry.lastRunFailedAttempts = compactEvent.failedAttempts;
+    telemetry.failedAttemptsCurrentRun = 0;
+  }
+
+  telemetry.lastEvent = compactEvent;
+  telemetry.events = [...(telemetry.events || []), compactEvent].slice(-RETRY_EVENT_LIMIT);
+  await chrome.storage.local.set({ checkoutTelemetry: telemetry });
+}
+
 // ─── MESSAGE ROUTER ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -33,9 +78,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(() => sendResponse({ ok: true }));
       return true;
 
+    case 'CHECKOUT_RETRY_EVENT':
+      recordCheckoutRetryEvent(message.event)
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
     case 'GET_MONITOR_STATUS':
-      chrome.storage.local.get('monitor', ({ monitor }) => {
-        sendResponse(monitor || { active: false, products: [], counts: {} });
+      chrome.storage.local.get(['monitor', 'checkoutTelemetry'], ({ monitor, checkoutTelemetry }) => {
+        const baseMonitor = monitor || { active: false, products: [], counts: {} };
+        sendResponse({
+          ...baseMonitor,
+          checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
+        });
       });
       return true;
 
@@ -74,7 +129,10 @@ async function startMonitor(products, refreshInterval) {
     tabIds: [],
   };
 
-  await chrome.storage.local.set({ monitor });
+  await chrome.storage.local.set({
+    monitor,
+    checkoutTelemetry: getDefaultCheckoutTelemetry(),
+  });
 
   const tabResults = await Promise.allSettled(
     products.map(p => chrome.tabs.create({ url: p.url, active: false }))

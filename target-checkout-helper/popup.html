@@ -29,6 +29,10 @@
         <div class="monitor-interval">
           Retry every <input type="number" id="refreshInterval" value="1" min="1" max="60"> sec
         </div>
+        <div class="monitor-retry">
+          Checkout retries <input type="number" id="checkoutRetryMax" value="4" min="1" max="20">
+          delay <input type="number" id="checkoutRetryDelay" value="2" min="1" max="60"> sec
+        </div>
         <button id="monitorBtn" class="btn-monitor">Start Monitoring</button>
       </div>
       <p id="monitorStatus" class="monitor-status"></p>

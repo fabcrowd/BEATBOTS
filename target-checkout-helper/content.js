@@ -21,6 +21,9 @@ const T = {
   checkoutProbeInterval: 60,
   checkoutProbeTimeout: 2500,
   reviewDedupWindowMs: 15000,
+  retryMaxAttempts: 4,
+  retryDelayMs: 1500,
+  retryStateTtlMs: 20 * 60 * 1000,
 };
 
 // ─── SETTINGS CACHE ─────────────────────────────────────────────────────────
@@ -29,7 +32,13 @@ let settingsCache = null;
 
 async function getSettings() {
   if (!settingsCache) {
-    settingsCache = await chrome.storage.local.get(['enabled', 'shipping', 'payment', 'monitor']);
+    settingsCache = await chrome.storage.local.get([
+      'enabled',
+      'shipping',
+      'payment',
+      'monitor',
+      'retryPolicy',
+    ]);
   }
   return settingsCache;
 }
@@ -105,6 +114,200 @@ function findByText(text) {
 function normalizeProductUrl(url) {
   try { const u = new URL(url); return u.origin + u.pathname.replace(/\/$/, ''); }
   catch { return url; }
+}
+
+const RETRY_STATE_KEY = 'tch:checkoutRetryState';
+const LAST_PRODUCT_URL_KEY = 'tch:lastProductUrl';
+const RETRY_NAV_MARK_KEY = 'tch:checkoutRetryNav';
+let checkoutRetryTimer = null;
+let checkoutRetryScheduled = false;
+
+function clampInt(value, min, max, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function getRetryPolicy(settings) {
+  const policy = settings?.retryPolicy || {};
+  return {
+    maxAttempts: clampInt(policy.maxAttempts, 1, 20, T.retryMaxAttempts),
+    delayMs: clampInt(policy.delaySec, 1, 60, Math.round(T.retryDelayMs / 1000)) * 1000,
+  };
+}
+
+function readRetryState() {
+  try {
+    const raw = sessionStorage.getItem(RETRY_STATE_KEY);
+    if (!raw) return { failedAttempts: 0, lastFailure: null, updatedAt: Date.now() };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('invalid');
+    if (Date.now() - (parsed.updatedAt || 0) > T.retryStateTtlMs) {
+      return { failedAttempts: 0, lastFailure: null, updatedAt: Date.now() };
+    }
+    return {
+      failedAttempts: Number(parsed.failedAttempts) || 0,
+      lastFailure: parsed.lastFailure || null,
+      updatedAt: Number(parsed.updatedAt) || Date.now(),
+    };
+  } catch {
+    return { failedAttempts: 0, lastFailure: null, updatedAt: Date.now() };
+  }
+}
+
+function writeRetryState(state) {
+  try {
+    sessionStorage.setItem(
+      RETRY_STATE_KEY,
+      JSON.stringify({ ...state, updatedAt: Date.now() })
+    );
+  } catch {}
+}
+
+function clearCheckoutRetryState() {
+  checkoutRetryScheduled = false;
+  if (checkoutRetryTimer) {
+    clearTimeout(checkoutRetryTimer);
+    checkoutRetryTimer = null;
+  }
+  try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
+}
+
+function rememberProductUrl(url = location.href) {
+  try { sessionStorage.setItem(LAST_PRODUCT_URL_KEY, normalizeProductUrl(url)); } catch {}
+}
+
+function getRememberedProductUrl() {
+  try { return sessionStorage.getItem(LAST_PRODUCT_URL_KEY) || ''; }
+  catch { return ''; }
+}
+
+function markRetryNavigation(targetUrl) {
+  try {
+    sessionStorage.setItem(RETRY_NAV_MARK_KEY, JSON.stringify({
+      ts: Date.now(),
+      targetUrl: normalizeProductUrl(targetUrl),
+    }));
+  } catch {}
+}
+
+function consumeRetryNavigationMark(maxAgeMs = 30000) {
+  try {
+    const raw = sessionStorage.getItem(RETRY_NAV_MARK_KEY);
+    if (!raw) return false;
+    sessionStorage.removeItem(RETRY_NAV_MARK_KEY);
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return false;
+    const ts = Number(parsed.ts);
+    if (!Number.isFinite(ts) || Date.now() - ts >= maxAgeMs) return false;
+    const targetUrl = parsed.targetUrl ? normalizeProductUrl(parsed.targetUrl) : '';
+    const currentUrl = normalizeProductUrl(location.href);
+    return !targetUrl || targetUrl === currentUrl;
+  } catch {
+    return false;
+  }
+}
+
+async function reportRetryEvent(event) {
+  try {
+    await chrome.runtime.sendMessage({ type: 'CHECKOUT_RETRY_EVENT', event });
+  } catch {}
+}
+
+function performRetryNavigation() {
+  const remembered = getRememberedProductUrl();
+  const destination = remembered || (getPageType() === 'checkout'
+    ? 'https://www.target.com/cart'
+    : location.href);
+  markRetryNavigation(destination);
+
+  if (remembered) {
+    window.location.href = remembered;
+    return;
+  }
+  if (getPageType() === 'checkout') {
+    window.location.href = 'https://www.target.com/cart';
+    return;
+  }
+  location.reload();
+}
+
+async function scheduleCheckoutRetry(settings, reason, details = {}) {
+  if (checkoutRetryScheduled) return true;
+
+  const policy = getRetryPolicy(settings);
+  const state = readRetryState();
+  const nextAttempt = state.failedAttempts + 1;
+  const eventBase = {
+    reason,
+    page: getPageType(),
+    url: location.href,
+    ts: Date.now(),
+    ...details,
+  };
+
+  if (nextAttempt > policy.maxAttempts) {
+    writeRetryState({
+      failedAttempts: policy.maxAttempts,
+      lastFailure: {
+        reason,
+        page: eventBase.page,
+        url: eventBase.url,
+        ts: eventBase.ts,
+      },
+    });
+    console.error(`[TCH] retry exhausted after ${policy.maxAttempts} attempts: ${reason}`);
+    showToast(`Checkout retries exhausted: ${reason}`, 'error');
+    await reportRetryEvent({
+      status: 'exhausted',
+      attempt: policy.maxAttempts,
+      maxAttempts: policy.maxAttempts,
+      ...eventBase,
+    });
+    return false;
+  }
+
+  writeRetryState({
+    failedAttempts: nextAttempt,
+    lastFailure: {
+      reason,
+      page: eventBase.page,
+      url: eventBase.url,
+      ts: eventBase.ts,
+    },
+  });
+  console.warn(`[TCH] retry attempt ${nextAttempt}/${policy.maxAttempts}: ${reason}`);
+
+  const delayMs = policy.delayMs * Math.min(nextAttempt, 3);
+  await reportRetryEvent({
+    status: 'scheduled',
+    attempt: nextAttempt,
+    maxAttempts: policy.maxAttempts,
+    delayMs,
+    ...eventBase,
+  });
+  showToast(`Retry ${nextAttempt}/${policy.maxAttempts} in ${Math.round(delayMs / 1000)}s`, 'persistent');
+
+  checkoutRetryScheduled = true;
+  checkoutRetryTimer = setTimeout(() => {
+    checkoutRetryScheduled = false;
+    checkoutRetryTimer = null;
+    performRetryNavigation();
+  }, delayMs);
+  return true;
+}
+
+async function markCheckoutSuccess() {
+  const state = readRetryState();
+  const failedAttempts = state.failedAttempts || 0;
+  await reportRetryEvent({
+    status: 'success',
+    failedAttempts,
+    page: getPageType(),
+    url: location.href,
+    ts: Date.now(),
+  });
+  clearCheckoutRetryState();
 }
 
 function waitForAny(specs, timeout = T.observerTimeout) {
@@ -221,9 +424,12 @@ function getCheckoutStep() {
 
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
-async function handleProductPage() {
+async function handleProductPage(settings) {
   console.log('[TCH] handleProductPage');
   prefetchCheckout();
+  const fromRetryNavigation = consumeRetryNavigationMark();
+  if (!fromRetryNavigation) clearCheckoutRetryState();
+  rememberProductUrl(location.href);
 
   const stopFindAtc = startTiming('product_wait_for_atc');
   let addBtn;
@@ -233,7 +439,11 @@ async function handleProductPage() {
       { sel: SEL.stickyATC }, { text: 'add to cart' }, { text: 'preorder' },
     ], 6000);
     stopFindAtc('found');
-  } catch { showToast('ATC button not found', 'error'); return; }
+  } catch {
+    showToast('ATC button not found', 'error');
+    await scheduleCheckoutRetry(settings, 'ATC button not found');
+    return;
+  }
 
   if (addBtn.disabled) {
     const stopEnableAtc = startTiming('product_wait_for_enabled_atc');
@@ -246,6 +456,7 @@ async function handleProductPage() {
       stopEnableAtc('enabled');
     } catch {
       showToast('Button still disabled', 'error');
+      await scheduleCheckoutRetry(settings, 'ATC button stayed disabled');
       return;
     }
   }
@@ -257,7 +468,7 @@ async function handleProductPage() {
   window.location.href = 'https://www.target.com/checkout';
 }
 
-async function handleCartPage() {
+async function handleCartPage(settings) {
   console.log('[TCH] handleCartPage');
   const stopCartCheckout = startTiming('cart_wait_for_checkout_button');
   try {
@@ -296,7 +507,7 @@ async function handleCheckoutPage(settings) {
   console.log('[TCH] checkout step:', step);
   if (step === 'shipping')    return handleShippingStep(settings);
   if (step === 'payment')     return handlePaymentStep(settings);
-  if (step === 'review')      return handleReviewStep();
+  if (step === 'review')      return handleReviewStep(settings);
   watchForCheckoutStep(settings);
 }
 
@@ -334,7 +545,7 @@ function watchForCheckoutStep(settings) {
     }
     if (step === 'shipping') await handleShippingStep(settings);
     else if (step === 'payment') await handlePaymentStep(settings);
-    else if (step === 'review') await handleReviewStep();
+    else if (step === 'review') await handleReviewStep(settings);
   };
 
   const observer = new MutationObserver(async () => {
@@ -354,6 +565,9 @@ function watchForCheckoutStep(settings) {
     if (checkoutStepPollId) {
       clearInterval(checkoutStepPollId);
       checkoutStepPollId = null;
+    }
+    if (!handled) {
+      scheduleCheckoutRetry(settings, 'Checkout step detection timed out');
     }
     checkoutStepPollTimer = null;
   }, T.checkoutProbeTimeout);
@@ -391,6 +605,10 @@ async function handleShippingStep(settings) {
   const stopContinue = startTiming('shipping_wait_for_continue');
   const continueClicked = await waitAndClickContinue(5000);
   stopContinue(continueClicked ? 'clicked' : 'not_found_or_disabled');
+  if (!continueClicked) {
+    await scheduleCheckoutRetry(settings, 'Shipping continue button unavailable');
+    return;
+  }
 
   const addrObs = new MutationObserver(() => {
     const useAddr = findByText('use this address') || findByText('save and continue')
@@ -438,16 +656,18 @@ async function handlePaymentStep(settings) {
   const stopContinue = startTiming('payment_wait_for_continue');
   const continueClicked = await waitAndClickContinue(5000);
   stopContinue(continueClicked ? 'clicked' : 'not_found_or_disabled');
+  if (!continueClicked) {
+    await scheduleCheckoutRetry(settings, 'Payment continue button unavailable');
+    return;
+  }
   if (continueClicked) {
     waitForAny([
       { sel: SEL.placeOrder }, { text: 'place order' },
-    ], 15000).then(() => handleReviewStep()).catch(() => watchForCheckoutStep(settings));
-  } else {
-    watchForCheckoutStep(settings);
+    ], 15000).then(() => handleReviewStep(settings)).catch(() => watchForCheckoutStep(settings));
   }
 }
 
-async function handleReviewStep() {
+async function handleReviewStep(settings) {
   const reviewKey = `${location.pathname}${location.search}`;
   const now = Date.now();
   if (lastReviewKey === reviewKey && now - lastReviewAt < T.reviewDedupWindowMs) return;
@@ -463,6 +683,8 @@ async function handleReviewStep() {
     stopReviewWait('found');
   } catch {
     stopReviewWait('not_found');
+    await scheduleCheckoutRetry(settings, 'Review step missing Place Order button');
+    return;
   }
 
   console.log('[TCH] review reached: safety stop before Place Order');
@@ -470,6 +692,7 @@ async function handleReviewStep() {
     const totalMs = Math.round(performance.now() - checkoutFlowStart);
     console.log(`[TCH] timing checkout_total_to_review: ${totalMs}ms`);
   }
+  await markCheckoutSuccess();
   showToast('Reached review — Place Order remains manual.', 'persistent');
 }
 
@@ -526,6 +749,7 @@ async function streamingStockCheck(url, timeoutMs = 8000) {
 
 async function handleMonitoredATC(monitor, product) {
   console.log('[TCH] monitor ATC for', product.url);
+  rememberProductUrl(product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;
   const interval = monitor.refreshInterval || 1;
@@ -622,14 +846,21 @@ async function init() {
     || (data.payment && Object.values(data.payment).some(Boolean));
   if (!hasData) { showToast('Open popup to add your info', 'error'); stopInit('missing_settings'); return; }
 
-  const settings = { shipping: data.shipping || {}, payment: data.payment || {} };
+  const settings = {
+    shipping: data.shipping || {},
+    payment: data.payment || {},
+    retryPolicy: data.retryPolicy || {},
+  };
 
   if (page === 'product' || page === 'cart') prefetchCheckout();
 
-  if (page === 'product')      await handleProductPage();
-  else if (page === 'cart')    await handleCartPage();
+  if (page === 'product')      await handleProductPage(settings);
+  else if (page === 'cart')    await handleCartPage(settings);
   else if (page === 'checkout') await handleCheckoutPage(settings);
-  else if (page === 'confirmation') showToast('Order placed!', 'success');
+  else if (page === 'confirmation') {
+    await markCheckoutSuccess();
+    showToast('Order placed!', 'success');
+  }
   stopInit(`done:${page}`);
 }
 

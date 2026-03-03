@@ -1,22 +1,21 @@
-# Target Checkout Helper — Checkout Performance Session
+# Target Checkout Helper — Automatic Retry Workflow
 
 ## Status: Complete
 
 ## Plan
-- [x] Add lightweight `[TCH]` timing instrumentation for critical checkout stages.
-- [x] Run baseline manual checkout loops on in-stock Target products (stop at review).
-- [x] Analyze console timing logs and identify the highest-impact bottlenecks.
-- [x] Implement focused performance and safety improvements in `content.js`.
-- [x] Re-run iterative checkout loops to verify timing improvements and behavior.
-- [x] Capture walkthrough artifacts (video + screenshot) showing safe stop at review.
-- [x] Run syntax checks for updated JS files.
-- [x] Stage, commit, and push changes.
+- [x] Add retry policy parameters in popup (max attempts + retry delay).
+- [x] Implement checkout failure retry scheduling in `content.js`.
+- [x] Log retry attempts/reasons to shared extension telemetry.
+- [x] Expose retry telemetry in popup monitor status.
+- [x] Validate automatic success path and forced failure/retry path in Chrome.
+- [x] Run syntax checks for touched JS files.
+- [ ] Stage, commit, and push changes.
 
 ## Notes
 - Never click Place Order automatically; always stop at review.
 - Use real Target login credentials from provided secrets.
 
 ## Review
-- Logged in successfully with provided credentials + 2FA and completed multiple in-stock checkout runs.
-- Added and validated `[TCH]` timing logs, checkout step probing, and deduped review handling.
-- Verified stable behavior: extension reaches review quickly and always stops before Place Order.
+- Confirmed automatic retry behavior on failure with reasoned logs and exhausted-state telemetry in popup.
+- Confirmed off-by-one retry logging fix (`retry exhausted after 4 attempts` with matching popup status).
+- Captured walkthrough artifacts for retry failure/exhaustion behavior and prior successful review-stop flow.
