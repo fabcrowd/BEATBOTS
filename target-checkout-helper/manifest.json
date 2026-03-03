@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Target Checkout Helper",
+  "version": "1.0.0",
+  "description": "Automates Target.com checkout steps — Add to Cart through Order Review. You place the final order.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["*://*.target.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.target.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
