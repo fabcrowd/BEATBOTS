@@ -41,4 +41,4 @@
 - [x] Add a single bundled installer ZIP in `dist/` that contains all Windows install files.
 - [x] Update build script to regenerate this bundle automatically.
 - [x] Update docs so users can find the bundle after GitHub "Code → Download ZIP".
-- [ ] Verify bundle contents and push to `main`.
+- [x] Verify bundle contents and push to `main`.
