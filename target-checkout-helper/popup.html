@@ -17,6 +17,23 @@
   </header>
 
   <main>
+    <!-- Product Monitor Section -->
+    <section class="card">
+      <h2>Product Monitor</h2>
+      <div class="product-input-row">
+        <input type="url" id="productUrl" placeholder="Paste Target product URL">
+        <button id="addProductBtn" class="btn-icon">+</button>
+      </div>
+      <ul id="productList" class="product-list"></ul>
+      <div id="monitorControls" style="display:none">
+        <div class="monitor-interval">
+          Retry every <input type="number" id="refreshInterval" value="1" min="1" max="60"> sec
+        </div>
+        <button id="monitorBtn" class="btn-monitor">Start Monitoring</button>
+      </div>
+      <p id="monitorStatus" class="monitor-status"></p>
+    </section>
+
     <!-- Shipping Section -->
     <section class="card">
       <h2>Shipping</h2>
