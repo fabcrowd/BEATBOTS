@@ -181,7 +181,7 @@ async function runBackgroundPoll() {
     }
 
     const stockMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
-    if (pollCycles % 30 === 0) {
+    if (pollCycles % 60 === 0) {
       const statuses = tcins.map(t => `${t}:${stockMap.get(t)}`).join(' ');
       console.log(`[TCH bg] poll cycle ${pollCycles} results: ${statuses}`);
     }
@@ -201,27 +201,26 @@ async function runBackgroundPoll() {
       let navigated = false;
       if (tabId) {
         try {
-          await chrome.tabs.update(tabId, { url: product.url });
+          await chrome.tabs.update(tabId, { url: product.url, active: true });
           navigated = true;
         } catch { /* tab may have been closed */ }
       }
       if (!navigated) {
-        // Try to find an existing tab already showing this product URL.
         const existing = await chrome.tabs.query({}).catch(() => []);
         const match = existing.find(t => t.url && normalizeProductUrl(t.url) === normUrl);
         if (match) {
-          chrome.tabs.update(match.id, { url: product.url }).catch(() => {});
+          chrome.tabs.update(match.id, { url: product.url, active: true }).catch(() => {});
           navigated = true;
         }
       }
       if (!navigated) {
-        chrome.tabs.create({ url: product.url, active: false }).catch(() => {});
+        chrome.tabs.create({ url: product.url, active: true }).catch(() => {});
       }
       // Avoid hammering the same product multiple times per cycle.
       break;
     }
 
-    await sleep(1000);
+    await sleep(500); // was 1000ms — tighter polling for faster restock detection
   }
   console.log('[TCH bg] background TCIN poll stopped');
 }
@@ -355,6 +354,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Chrome may terminate the service worker after inactivity. The alarm wakes it
 // back up and restarts the polling loop if monitoring is still active.
 
+// Fire every 20 seconds (minimum Chrome allows is ~1 min without unlimitedStorage;
+// 0.5 min = 30s is the practical minimum). Keep at 0.5 to wake the SW promptly.
 chrome.alarms.create('bgPollWatchdog', { periodInMinutes: 0.5 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {

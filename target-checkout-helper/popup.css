@@ -402,6 +402,23 @@ input.error {
   line-height: 1.45;
 }
 
+.option-hint-warn {
+  color: #a04000;
+}
+
+.option-badge {
+  display: inline-block;
+  background: #cc7700;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
 /* Speed comparison display */
 .speed-compare {
   margin-top: 4px;

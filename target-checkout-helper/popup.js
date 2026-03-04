@@ -41,6 +41,7 @@ function gatherSettings() {
     payment,
     retryPolicy,
     useSavedPayment: $('useSavedPayment').checked,
+    autoPlaceOrder: $('autoPlaceOrder').checked,
   };
 }
 
@@ -121,6 +122,10 @@ function populateFields(data) {
     $('useSavedPayment').checked = true;
   }
 
+  if (data.autoPlaceOrder) {
+    $('autoPlaceOrder').checked = true;
+  }
+
   renderSpeedComparison(data.checkoutSpeeds);
 }
 
@@ -148,7 +153,7 @@ enableToggle.addEventListener('change', () => {
 saveBtn.addEventListener('click', save);
 
 chrome.storage.local.get(
-  ['enabled', 'shipping', 'payment', 'retryPolicy', 'useSavedPayment', 'checkoutSpeeds'],
+  ['enabled', 'shipping', 'payment', 'retryPolicy', 'useSavedPayment', 'autoPlaceOrder', 'checkoutSpeeds'],
   populateFields
 );
 
