@@ -35,7 +35,59 @@ function gatherSettings() {
     delaySec: parseIntInRange(checkoutRetryDelayIn.value, 1, 60, 1),
   };
 
-  return { enabled: enableToggle.checked, shipping, payment, retryPolicy };
+  return {
+    enabled: enableToggle.checked,
+    shipping,
+    payment,
+    retryPolicy,
+    useSavedPayment: $('useSavedPayment').checked,
+  };
+}
+
+function renderSpeedComparison(speeds) {
+  const el = $('speedCompare');
+  if (!el) return;
+
+  const entries = Array.isArray(speeds) ? speeds : [];
+  if (!entries.length) { el.style.display = 'none'; return; }
+
+  const saved    = entries.filter(e => e.mode === 'saved');
+  const formfill = entries.filter(e => e.mode === 'formfill');
+
+  const avgMs = (arr) => arr.length
+    ? Math.round(arr.reduce((sum, e) => sum + e.durationMs, 0) / arr.length)
+    : null;
+
+  const fmtSec = (ms) => ms !== null ? `${(ms / 1000).toFixed(1)}s` : 'N/A';
+
+  const savedAvg    = avgMs(saved);
+  const formfillAvg = avgMs(formfill);
+
+  let html = '<div class="speed-rows">';
+  if (saved.length) {
+    html += `<div class="speed-row"><span class="speed-label">Saved payment</span>`
+          + `<span class="speed-val">${fmtSec(savedAvg)} avg`
+          + ` (${saved.length} run${saved.length !== 1 ? 's' : ''})</span></div>`;
+  }
+  if (formfill.length) {
+    html += `<div class="speed-row"><span class="speed-label">Form fill</span>`
+          + `<span class="speed-val">${fmtSec(formfillAvg)} avg`
+          + ` (${formfill.length} run${formfill.length !== 1 ? 's' : ''})</span></div>`;
+  }
+  if (saved.length && formfill.length && savedAvg !== null && formfillAvg !== null) {
+    const diff = formfillAvg - savedAvg;
+    if (diff > 500) {
+      html += `<div class="speed-winner">Saved payment is ${fmtSec(diff)} faster ✓</div>`;
+    } else if (diff < -500) {
+      html += `<div class="speed-winner">Form fill is ${fmtSec(-diff)} faster</div>`;
+    } else {
+      html += `<div class="speed-winner">Both methods are similar speed</div>`;
+    }
+  }
+  html += '</div>';
+
+  el.innerHTML = html;
+  el.style.display = '';
 }
 
 function populateFields(data) {
@@ -64,6 +116,12 @@ function populateFields(data) {
       checkoutRetryDelayIn.value = String(data.retryPolicy.delaySec);
     }
   }
+
+  if (data.useSavedPayment) {
+    $('useSavedPayment').checked = true;
+  }
+
+  renderSpeedComparison(data.checkoutSpeeds);
 }
 
 async function save() {
@@ -89,7 +147,10 @@ enableToggle.addEventListener('change', () => {
 
 saveBtn.addEventListener('click', save);
 
-chrome.storage.local.get(['enabled', 'shipping', 'payment', 'retryPolicy'], populateFields);
+chrome.storage.local.get(
+  ['enabled', 'shipping', 'payment', 'retryPolicy', 'useSavedPayment', 'checkoutSpeeds'],
+  populateFields
+);
 
 // ─── PRODUCT MONITOR ─────────────────────────────────────────────────────────
 
