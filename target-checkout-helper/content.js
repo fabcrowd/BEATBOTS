@@ -562,25 +562,43 @@ async function waitAndClickContinue(timeout = 5000) {
   }
 }
 
-async function cacheApiKeyWhenReady() {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    try {
-      const apiKey = window.__CONFIG__?.services?.auth?.apiKey
-                  || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
-      const redskyBase = window.__CONFIG__?.services?.redsky?.baseUrl || '';
-      if (apiKey) {
-        console.log('[TCH] caching API key for background SW');
-        await chrome.storage.local.set({
-          bgApiKey: apiKey,
-          bgRedskyBase: redskyBase || 'https://redsky.target.com',
-        });
+// window.__CONFIG__ is set by page-side JS (main world) and is NOT directly
+// accessible inside a content script's isolated world. We bridge this by
+// injecting a <script> tag that runs in the main world, reads the config,
+// and dispatches a custom DOM event back to the isolated world.
+function cacheApiKeyWhenReady() {
+  const EVT = '__tch_api_key__';
+  document.addEventListener(EVT, (e) => {
+    const { apiKey, redskyBase } = e.detail || {};
+    if (apiKey) {
+      console.log('[TCH] API key received from page world, caching for SW');
+      chrome.storage.local.set({
+        bgApiKey: apiKey,
+        bgRedskyBase: redskyBase || 'https://redsky.target.com',
+      }).then(() => {
         chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
-        return;
-      }
-    } catch {}
-    await sleep(500);
-  }
-  console.log('[TCH] __CONFIG__ API key not found after 10s');
+      }).catch(() => {});
+    } else {
+      console.log('[TCH] page world: __CONFIG__ not available');
+    }
+  }, { once: true });
+
+  // Inline script executes in the PAGE's main world — full access to window.__CONFIG__.
+  const s = document.createElement('script');
+  s.textContent = `(function(){
+    var EVT='__tch_api_key__', WAIT=10000, INT=250, elapsed=0;
+    function check(){
+      var svc=window.__CONFIG__&&window.__CONFIG__.services;
+      var k=svc?((svc.auth||{}).apiKey||(svc.apiPlatform||{}).apiKey||''):'';
+      var b=svc&&svc.redsky?svc.redsky.baseUrl||'':'';
+      if(k||elapsed>=WAIT){
+        document.dispatchEvent(new CustomEvent(EVT,{detail:{apiKey:k,redskyBase:b}}));
+      } else { elapsed+=INT; setTimeout(check,INT); }
+    }
+    check();
+  })();`;
+  (document.head || document.documentElement).appendChild(s);
+  s.remove();
 }
 
 function prefetchCheckout() {
