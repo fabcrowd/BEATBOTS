@@ -87,13 +87,39 @@ function requestApiKeyFromTabs() {
   });
 }
 
-// ─── TCIN STOCK CHECK (BATCH) ────────────────────────────────────────────────
+// ─── TCIN STOCK CHECK ────────────────────────────────────────────────────────
 
+// Single-TCIN check using product_fulfillment_v1 (known-good for preorders).
+async function checkSingleTcin(tcin, apiKey, redskyBase) {
+  const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
+  const url  = `${base}/redsky_aggregations/v1/web/product_fulfillment_v1`
+    + `?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return parseFulfillmentBlock(json?.data?.product?.fulfillment);
+  } catch {
+    return null;
+  }
+}
+
+// Batch check using product_summary_with_fulfillment_v1. For any TCIN that
+// returns undefined (batch endpoint returned no data), falls back to the
+// single-TCIN product_fulfillment_v1 endpoint which is authoritative for
+// preorder items.
 async function checkTcinsStock(tcins, apiKey, redskyBase) {
   if (!tcins.length || !apiKey) return new Map();
   const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
   const url  = `${base}/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1`
     + `?key=${encodeURIComponent(apiKey)}&tcins=${tcins.join(',')}`;
+
+  const out = new Map();
   try {
     const res = await fetch(url, {
       cache: 'no-store',
@@ -101,12 +127,22 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       signal: AbortSignal.timeout(4000),
     });
-    if (!res.ok) return new Map();
-    const json = await res.json();
-    return parseBatchFulfillmentResponse(json);
-  } catch {
-    return new Map();
+    if (res.ok) {
+      const json = await res.json();
+      const batchMap = parseBatchFulfillmentResponse(json);
+      for (const [k, v] of batchMap) out.set(k, v);
+    }
+  } catch {}
+
+  // For TCINs not covered by the batch endpoint, fall back to individual calls.
+  const missing = tcins.filter(t => out.get(t) === undefined);
+  if (missing.length) {
+    await Promise.all(missing.map(async (tcin) => {
+      const result = await checkSingleTcin(tcin, apiKey, redskyBase);
+      if (result !== null) out.set(tcin, result);
+    }));
   }
+  return out;
 }
 
 // ─── BACKGROUND POLL LOOP ────────────────────────────────────────────────────
