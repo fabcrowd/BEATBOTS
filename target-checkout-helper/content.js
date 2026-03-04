@@ -1287,6 +1287,17 @@ async function init() {
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
+  // Relay the Target API key to the background service worker so it can poll
+  // the RedSky fulfillment API directly (unthrottled, no tab dependency).
+  try {
+    const apiKey   = window.__CONFIG__?.services?.auth?.apiKey
+                  || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
+    const redskyBase = window.__CONFIG__?.services?.redsky?.baseUrl || '';
+    if (apiKey) {
+      chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
+    }
+  } catch {}
+
   if (page !== 'checkout') {
     checkoutFlowStart = null;
   } else {
@@ -1346,6 +1357,18 @@ new MutationObserver(() => {
 // ─── MESSAGE LISTENER ────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'REQUEST_API_KEY') {
+    try {
+      const apiKey = window.__CONFIG__?.services?.auth?.apiKey
+                  || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
+      const redskyBase = window.__CONFIG__?.services?.redsky?.baseUrl || '';
+      if (apiKey) {
+        chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
+      }
+    } catch {}
+    return;
+  }
+
   if (message.type === 'SETTINGS_UPDATED') {
     invalidateCache();
     runtimeEnabled = !!message.enabled;

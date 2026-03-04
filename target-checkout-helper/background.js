@@ -1,5 +1,8 @@
 // background.js — Service worker
-// Relays messages between popup/content scripts + orchestrates product monitoring
+// Relays messages between popup/content scripts + orchestrates product monitoring.
+// Background TCIN polling runs here — no browser tab throttling.
+
+// ─── UTILITIES ───────────────────────────────────────────────────────────────
 
 function normalizeProductUrl(url) {
   try {
@@ -9,6 +12,162 @@ function normalizeProductUrl(url) {
     return url;
   }
 }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function extractTcin(url) {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/A-(\d{6,10})/i);
+    if (m?.[1]) return m[1];
+    const q = u.searchParams.get('tcin');
+    if (q && /^\d{6,10}$/.test(q)) return q;
+    return null;
+  } catch { return null; }
+}
+
+// ─── STOCK STATUS PARSING ────────────────────────────────────────────────────
+
+const SELLABLE_STATUSES = new Set([
+  'IN_STOCK', 'LIMITED_STOCK', 'PRE_ORDER_SELLABLE',
+  'BACKORDER_AVAILABLE', 'BACKORDERED', 'AVAILABLE',
+]);
+const BLOCKED_RE = /(OUT_OF_STOCK|UNSELLABLE|UNAVAILABLE|NOT_AVAILABLE|NO_INVENTORY|INVENTORY_UNAVAILABLE)/i;
+
+function parseFulfillmentBlock(fulfillment) {
+  if (!fulfillment || typeof fulfillment !== 'object') return null;
+  const shipping = fulfillment.shipping_options || {};
+  const status = String(shipping.availability_status || '').toUpperCase();
+  const qty = Number(shipping.available_to_promise_quantity) || 0;
+  const soldOut = fulfillment.sold_out === true;
+  const oosAll  = fulfillment.is_out_of_stock_in_all_store_locations === true;
+  const sellable = qty > 0 || SELLABLE_STATUSES.has(status);
+  const blocked  = soldOut || BLOCKED_RE.test(status) || (oosAll && qty <= 0 && !sellable);
+  if (sellable && !soldOut) return true;
+  if (blocked) return false;
+  return null;
+}
+
+// Parse the batch product_summary_with_fulfillment_v1 response.
+// Returns a Map of tcin (string) → true | false | null.
+function parseBatchFulfillmentResponse(payload) {
+  const out = new Map();
+  const products = payload?.data?.products ?? [];
+  for (const p of products) {
+    const tcin = String(p.tcin ?? '');
+    if (tcin) out.set(tcin, parseFulfillmentBlock(p.fulfillment));
+  }
+  return out;
+}
+
+// ─── BACKGROUND POLLING STATE ────────────────────────────────────────────────
+
+let bgPollActive     = false;
+let cachedApiKey     = '';
+let cachedRedskyBase = 'https://redsky.target.com';
+// Tracks which tab is assigned to which normalised product URL so we can
+// navigate exactly the right tab when a restock is detected.
+let urlToTabId       = {};
+
+// Load a previously-cached API key from storage (survives SW termination).
+async function loadCachedApiKey() {
+  const { bgApiKey, bgRedskyBase } = await chrome.storage.local.get(['bgApiKey', 'bgRedskyBase']).catch(() => ({}));
+  if (bgApiKey && !cachedApiKey) {
+    cachedApiKey = bgApiKey;
+    if (bgRedskyBase) cachedRedskyBase = bgRedskyBase;
+  }
+}
+
+// Ask all open Target tabs to re-send their API key (used after SW restart).
+function requestApiKeyFromTabs() {
+  chrome.tabs.query({ url: '*://*.target.com/*' }, (tabs) => {
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, { type: 'REQUEST_API_KEY' }).catch(() => {});
+    }
+  });
+}
+
+// ─── TCIN STOCK CHECK (BATCH) ────────────────────────────────────────────────
+
+async function checkTcinsStock(tcins, apiKey, redskyBase) {
+  if (!tcins.length || !apiKey) return new Map();
+  const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
+  const url  = `${base}/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1`
+    + `?key=${encodeURIComponent(apiKey)}&tcins=${tcins.join(',')}`;
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return new Map();
+    const json = await res.json();
+    return parseBatchFulfillmentResponse(json);
+  } catch {
+    return new Map();
+  }
+}
+
+// ─── BACKGROUND POLL LOOP ────────────────────────────────────────────────────
+
+async function runBackgroundPoll() {
+  bgPollActive = true;
+  console.log('[TCH bg] background TCIN poll started');
+
+  while (bgPollActive) {
+    const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
+    if (!monitor?.active) { bgPollActive = false; break; }
+    if (!cachedApiKey) { await sleep(1000); continue; }
+
+    const pendingProducts = (monitor.products || []).filter(p => {
+      const n = normalizeProductUrl(p.url);
+      return (monitor.counts?.[n] || 0) < p.qty;
+    });
+    if (!pendingProducts.length) { await sleep(1000); continue; }
+
+    const tcins = pendingProducts.map(p => extractTcin(p.url)).filter(Boolean);
+    if (!tcins.length) { await sleep(1000); continue; }
+
+    const stockMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
+
+    for (const product of pendingProducts) {
+      if (!bgPollActive) break;
+      const tcin = extractTcin(product.url);
+      if (!tcin) continue;
+      const inStock = stockMap.get(tcin);
+      if (inStock !== true) continue;
+
+      // Restock detected! Navigate the assigned monitor tab to the product page.
+      const normUrl = normalizeProductUrl(product.url);
+      const tabId = urlToTabId[normUrl];
+      console.log(`[TCH bg] RESTOCK: tcin=${tcin} url=${product.url} tabId=${tabId}`);
+      if (tabId) {
+        chrome.tabs.update(tabId, { url: product.url }).catch(() => {});
+      } else {
+        // No assigned tab — create one (safety fallback).
+        chrome.tabs.create({ url: product.url, active: false }).catch(() => {});
+      }
+      // Avoid hammering the same product multiple times per cycle.
+      break;
+    }
+
+    await sleep(1000);
+  }
+  console.log('[TCH bg] background TCIN poll stopped');
+}
+
+async function ensureBackgroundPollRunning() {
+  if (!cachedApiKey) await loadCachedApiKey();
+  if (!bgPollActive && cachedApiKey) {
+    runBackgroundPoll();
+  } else if (!cachedApiKey) {
+    // Still no key — ask open tabs to resend it.
+    requestApiKeyFromTabs();
+  }
+}
+
+// ─── TELEMETRY ───────────────────────────────────────────────────────────────
 
 const RETRY_EVENT_LIMIT = 30;
 
@@ -98,9 +257,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    // Content scripts send the Target API key so the service worker can poll
+    // the fulfillment API directly, without relying on throttled tab timers.
+    case 'CACHE_API_KEY': {
+      const key  = String(message.apiKey  || '');
+      const base = String(message.redskyBase || '');
+      if (key && key !== cachedApiKey) {
+        cachedApiKey = key;
+        if (base) cachedRedskyBase = base;
+        // Persist so we survive future SW termination/restart cycles.
+        chrome.storage.local.set({ bgApiKey: key, bgRedskyBase: cachedRedskyBase }).catch(() => {});
+        console.log('[TCH bg] API key cached; ensuring poll is running');
+        chrome.storage.local.get('monitor').then(({ monitor }) => {
+          if (monitor?.active) ensureBackgroundPollRunning();
+        });
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
     default:
       sendResponse({ ok: true });
       return true;
+  }
+});
+
+// ─── ALARM: WATCHDOG ─────────────────────────────────────────────────────────
+// Chrome may terminate the service worker after inactivity. The alarm wakes it
+// back up and restarts the polling loop if monitoring is still active.
+
+chrome.alarms.create('bgPollWatchdog', { periodInMinutes: 0.5 });
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== 'bgPollWatchdog') return;
+  const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
+  if (monitor?.active && !bgPollActive) {
+    console.log('[TCH bg] watchdog: restarting poll (was inactive)');
+    ensureBackgroundPollRunning();
   }
 });
 
@@ -117,13 +310,10 @@ function broadcastToTarget(message) {
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
 
 async function startMonitor(products, refreshInterval) {
-  // Clean up any previous monitoring session first
   await stopMonitor();
 
   const counts = {};
-  for (const p of products) {
-    counts[normalizeProductUrl(p.url)] = 0;
-  }
+  for (const p of products) counts[normalizeProductUrl(p.url)] = 0;
 
   const monitor = {
     active: true,
@@ -138,17 +328,31 @@ async function startMonitor(products, refreshInterval) {
     checkoutTelemetry: getDefaultCheckoutTelemetry(),
   });
 
+  // Open one background tab per product for the content-script ATC click
+  // after the background poll navigates it on restock detection.
   const tabResults = await Promise.allSettled(
     products.map(p => chrome.tabs.create({ url: p.url, active: false }))
   );
-  monitor.tabIds = tabResults
-    .filter(r => r.status === 'fulfilled')
-    .map(r => r.value.id);
+  monitor.tabIds = [];
+  urlToTabId = {};
+  for (let i = 0; i < products.length; i++) {
+    if (tabResults[i].status === 'fulfilled') {
+      const tabId = tabResults[i].value.id;
+      monitor.tabIds.push(tabId);
+      urlToTabId[normalizeProductUrl(products[i].url)] = tabId;
+    }
+  }
 
   await chrome.storage.local.set({ monitor });
+
+  // Start background TCIN polling immediately if we already have the API key.
+  // Otherwise it will start as soon as CACHE_API_KEY is received.
+  ensureBackgroundPollRunning();
 }
 
 async function stopMonitor() {
+  bgPollActive = false;
+
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) return;
 
@@ -156,6 +360,7 @@ async function stopMonitor() {
     try { await chrome.tabs.remove(tabId); } catch {}
   }
 
+  urlToTabId = {};
   monitor.active = false;
   monitor.tabIds = [];
   await chrome.storage.local.set({ monitor });
@@ -187,6 +392,7 @@ async function handleATCSuccess(url, tabId) {
   });
 
   if (allDone) {
+    bgPollActive = false;
     chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
 
     for (const tid of monitor.tabIds || []) {
