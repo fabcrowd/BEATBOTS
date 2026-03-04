@@ -351,6 +351,13 @@ async function scheduleCheckoutRetry(settings, reason, details = {}) {
         const result = await streamingStockCheck(watchUrl);
         stockWatchPolls++;
         if (result === true) {
+          const confirmResult = await streamingStockCheck(watchUrl, 8000, {
+            requireFullParse: true,
+          });
+          if (confirmResult !== true) {
+            stockWatchTimer = setTimeout(poll, getStockWatchDelay(policy, nullStreak));
+            return;
+          }
           stockWatchActive = false;
           if (stockWatchTimer) {
             clearTimeout(stockWatchTimer);
@@ -824,17 +831,152 @@ async function handleReviewStep(settings) {
 
 const OOS_STRINGS = ['Preorders have sold out', 'Out of stock', 'Sold out',
   'This item is not available', 'Item not available', 'Currently unavailable'];
-const IN_STOCK_STRINGS = ['shippingButton', 'shipItButton', 'orderPickupButton', '>Add to cart<'];
+const WEAK_IN_STOCK_STRINGS = ['>Add to cart<'];
+const FULFILLMENT_SELLABLE_STATUSES = new Set([
+  'IN_STOCK',
+  'LIMITED_STOCK',
+  'PRE_ORDER_SELLABLE',
+  'BACKORDER_AVAILABLE',
+  'BACKORDERED',
+  'AVAILABLE',
+]);
+const FULFILLMENT_BLOCKED_RE = /(OUT_OF_STOCK|UNSELLABLE|UNAVAILABLE|NOT_AVAILABLE|NO_INVENTORY|INVENTORY_UNAVAILABLE)/i;
+const ENABLED_ATC_PATTERNS = [
+  { name: 'ship_it_enabled', regex: /<button\b(?=[^>]*data-test=["']shipItButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'shipping_enabled', regex: /<button\b(?=[^>]*data-test=["']shippingButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'pickup_enabled', regex: /<button\b(?=[^>]*data-test=["']orderPickupButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'sticky_atc_enabled', regex: /<[^>]*data-test=["']StickyAddToCart["'][\s\S]{0,240}<button\b(?![^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'fulfillment_add_to_cart_enabled', regex: /fulfillmentSectionAddToCartButtonWrapper[\s\S]{0,260}<button\b(?![^>]*\bdisabled\b)[^>]*>\s*add to cart\s*<\/button>/i },
+];
+const DISABLED_ATC_PATTERNS = [
+  { name: 'ship_it_disabled', regex: /<button\b(?=[^>]*data-test=["']shipItButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'shipping_disabled', regex: /<button\b(?=[^>]*data-test=["']shippingButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'pickup_disabled', regex: /<button\b(?=[^>]*data-test=["']orderPickupButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'sticky_atc_disabled', regex: /<[^>]*data-test=["']StickyAddToCart["'][\s\S]{0,240}<button\b(?=[^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'fulfillment_add_to_cart_disabled', regex: /fulfillmentSectionAddToCartButtonWrapper[\s\S]{0,260}<button\b(?=[^>]*\bdisabled\b)[^>]*>\s*add to cart\s*<\/button>/i },
+];
+
+function findCaseInsensitiveStringMatch(haystack, needles) {
+  const lowerHaystack = haystack.toLowerCase();
+  for (const needle of needles) {
+    if (lowerHaystack.includes(needle.toLowerCase())) return needle;
+  }
+  return null;
+}
+
+function findRegexSignalMatch(haystack, patterns) {
+  for (const pattern of patterns) {
+    if (pattern.regex.test(haystack)) return pattern.name;
+  }
+  return null;
+}
+
+function analyzeStockSignals(html) {
+  return {
+    oosMatch: findCaseInsensitiveStringMatch(html, OOS_STRINGS),
+    weakInStockMatch: findCaseInsensitiveStringMatch(html, WEAK_IN_STOCK_STRINGS),
+    enabledATCMatch: findRegexSignalMatch(html, ENABLED_ATC_PATTERNS),
+    disabledATCMatch: findRegexSignalMatch(html, DISABLED_ATC_PATTERNS),
+  };
+}
+
+function extractTcinFromUrl(url) {
+  try {
+    const parsed = new URL(url, location.href);
+    const pathMatch = parsed.pathname.match(/\/A-(\d{6,10})/i);
+    if (pathMatch?.[1]) return pathMatch[1];
+    const queryTcin = parsed.searchParams.get('tcin');
+    if (queryTcin && /^\d{6,10}$/.test(queryTcin)) return queryTcin;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function buildFulfillmentApiUrl(productUrl) {
+  const tcin = extractTcinFromUrl(productUrl);
+  if (!tcin) return null;
+
+  const cfg = window.__CONFIG__?.services || {};
+  const baseUrl = (cfg.redsky?.baseUrl || 'https://redsky.target.com').replace(/\/$/, '');
+  const endpoint = (cfg.redsky?.apis?.redskyAggregations?.endpointPaths?.productFulfillment
+    || 'redsky_aggregations/v1/web/product_fulfillment_v1').replace(/^\/+/, '');
+  const apiKey = cfg.auth?.apiKey || cfg.apiPlatform?.apiKey || '';
+  if (!apiKey) return null;
+
+  return `${baseUrl}/${endpoint}?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
+}
+
+function parseFulfillmentStockStatus(payload) {
+  const fulfillment = payload?.data?.product?.fulfillment;
+  if (!fulfillment || typeof fulfillment !== 'object') {
+    return { result: null, status: '', qty: 0, soldOut: false, oosAllStores: false };
+  }
+
+  const shipping = fulfillment.shipping_options || {};
+  const status = String(shipping.availability_status || '').toUpperCase();
+  const qtyValue = Number(shipping.available_to_promise_quantity);
+  const qty = Number.isFinite(qtyValue) ? qtyValue : 0;
+  const soldOut = fulfillment.sold_out === true;
+  const oosAllStores = fulfillment.is_out_of_stock_in_all_store_locations === true;
+
+  const sellable = qty > 0 || FULFILLMENT_SELLABLE_STATUSES.has(status);
+  const blocked = soldOut
+    || FULFILLMENT_BLOCKED_RE.test(status)
+    || (oosAllStores && qty <= 0 && !sellable);
+
+  if (sellable) {
+    return { result: true, status, qty, soldOut, oosAllStores };
+  }
+  if (blocked) {
+    return { result: false, status, qty, soldOut, oosAllStores };
+  }
+  return { result: null, status, qty, soldOut, oosAllStores };
+}
+
+async function checkStockFromFulfillmentApi(url, timeoutMs = 3000) {
+  const fulfillmentUrl = buildFulfillmentApiUrl(url);
+  if (!fulfillmentUrl) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(fulfillmentUrl, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+
+    const payload = await res.json();
+    const parsed = parseFulfillmentStockStatus(payload);
+    return parsed.result;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function checkStockFromHTML(html) {
-  for (const s of OOS_STRINGS) { if (html.includes(s)) return false; }
-  for (const s of IN_STOCK_STRINGS) { if (html.includes(s)) return true; }
+  const signals = analyzeStockSignals(html);
+  if (signals.enabledATCMatch) return true;
+  if (signals.oosMatch || signals.disabledATCMatch) return false;
+  // Weak "Add to cart" text appears in disabled/preorder contexts; treat as inconclusive.
+  if (signals.weakInStockMatch) return false;
   return false;
 }
 
-// Streaming stock check — reads the response in chunks and terminates early
-// as soon as a stock-status string is found, avoiding full page download.
-async function streamingStockCheck(url, timeoutMs = 8000) {
+// Stock check uses RedSky fulfillment API first (authoritative + fast).
+// If unavailable, it falls back to streaming page HTML with conservative parsing.
+async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
+  const requireFullParse = options?.requireFullParse === true;
+  const fulfillmentResult = await checkStockFromFulfillmentApi(url, Math.min(timeoutMs, 3000));
+  if (fulfillmentResult !== null) {
+    return fulfillmentResult;
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -850,20 +992,27 @@ async function streamingStockCheck(url, timeoutMs = 8000) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    let loggedWeakCandidate = false;
 
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
 
-      for (const s of OOS_STRINGS) {
-        if (buf.includes(s)) { reader.cancel(); return false; }
+      const signals = analyzeStockSignals(buf);
+      if (signals.oosMatch || signals.disabledATCMatch) {
+        reader.cancel();
+        return false;
       }
-      for (const s of IN_STOCK_STRINGS) {
-        if (buf.includes(s)) { reader.cancel(); return true; }
+      if (signals.enabledATCMatch) {
+        if (!requireFullParse) {
+          reader.cancel();
+          return true;
+        }
+      } else if (signals.weakInStockMatch && !loggedWeakCandidate) {
+        loggedWeakCandidate = true;
       }
     }
-
     return checkStockFromHTML(buf);
   } catch {
     clearTimeout(timer);
@@ -927,9 +1076,19 @@ async function handleMonitoredATC(monitor, product) {
   console.log('[TCH] passive polling for', normUrl);
 
   const pollId = setInterval(async () => {
+    if (!runtimeEnabled) {
+      clearInterval(pollId);
+      return;
+    }
     pollCount++;
-    const result = await streamingStockCheck(location.href);
+    const result = await streamingStockCheck(normUrl);
     if (result === true) {
+      const confirmResult = await streamingStockCheck(normUrl, 8000, {
+        requireFullParse: true,
+      });
+      if (confirmResult !== true) {
+        return;
+      }
       clearInterval(pollId);
       console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
       showToast('STOCK DETECTED — reloading!', 'success');
