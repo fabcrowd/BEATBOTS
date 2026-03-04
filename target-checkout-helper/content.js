@@ -1287,14 +1287,23 @@ async function init() {
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
-  // Relay the Target API key to the background service worker so it can poll
-  // the RedSky fulfillment API directly (unthrottled, no tab dependency).
+  // Write the Target API key directly to storage so the background SW can poll
+  // RedSky without relying on message-passing (which can fail when SW is dormant).
   try {
-    const apiKey   = window.__CONFIG__?.services?.auth?.apiKey
-                  || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
+    const apiKey     = window.__CONFIG__?.services?.auth?.apiKey
+                    || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
     const redskyBase = window.__CONFIG__?.services?.redsky?.baseUrl || '';
     if (apiKey) {
-      chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
+      console.log('[TCH] caching API key for background SW');
+      chrome.storage.local.set({
+        bgApiKey: apiKey,
+        bgRedskyBase: redskyBase || 'https://redsky.target.com',
+      }).then(() => {
+        // Also ping the SW in case it is already awake — it will start polling immediately.
+        chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
+      }).catch(() => {});
+    } else {
+      console.log('[TCH] window.__CONFIG__ API key not available yet');
     }
   } catch {}
 

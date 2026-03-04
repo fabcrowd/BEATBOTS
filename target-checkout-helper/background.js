@@ -113,7 +113,8 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
 
 async function runBackgroundPoll() {
   bgPollActive = true;
-  console.log('[TCH bg] background TCIN poll started');
+  let pollCycles = 0;
+  console.log('[TCH bg] background TCIN poll started — key:', cachedApiKey.slice(0, 12) + '...');
 
   while (bgPollActive) {
     const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
@@ -129,7 +130,16 @@ async function runBackgroundPoll() {
     const tcins = pendingProducts.map(p => extractTcin(p.url)).filter(Boolean);
     if (!tcins.length) { await sleep(1000); continue; }
 
+    pollCycles++;
+    if (pollCycles % 30 === 0) {
+      console.log(`[TCH bg] poll cycle ${pollCycles} — watching ${tcins.length} TCINs: ${tcins.join(',')}`);
+    }
+
     const stockMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
+    if (pollCycles % 30 === 0) {
+      const statuses = tcins.map(t => `${t}:${stockMap.get(t)}`).join(' ');
+      console.log(`[TCH bg] poll cycle ${pollCycles} results: ${statuses}`);
+    }
 
     for (const product of pendingProducts) {
       if (!bgPollActive) break;
@@ -291,9 +301,12 @@ chrome.alarms.create('bgPollWatchdog', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== 'bgPollWatchdog') return;
   const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
-  if (monitor?.active && !bgPollActive) {
-    console.log('[TCH bg] watchdog: restarting poll (was inactive)');
-    ensureBackgroundPollRunning();
+  if (!monitor?.active) return;
+  if (!bgPollActive) {
+    console.log('[TCH bg] watchdog: restarting poll (was inactive), cachedApiKey:', cachedApiKey ? 'present' : 'MISSING');
+    await ensureBackgroundPollRunning();
+  } else {
+    console.log('[TCH bg] watchdog: poll running OK');
   }
 });
 
