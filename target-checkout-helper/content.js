@@ -1159,10 +1159,13 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       buf += decoder.decode(value, { stream: true });
 
       const signals = analyzeStockSignals(buf);
-      if (signals.oosMatch || signals.disabledATCMatch) {
+      // A disabled button is unambiguous — item is OOS; no need to read further.
+      if (signals.disabledATCMatch) {
         reader.cancel();
         return false;
       }
+      // An enabled button takes priority over any OOS text that may appear earlier in
+      // the HTML stream (e.g. "Preorders have sold out" above the button on restock).
       if (signals.enabledATCMatch) {
         if (!requireFullParse) {
           reader.cancel();
@@ -1171,6 +1174,8 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       } else if (signals.weakInStockMatch && !loggedWeakCandidate) {
         loggedWeakCandidate = true;
       }
+      // OOS text alone does NOT cancel the read — button state is authoritative.
+      // checkStockFromHTML at end checks enabledATCMatch first.
     }
     return checkStockFromHTML(buf);
   } catch {
@@ -1218,13 +1223,26 @@ async function handleMonitoredATC(monitor, product) {
     showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
     addBtn.click();
 
+    // Decline any protection/coverage upsell modal immediately.
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 300);
 
-    await sleep(800);
+    // Wait for the cart-confirmation modal to appear. "View Cart & Check Out" confirms
+    // the item was added; "continue shopping" dismisses without navigating. Either signals
+    // success. Give up to 2.5s to handle slow preorder cart-add responses.
+    let cartConfirmed = false;
+    try {
+      await waitForAny([
+        { sel: SEL.viewCart }, { text: 'continue shopping' }, { text: 'view cart' },
+      ], 2500);
+      cartConfirmed = true;
+    } catch { /* modal didn't appear — item may still have been added */ }
+
+    // Dismiss "continue shopping" so the monitor tab stays on the product page.
     const dismissBtn = findByText('continue shopping');
     if (dismissBtn) dismissBtn.click();
 
     showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
+    console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}`);
     chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
     return;
   }
