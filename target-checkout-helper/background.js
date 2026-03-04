@@ -152,6 +152,15 @@ async function runBackgroundPoll() {
   let pollCycles = 0;
   console.log('[TCH bg] background TCIN poll started — key:', cachedApiKey.slice(0, 12) + '...');
 
+  // Restore urlToTabId from storage (lost when service worker was terminated).
+  const { monitor: mon0 } = await chrome.storage.local.get('monitor').catch(() => ({}));
+  if (mon0?.urlToTabId) {
+    for (const [url, tabId] of Object.entries(mon0.urlToTabId)) {
+      urlToTabId[url] = tabId;
+    }
+    console.log('[TCH bg] restored urlToTabId:', Object.keys(urlToTabId).length, 'entries');
+  }
+
   while (bgPollActive) {
     const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
     if (!monitor?.active) { bgPollActive = false; break; }
@@ -188,10 +197,24 @@ async function runBackgroundPoll() {
       const normUrl = normalizeProductUrl(product.url);
       const tabId = urlToTabId[normUrl];
       console.log(`[TCH bg] RESTOCK: tcin=${tcin} url=${product.url} tabId=${tabId}`);
+
+      let navigated = false;
       if (tabId) {
-        chrome.tabs.update(tabId, { url: product.url }).catch(() => {});
-      } else {
-        // No assigned tab — create one (safety fallback).
+        try {
+          await chrome.tabs.update(tabId, { url: product.url });
+          navigated = true;
+        } catch { /* tab may have been closed */ }
+      }
+      if (!navigated) {
+        // Try to find an existing tab already showing this product URL.
+        const existing = await chrome.tabs.query({}).catch(() => []);
+        const match = existing.find(t => t.url && normalizeProductUrl(t.url) === normUrl);
+        if (match) {
+          chrome.tabs.update(match.id, { url: product.url }).catch(() => {});
+          navigated = true;
+        }
+      }
+      if (!navigated) {
         chrome.tabs.create({ url: product.url, active: false }).catch(() => {});
       }
       // Avoid hammering the same product multiple times per cycle.
@@ -370,6 +393,7 @@ async function startMonitor(products, refreshInterval) {
     refreshInterval: refreshInterval || 1,
     counts,
     tabIds: [],
+    urlToTabId: {},
   };
 
   await chrome.storage.local.set({
@@ -383,12 +407,15 @@ async function startMonitor(products, refreshInterval) {
     products.map(p => chrome.tabs.create({ url: p.url, active: false }))
   );
   monitor.tabIds = [];
+  monitor.urlToTabId = {};
   urlToTabId = {};
   for (let i = 0; i < products.length; i++) {
     if (tabResults[i].status === 'fulfilled') {
       const tabId = tabResults[i].value.id;
+      const norm  = normalizeProductUrl(products[i].url);
       monitor.tabIds.push(tabId);
-      urlToTabId[normalizeProductUrl(products[i].url)] = tabId;
+      monitor.urlToTabId[norm] = tabId;
+      urlToTabId[norm] = tabId;
     }
   }
 

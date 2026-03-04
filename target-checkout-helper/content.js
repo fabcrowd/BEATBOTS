@@ -1323,9 +1323,12 @@ async function init() {
   }
 
   if (data.monitor?.active && page === 'product') {
-    const normUrl = normalizeProductUrl(location.href);
-    const product = (data.monitor.products || []).find(
-      p => normalizeProductUrl(p.url) === normUrl
+    const normUrl    = normalizeProductUrl(location.href);
+    const currentTcin = extractTcinFromUrl(location.href);
+    // Match by normalised URL first, then by TCIN as fallback (handles URL slug redirects).
+    const product = (data.monitor.products || []).find(p =>
+      normalizeProductUrl(p.url) === normUrl
+      || (currentTcin && extractTcinFromUrl(p.url) === currentTcin)
     );
     if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
   }
