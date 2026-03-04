@@ -562,43 +562,26 @@ async function waitAndClickContinue(timeout = 5000) {
   }
 }
 
-// window.__CONFIG__ is set by page-side JS (main world) and is NOT directly
-// accessible inside a content script's isolated world. We bridge this by
-// injecting a <script> tag that runs in the main world, reads the config,
-// and dispatches a custom DOM event back to the isolated world.
+// main_world.js (declared in manifest.json with "world":"MAIN") runs in the
+// page's full JavaScript context and writes window.__CONFIG__ values into
+// document.documentElement dataset attributes, then fires '__tch_api_key__'.
+// This isolated-world content script reads those attributes and forwards the
+// key to the background SW via chrome.storage.
 function cacheApiKeyWhenReady() {
-  const EVT = '__tch_api_key__';
-  document.addEventListener(EVT, (e) => {
-    const { apiKey, redskyBase } = e.detail || {};
-    if (apiKey) {
-      console.log('[TCH] API key received from page world, caching for SW');
-      chrome.storage.local.set({
-        bgApiKey: apiKey,
-        bgRedskyBase: redskyBase || 'https://redsky.target.com',
-      }).then(() => {
-        chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
-      }).catch(() => {});
-    } else {
-      console.log('[TCH] page world: __CONFIG__ not available');
-    }
-  }, { once: true });
+  const read = () => {
+    const apiKey    = document.documentElement.dataset.tchKey    || '';
+    const redskyBase = document.documentElement.dataset.tchRedsky || 'https://redsky.target.com';
+    if (!apiKey) return;
+    console.log('[TCH] API key received from main world, caching for SW');
+    chrome.storage.local.set({ bgApiKey: apiKey, bgRedskyBase: redskyBase })
+      .then(() => chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {}))
+      .catch(() => {});
+  };
 
-  // Inline script executes in the PAGE's main world — full access to window.__CONFIG__.
-  const s = document.createElement('script');
-  s.textContent = `(function(){
-    var EVT='__tch_api_key__', WAIT=10000, INT=250, elapsed=0;
-    function check(){
-      var svc=window.__CONFIG__&&window.__CONFIG__.services;
-      var k=svc?((svc.auth||{}).apiKey||(svc.apiPlatform||{}).apiKey||''):'';
-      var b=svc&&svc.redsky?svc.redsky.baseUrl||'':'';
-      if(k||elapsed>=WAIT){
-        document.dispatchEvent(new CustomEvent(EVT,{detail:{apiKey:k,redskyBase:b}}));
-      } else { elapsed+=INT; setTimeout(check,INT); }
-    }
-    check();
-  })();`;
-  (document.head || document.documentElement).appendChild(s);
-  s.remove();
+  // Key may already be present if main_world.js ran before us.
+  read();
+  // Otherwise wait for main_world.js to fire the ready signal.
+  document.documentElement.addEventListener('__tch_api_key__', read, { once: true });
 }
 
 function prefetchCheckout() {

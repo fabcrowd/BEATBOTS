@@ -13,6 +13,12 @@
       "matches": ["*://*.target.com/*"],
       "js": ["content.js"],
       "run_at": "document_end"
+    },
+    {
+      "matches": ["*://*.target.com/*"],
+      "js": ["main_world.js"],
+      "run_at": "document_end",
+      "world": "MAIN"
     }
   ],
   "action": {
