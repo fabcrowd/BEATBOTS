@@ -370,3 +370,73 @@ input.error {
   25% { transform: translateX(-4px); }
   75% { transform: translateX(4px); }
 }
+
+/* Checkout Options */
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.option-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #cc0000;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.option-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #222;
+}
+
+.option-hint {
+  font-size: 11px;
+  color: #777;
+  margin: 2px 0 8px;
+  line-height: 1.45;
+}
+
+/* Speed comparison display */
+.speed-compare {
+  margin-top: 4px;
+}
+
+.speed-rows {
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.speed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 2px 0;
+  gap: 6px;
+}
+
+.speed-label {
+  color: #555;
+}
+
+.speed-val {
+  font-weight: 600;
+  color: #222;
+  white-space: nowrap;
+}
+
+.speed-winner {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a7340;
+  border-top: 1px solid #ddd;
+  padding-top: 5px;
+}

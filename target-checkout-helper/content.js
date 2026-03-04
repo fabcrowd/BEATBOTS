@@ -7,6 +7,7 @@ const SEL = {
   shipIt:          '[data-test="shipItButton"], [data-test="shippingButton"]',
   pickup:          '[data-test="orderPickupButton"]',
   preorder:        '[data-test="preorderButton"]',
+  buyNow:          '[data-test="buyNowButton"]',
   declineCoverage: '[data-test="espModalContent-declineCoverageButton"]',
   viewCart:        '[data-test="addToCartModalViewCartCheckout"]',
   cartCheckout:    '[data-test="checkout-button"]',
@@ -42,6 +43,7 @@ async function getSettings() {
       'payment',
       'monitor',
       'retryPolicy',
+      'useSavedPayment',
     ]);
   }
   return settingsCache;
@@ -123,6 +125,9 @@ function normalizeProductUrl(url) {
 const RETRY_STATE_KEY = 'tch:checkoutRetryState';
 const LAST_PRODUCT_URL_KEY = 'tch:lastProductUrl';
 const RETRY_NAV_MARK_KEY = 'tch:checkoutRetryNav';
+const CHECKOUT_START_KEY = 'tch:checkoutStart';
+const CHECKOUT_MODE_KEY  = 'tch:checkoutMode';
+const CHECKOUT_SPEEDS_STORAGE_KEY = 'checkoutSpeeds';
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
 let stockWatchTimer = null;
@@ -534,6 +539,24 @@ function prefetchCheckout() {
   document.head.appendChild(link);
 }
 
+function markCheckoutStart(mode) {
+  try {
+    sessionStorage.setItem(CHECKOUT_START_KEY, String(Date.now()));
+    sessionStorage.setItem(CHECKOUT_MODE_KEY, mode);
+  } catch {}
+}
+
+async function recordCheckoutSpeed(mode, durationMs) {
+  try {
+    const data = await chrome.storage.local.get(CHECKOUT_SPEEDS_STORAGE_KEY);
+    const entries = Array.isArray(data[CHECKOUT_SPEEDS_STORAGE_KEY])
+      ? data[CHECKOUT_SPEEDS_STORAGE_KEY] : [];
+    entries.push({ mode, durationMs, ts: Date.now() });
+    if (entries.length > 20) entries.splice(0, entries.length - 20);
+    await chrome.storage.local.set({ [CHECKOUT_SPEEDS_STORAGE_KEY]: entries });
+  } catch {}
+}
+
 // ─── PAGE DETECTION ──────────────────────────────────────────────────────────
 
 function getPageType() {
@@ -545,11 +568,13 @@ function getPageType() {
   return 'other';
 }
 
-function getCheckoutStep() {
+function getCheckoutStep(useSavedPayment = false) {
   if (document.querySelector(SEL.placeOrder) || findByText('place order')) return 'review';
   if (document.querySelector(SEL.cardNumber)) return 'payment';
   if (['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
     .some(s => document.querySelector(s))) return 'shipping';
+  // When using saved payment, a pre-populated step shows a Continue button with no form fields.
+  if (useSavedPayment && findContinueButton(true)) return 'saved';
   return 'unknown';
 }
 
@@ -561,6 +586,19 @@ async function handleProductPage(settings) {
   const fromRetryNavigation = consumeRetryNavigationMark();
   if (!fromRetryNavigation) clearCheckoutRetryState();
   rememberProductUrl(location.href);
+
+  // When useSavedPayment: try Buy It Now first — instant checkout using account's saved info.
+  if (settings.useSavedPayment) {
+    const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
+    if (buyNowBtn && !buyNowBtn.disabled) {
+      console.log('[TCH] clicking Buy It Now (saved payment mode)');
+      markCheckoutStart('saved');
+      buyNowBtn.click();
+      showToast('Buy It Now → checkout…');
+      setNavigationMark('product_to_checkout');
+      return;
+    }
+  }
 
   const stopFindAtc = startTiming('product_wait_for_atc');
   let addBtn;
@@ -594,6 +632,24 @@ async function handleProductPage(settings) {
 
   console.log('[TCH] clicking ATC');
   addBtn.click();
+
+  if (settings.useSavedPayment) {
+    // For preorder/ATC: wait for the "View Cart & Check Out" modal button, which routes
+    // through the cart and uses the account's saved payment & address at checkout.
+    markCheckoutStart('saved');
+    showToast('ATC → waiting for checkout…');
+    try {
+      const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 3000);
+      setNavigationMark('product_to_checkout');
+      viewCartBtn.click();
+      return;
+    } catch {
+      // Modal didn't appear; fall through to immediate navigate
+      console.log('[TCH] viewCart modal not found; falling back to direct navigate');
+    }
+  }
+
+  markCheckoutStart('formfill');
   showToast('ATC → checkout…');
   setNavigationMark('product_to_checkout');
   window.location.href = 'https://www.target.com/checkout';
@@ -634,11 +690,12 @@ function markCheckoutFlow(step) {
 
 async function handleCheckoutPage(settings) {
   markCheckoutFlow('page_ready');
-  const step = getCheckoutStep();
+  const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
   if (step === 'shipping')    return handleShippingStep(settings);
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
+  if (step === 'saved')       return handleSavedStep(settings);
   watchForCheckoutStep(settings);
 }
 
@@ -677,16 +734,17 @@ function watchForCheckoutStep(settings) {
     if (step === 'shipping') await handleShippingStep(settings);
     else if (step === 'payment') await handlePaymentStep(settings);
     else if (step === 'review') await handleReviewStep(settings);
+    else if (step === 'saved') await handleSavedStep(settings);
   };
 
   const observer = new MutationObserver(async () => {
     if (handled) return;
-    await runStep(getCheckoutStep());
+    await runStep(getCheckoutStep(settings.useSavedPayment));
   });
   checkoutStepObserver = observer;
   observer.observe(document.body, { childList: true, subtree: true });
   checkoutStepPollId = setInterval(() => {
-    runStep(getCheckoutStep());
+    runStep(getCheckoutStep(settings.useSavedPayment));
   }, T.checkoutProbeInterval);
   checkoutStepPollTimer = setTimeout(() => {
     if (!handled && checkoutStepObserver === observer) {
@@ -708,6 +766,30 @@ async function handleShippingStep(settings) {
   const s = settings.shipping || {};
   console.log('[TCH] filling shipping');
   markCheckoutFlow('shipping_start');
+
+  // When useSavedPayment and no address form is visible, a saved address is pre-selected —
+  // just click Continue rather than trying to fill non-existent inputs.
+  if (settings.useSavedPayment) {
+    const hasFormFields = ['input[id*="firstName"]', 'input[name="firstName"]',
+      'input[autocomplete="given-name"]'].some(sel => document.querySelector(sel));
+    if (!hasFormFields) {
+      console.log('[TCH] shipping: saved address detected (no form), clicking continue');
+      const continueClicked = await waitAndClickContinue(5000);
+      if (continueClicked) {
+        const addrObs = new MutationObserver(() => {
+          const useAddr = findByText('use this address') || findByText('save and continue')
+            || findByText('use as entered') || findByText('suggested address');
+          if (useAddr && !useAddr.disabled) { useAddr.click(); addrObs.disconnect(); }
+        });
+        addrObs.observe(document.body, { childList: true, subtree: true });
+        setTimeout(() => addrObs.disconnect(), 5000);
+        watchForCheckoutStep(settings);
+        return;
+      }
+      await scheduleCheckoutRetry(settings, 'Saved address continue button unavailable');
+      return;
+    }
+  }
 
   const stopFill = startTiming('shipping_fill_fields');
   const fieldMap = [
@@ -757,6 +839,24 @@ async function handlePaymentStep(settings) {
   console.log('[TCH] filling payment');
   markCheckoutFlow('payment_start');
 
+  // When useSavedPayment and no card number input is visible, a saved payment method is
+  // pre-selected — just click Continue rather than trying to fill non-existent inputs.
+  if (settings.useSavedPayment) {
+    const hasCardInput = !!document.querySelector(SEL.cardNumber);
+    if (!hasCardInput) {
+      console.log('[TCH] payment: saved payment detected (no card input), clicking continue');
+      const continueClicked = await waitAndClickContinue(5000);
+      if (continueClicked) {
+        waitForAny([
+          { sel: SEL.placeOrder }, { text: 'place order' },
+        ], 15000).then(() => handleReviewStep(settings)).catch(() => watchForCheckoutStep(settings));
+        return;
+      }
+      await scheduleCheckoutRetry(settings, 'Saved payment continue button unavailable');
+      return;
+    }
+  }
+
   const stopFill = startTiming('payment_fill_fields');
   if (p.cardNumber) {
     const el = document.querySelector(SEL.cardNumber);
@@ -798,6 +898,17 @@ async function handlePaymentStep(settings) {
   }
 }
 
+async function handleSavedStep(settings) {
+  console.log('[TCH] handleSavedStep: saved checkout data shown, clicking continue');
+  markCheckoutFlow('saved_step_start');
+  const continueClicked = await waitAndClickContinue(5000);
+  if (continueClicked) {
+    watchForCheckoutStep(settings);
+    return;
+  }
+  await scheduleCheckoutRetry(settings, 'Saved checkout continue button unavailable');
+}
+
 async function handleReviewStep(settings) {
   const reviewKey = `${location.pathname}${location.search}`;
   const now = Date.now();
@@ -823,6 +934,20 @@ async function handleReviewStep(settings) {
     const totalMs = Math.round(performance.now() - checkoutFlowStart);
     console.log(`[TCH] timing checkout_total_to_review: ${totalMs}ms`);
   }
+
+  // Record end-to-end checkout speed for comparison between saved-payment and form-fill modes.
+  try {
+    const startMs = parseInt(sessionStorage.getItem(CHECKOUT_START_KEY) || '0', 10);
+    const mode = sessionStorage.getItem(CHECKOUT_MODE_KEY) || 'formfill';
+    if (startMs > 0) {
+      const durationMs = Date.now() - startMs;
+      console.log(`[TCH] checkout speed (${mode}): ${durationMs}ms`);
+      sessionStorage.removeItem(CHECKOUT_START_KEY);
+      sessionStorage.removeItem(CHECKOUT_MODE_KEY);
+      await recordCheckoutSpeed(mode, durationMs);
+    }
+  } catch {}
+
   await markCheckoutSuccess();
   showToast('Reached review — Place Order remains manual.', 'persistent');
 }
@@ -1130,7 +1255,8 @@ async function init() {
     stopInit('disabled');
     return;
   }
-  const hasData = (data.shipping && Object.values(data.shipping).some(Boolean))
+  const hasData = data.useSavedPayment
+    || (data.shipping && Object.values(data.shipping).some(Boolean))
     || (data.payment && Object.values(data.payment).some(Boolean));
   if (!hasData) { showToast('Open popup to add your info', 'error'); stopInit('missing_settings'); return; }
 
@@ -1138,6 +1264,7 @@ async function init() {
     shipping: data.shipping || {},
     payment: data.payment || {},
     retryPolicy: data.retryPolicy || {},
+    useSavedPayment: !!data.useSavedPayment,
   };
 
   if (page === 'product' || page === 'cart') prefetchCheckout();
