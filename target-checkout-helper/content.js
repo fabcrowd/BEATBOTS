@@ -335,12 +335,44 @@ async function scheduleCheckoutRetry(settings, reason, details = {}) {
   }
 
   if (isStockWatchReason(reason)) {
+    // On the very first ATC failure, do a page reload before entering silent polling.
+    // This resets any stale page state, re-authenticates the session, and gives the
+    // product page one fresh chance to show the correct button state.
+    if (!stockWatchActive && nextAttempt <= 1) {
+      let delayMs = getNavigationRetryDelay(policy, nextAttempt);
+      if (hasHumanVerificationChallenge()) {
+        delayMs = Math.max(delayMs, T.humanChallengeDelayMs);
+        console.warn('[TCH] challenge detected; slowing first-failure reload');
+      }
+      await reportRetryEvent({
+        status: 'scheduled',
+        attempt: nextAttempt,
+        maxAttempts: policy.maxAttempts,
+        mode: 'navigation',
+        delayMs,
+        ...eventBase,
+      });
+      if (unlimited) {
+        showToast(`Reloading page to reset session (#${nextAttempt})…`, 'persistent');
+      } else {
+        showToast(`Retry ${nextAttempt}/${policy.maxAttempts}: reloading page…`, 'persistent');
+      }
+      checkoutRetryScheduled = true;
+      checkoutRetryTimer = setTimeout(() => {
+        if (!runtimeEnabled) return;
+        checkoutRetryScheduled = false;
+        checkoutRetryTimer = null;
+        performRetryNavigation();
+      }, delayMs);
+      return true;
+    }
+
     if (!stockWatchActive) {
       const watchUrl = getRememberedProductUrl() || normalizeProductUrl(location.href);
       const policyDelay = Math.max(1, Math.round(policy.delayMs / 1000));
       stockWatchActive = true;
       stockWatchPolls = 0;
-      showToast(`Watching stock every ~${policyDelay}s (no reload spam)…`, 'persistent');
+      showToast(`Watching stock every ~${policyDelay}s…`, 'persistent');
       await reportRetryEvent({
         status: 'watching',
         attempt: nextAttempt,
@@ -970,6 +1002,7 @@ const ENABLED_ATC_PATTERNS = [
   { name: 'ship_it_enabled', regex: /<button\b(?=[^>]*data-test=["']shipItButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
   { name: 'shipping_enabled', regex: /<button\b(?=[^>]*data-test=["']shippingButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
   { name: 'pickup_enabled', regex: /<button\b(?=[^>]*data-test=["']orderPickupButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'preorder_enabled', regex: /<button\b(?=[^>]*data-test=["']preorderButton["'])(?![^>]*\bdisabled\b)[^>]*>/i },
   { name: 'sticky_atc_enabled', regex: /<[^>]*data-test=["']StickyAddToCart["'][\s\S]{0,240}<button\b(?![^>]*\bdisabled\b)[^>]*>/i },
   { name: 'fulfillment_add_to_cart_enabled', regex: /fulfillmentSectionAddToCartButtonWrapper[\s\S]{0,260}<button\b(?![^>]*\bdisabled\b)[^>]*>\s*add to cart\s*<\/button>/i },
 ];
@@ -977,6 +1010,7 @@ const DISABLED_ATC_PATTERNS = [
   { name: 'ship_it_disabled', regex: /<button\b(?=[^>]*data-test=["']shipItButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
   { name: 'shipping_disabled', regex: /<button\b(?=[^>]*data-test=["']shippingButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
   { name: 'pickup_disabled', regex: /<button\b(?=[^>]*data-test=["']orderPickupButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
+  { name: 'preorder_disabled', regex: /<button\b(?=[^>]*data-test=["']preorderButton["'])(?=[^>]*\bdisabled\b)[^>]*>/i },
   { name: 'sticky_atc_disabled', regex: /<[^>]*data-test=["']StickyAddToCart["'][\s\S]{0,240}<button\b(?=[^>]*\bdisabled\b)[^>]*>/i },
   { name: 'fulfillment_add_to_cart_disabled', regex: /fulfillmentSectionAddToCartButtonWrapper[\s\S]{0,260}<button\b(?=[^>]*\bdisabled\b)[^>]*>\s*add to cart\s*<\/button>/i },
 ];
