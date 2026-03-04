@@ -399,9 +399,13 @@ async function handleATCSuccess(url, tabId) {
     return;
   }
 
+  // Consider "done" if every product whose TCIN can be extracted is satisfied.
+  // This prevents stale/unresolvable products from blocking checkout indefinitely.
   const allDone = monitor.products.every((p) => {
     const c = monitor.counts[normalizeProductUrl(p.url)] || 0;
-    return c >= p.qty;
+    if (c >= p.qty) return true;
+    // A product with no extractable TCIN can't be auto-ATC'd — skip it.
+    return !extractTcin(p.url);
   });
 
   if (allDone) {

@@ -562,6 +562,27 @@ async function waitAndClickContinue(timeout = 5000) {
   }
 }
 
+async function cacheApiKeyWhenReady() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const apiKey = window.__CONFIG__?.services?.auth?.apiKey
+                  || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
+      const redskyBase = window.__CONFIG__?.services?.redsky?.baseUrl || '';
+      if (apiKey) {
+        console.log('[TCH] caching API key for background SW');
+        await chrome.storage.local.set({
+          bgApiKey: apiKey,
+          bgRedskyBase: redskyBase || 'https://redsky.target.com',
+        });
+        chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
+        return;
+      }
+    } catch {}
+    await sleep(500);
+  }
+  console.log('[TCH] __CONFIG__ API key not found after 10s');
+}
+
 function prefetchCheckout() {
   if (document.querySelector('link[data-tch-prefetch]')) return;
   const link = document.createElement('link');
@@ -1226,14 +1247,16 @@ async function handleMonitoredATC(monitor, product) {
     // Decline any protection/coverage upsell modal immediately.
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 300);
 
-    // Wait for the cart-confirmation modal to appear. "View Cart & Check Out" confirms
-    // the item was added; "continue shopping" dismisses without navigating. Either signals
-    // success. Give up to 2.5s to handle slow preorder cart-add responses.
+    // Wait for a cart-confirmation modal or any sign the item was added.
+    // Preorder buttons can be slower than regular ATC; allow up to 5 seconds.
     let cartConfirmed = false;
     try {
       await waitForAny([
-        { sel: SEL.viewCart }, { text: 'continue shopping' }, { text: 'view cart' },
-      ], 2500);
+        { sel: SEL.viewCart },
+        { text: 'continue shopping' }, { text: 'view cart' },
+        { text: 'view cart & check out' }, { text: 'go to cart' },
+        { text: 'item added' }, { text: 'added to cart' },
+      ], 5000);
       cartConfirmed = true;
     } catch { /* modal didn't appear — item may still have been added */ }
 
@@ -1287,25 +1310,9 @@ async function init() {
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
-  // Write the Target API key directly to storage so the background SW can poll
-  // RedSky without relying on message-passing (which can fail when SW is dormant).
-  try {
-    const apiKey     = window.__CONFIG__?.services?.auth?.apiKey
-                    || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
-    const redskyBase = window.__CONFIG__?.services?.redsky?.baseUrl || '';
-    if (apiKey) {
-      console.log('[TCH] caching API key for background SW');
-      chrome.storage.local.set({
-        bgApiKey: apiKey,
-        bgRedskyBase: redskyBase || 'https://redsky.target.com',
-      }).then(() => {
-        // Also ping the SW in case it is already awake — it will start polling immediately.
-        chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
-      }).catch(() => {});
-    } else {
-      console.log('[TCH] window.__CONFIG__ API key not available yet');
-    }
-  } catch {}
+  // Target sets window.__CONFIG__ asynchronously after document_end, so retry
+  // until it's populated (up to 10 seconds) then write to storage for the SW.
+  cacheApiKeyWhenReady();
 
   if (page !== 'checkout') {
     checkoutFlowStart = null;
