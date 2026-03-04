@@ -19,13 +19,13 @@ const SEL = {
 
 const T = {
   observerTimeout: 10000,
-  checkoutProbeInterval: 60,
+  checkoutProbeInterval: 25,       // ms between checkout step polls (was 60)
   checkoutProbeTimeout: 2500,
   reviewDedupWindowMs: 15000,
-  retryMaxAttempts: 0, // 0 => run until user cancels
+  retryMaxAttempts: 0,             // 0 => run until user cancels
   retryDelayMs: 1000,
-  retryWatchBaseMs: 900,
-  retryWatchJitterMs: 250,
+  retryWatchBaseMs: 400,           // stock-watch base interval (was 900)
+  retryWatchJitterMs: 80,          // jitter on stock watch (was 250)
   retryMaxDelayMs: 7000,
   humanChallengeDelayMs: 12000,
   retryStateTtlMs: 20 * 60 * 1000,
@@ -44,6 +44,7 @@ async function getSettings() {
       'monitor',
       'retryPolicy',
       'useSavedPayment',
+      'autoPlaceOrder',
     ]);
   }
   return settingsCache;
@@ -128,6 +129,7 @@ const RETRY_NAV_MARK_KEY = 'tch:checkoutRetryNav';
 const CHECKOUT_START_KEY = 'tch:checkoutStart';
 const CHECKOUT_MODE_KEY  = 'tch:checkoutMode';
 const CHECKOUT_SPEEDS_STORAGE_KEY = 'checkoutSpeeds';
+const CART_READY_KEY = 'tch:cartReady'; // set after ATC succeeds; cleared on checkout success
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
 let stockWatchTimer = null;
@@ -191,6 +193,15 @@ function clearCheckoutRetryState() {
   stockWatchPolls = 0;
   try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
   try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
+  try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+}
+
+function markCartReady() {
+  try { sessionStorage.setItem(CART_READY_KEY, '1'); } catch {}
+}
+
+function isCartReady() {
+  try { return sessionStorage.getItem(CART_READY_KEY) === '1'; } catch { return false; }
 }
 
 function rememberProductUrl(url = location.href) {
@@ -264,6 +275,14 @@ function getStockWatchDelay(policy, nullStreak = 0) {
 }
 
 function performRetryNavigation() {
+  // If we already added to cart (ATC succeeded), go straight to cart → checkout
+  // to avoid re-landing on the product page where the button shows "1 in cart".
+  if (isCartReady()) {
+    markRetryNavigation('https://www.target.com/cart');
+    window.location.href = 'https://www.target.com/cart';
+    return;
+  }
+
   const remembered = getRememberedProductUrl();
   const destination = remembered || (getPageType() === 'checkout'
     ? 'https://www.target.com/cart'
@@ -388,13 +407,8 @@ async function scheduleCheckoutRetry(settings, reason, details = {}) {
         const result = await streamingStockCheck(watchUrl);
         stockWatchPolls++;
         if (result === true) {
-          const confirmResult = await streamingStockCheck(watchUrl, 8000, {
-            requireFullParse: true,
-          });
-          if (confirmResult !== true) {
-            stockWatchTimer = setTimeout(poll, getStockWatchDelay(policy, nullStreak));
-            return;
-          }
+          // Act immediately on first positive — latency matters more than
+          // avoiding a rare false positive; a failed ATC just retries.
           stockWatchActive = false;
           if (stockWatchTimer) {
             clearTimeout(stockWatchTimer);
@@ -475,7 +489,7 @@ async function markCheckoutSuccess() {
     url: location.href,
     ts: Date.now(),
   });
-  clearCheckoutRetryState();
+  clearCheckoutRetryState(); // also clears CART_READY_KEY
 }
 
 function waitForAny(specs, timeout = T.observerTimeout) {
@@ -641,6 +655,22 @@ async function handleProductPage(settings) {
   if (!fromRetryNavigation) clearCheckoutRetryState();
   rememberProductUrl(location.href);
 
+  // If item is already in cart (button shows "N in cart"), skip straight to checkout.
+  // Target uses data-test="cartButton" or renders "in cart" within ATC button variants.
+  // Cast a wide net: check buttons, links, AND role="button" elements.
+  const inCartEl = (
+    Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find(el => /\bin cart\b/i.test(el.textContent))
+  ) || document.querySelector('[data-test="cartButton"]');
+  if (inCartEl) {
+    console.log('[TCH] item already in cart — navigating to checkout');
+    markCartReady();
+    showToast('Item in cart → checkout…');
+    setNavigationMark('product_to_checkout');
+    window.location.href = 'https://www.target.com/checkout';
+    return;
+  }
+
   // When useSavedPayment: try Buy It Now first — instant checkout using account's saved info.
   if (settings.useSavedPayment) {
     const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
@@ -660,7 +690,7 @@ async function handleProductPage(settings) {
     addBtn = await waitForAny([
       { sel: SEL.shipIt }, { sel: SEL.pickup }, { sel: SEL.preorder },
       { sel: SEL.stickyATC }, { text: 'add to cart' }, { text: 'preorder' },
-    ], 6000);
+    ], 5000);
     stopFindAtc('found');
   } catch {
     showToast('ATC button not found', 'error');
@@ -669,12 +699,22 @@ async function handleProductPage(settings) {
   }
 
   if (addBtn.disabled) {
+    // Before entering the wait loop, check if the button is in "N in cart" state
+    // (disabled because item is already in cart, not because it's OOS).
+    if (/\bin cart\b/i.test(addBtn.textContent)) {
+      console.log('[TCH] ATC button shows "in cart" — navigating to checkout');
+      markCartReady();
+      showToast('Item in cart → checkout…');
+      setNavigationMark('product_to_checkout');
+      window.location.href = 'https://www.target.com/checkout';
+      return;
+    }
     const stopEnableAtc = startTiming('product_wait_for_enabled_atc');
     try {
       addBtn = await waitForEnabled(
         () => findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
               || findByText('add to cart') || findByText('preorder'),
-        6000
+        5000
       );
       stopEnableAtc('enabled');
     } catch {
@@ -687,22 +727,30 @@ async function handleProductPage(settings) {
   console.log('[TCH] clicking ATC');
   addBtn.click();
 
+  markCartReady(); // ATC was clicked — cart should now have this item
+
   if (settings.useSavedPayment) {
     // For preorder/ATC: wait for the "View Cart & Check Out" modal button, which routes
     // through the cart and uses the account's saved payment & address at checkout.
     markCheckoutStart('saved');
     showToast('ATC → waiting for checkout…');
+    // Decline coverage upsell immediately so it doesn't block navigation.
+    setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
     try {
-      const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 3000);
+      const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
       setNavigationMark('product_to_checkout');
       viewCartBtn.click();
       return;
     } catch {
-      // Modal didn't appear; fall through to immediate navigate
-      console.log('[TCH] viewCart modal not found; falling back to direct navigate');
+      console.log('[TCH] viewCart modal not found; navigating to checkout directly');
+      setNavigationMark('product_to_checkout');
+      window.location.href = 'https://www.target.com/checkout';
+      return;
     }
   }
 
+  // Non-saved-payment: decline coverage modal if it appears, then navigate to checkout.
+  setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
   markCheckoutStart('formfill');
   showToast('ATC → checkout…');
   setNavigationMark('product_to_checkout');
@@ -972,8 +1020,9 @@ async function handleReviewStep(settings) {
 
   const stopReviewWait = startTiming('review_wait_for_place_order');
   markCheckoutFlow('review_start');
+  let placeOrderBtn = null;
   try {
-    await waitForAny([
+    placeOrderBtn = await waitForAny([
       { sel: SEL.placeOrder }, { text: 'place order' },
     ], 4000);
     stopReviewWait('found');
@@ -983,7 +1032,7 @@ async function handleReviewStep(settings) {
     return;
   }
 
-  console.log('[TCH] review reached: safety stop before Place Order');
+  console.log('[TCH] review reached');
   if (checkoutFlowStart !== null) {
     const totalMs = Math.round(performance.now() - checkoutFlowStart);
     console.log(`[TCH] timing checkout_total_to_review: ${totalMs}ms`);
@@ -1003,6 +1052,20 @@ async function handleReviewStep(settings) {
   } catch {}
 
   await markCheckoutSuccess();
+
+  if (settings.autoPlaceOrder) {
+    // Auto Place Order: resolve the button reference freshly in case the DOM
+    // was re-rendered while we were processing, then click.
+    const btn = document.querySelector(SEL.placeOrder) || findByText('place order') || placeOrderBtn;
+    if (btn && !btn.disabled) {
+      console.log('[TCH] autoPlaceOrder: clicking Place Order');
+      showToast('Placing order…', 'persistent');
+      btn.click();
+      return;
+    }
+    console.warn('[TCH] autoPlaceOrder: Place Order button not clickable');
+  }
+
   showToast('Reached review — Place Order remains manual.', 'persistent');
 }
 
@@ -1215,6 +1278,23 @@ async function handleMonitoredATC(monitor, product) {
 
   if (currentCount >= product.qty) return;
 
+  // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
+  const settings = await getSettings();
+  if (settings.useSavedPayment) {
+    const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
+    if (buyNowBtn && !buyNowBtn.disabled) {
+      console.log('[TCH] monitor: clicking Buy It Now (saved payment mode)');
+      markCheckoutStart('saved');
+      buyNowBtn.click();
+      showToast('Monitor: Buy It Now → checkout…');
+      setNavigationMark('product_to_checkout');
+      // Buy It Now routes directly to checkout; ATC_SUCCESS will be implied
+      // once checkout completes, so send it now to let the background update counts.
+      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+      return;
+    }
+  }
+
   let addBtn = findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
     || findByText('add to cart') || findByText('preorder');
 
@@ -1246,25 +1326,40 @@ async function handleMonitoredATC(monitor, product) {
     addBtn.click();
 
     // Decline any protection/coverage upsell modal immediately.
-    setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 300);
+    setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
 
-    // Wait for a cart-confirmation modal or any sign the item was added.
-    // Preorder buttons can be slower than regular ATC; allow up to 5 seconds.
+    if (settings.useSavedPayment) {
+      // With saved payment: click "View Cart & Check Out" from the ATC modal for fastest path.
+      let cartConfirmed = false;
+      try {
+        const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
+        setNavigationMark('product_to_checkout');
+        viewCartBtn.click();
+        cartConfirmed = true;
+      } catch {
+        // Modal didn't appear; navigate to checkout directly.
+        setNavigationMark('product_to_checkout');
+        window.location.href = 'https://www.target.com/checkout';
+        cartConfirmed = true;
+      }
+      showToast(`Monitor: Added! → checkout (${currentCount + 1}/${product.qty})`, 'success');
+      console.log(`[TCH] monitor ATC (saved): navigating to checkout`);
+      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+      return;
+    }
+
+    // Without saved payment: navigate directly to checkout to skip the cart page round-trip.
     let cartConfirmed = false;
     try {
       await waitForAny([
         { sel: SEL.viewCart },
-        { text: 'continue shopping' }, { text: 'view cart' },
-        { text: 'view cart & check out' }, { text: 'go to cart' },
+        { text: 'view cart' }, { text: 'view cart & check out' },
         { text: 'item added' }, { text: 'added to cart' },
-      ], 5000);
+      ], 2500);
       cartConfirmed = true;
     } catch { /* modal didn't appear — item may still have been added */ }
 
-    // Dismiss "continue shopping" so the monitor tab stays on the product page.
-    const dismissBtn = findByText('continue shopping');
-    if (dismissBtn) dismissBtn.click();
-
+    markCartReady();
     showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
     console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}`);
     chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
@@ -1284,12 +1379,7 @@ async function handleMonitoredATC(monitor, product) {
     pollCount++;
     const result = await streamingStockCheck(normUrl);
     if (result === true) {
-      const confirmResult = await streamingStockCheck(normUrl, 8000, {
-        requireFullParse: true,
-      });
-      if (confirmResult !== true) {
-        return;
-      }
+      // Act immediately on first positive for maximum speed.
       clearInterval(pollId);
       console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
       showToast('STOCK DETECTED — reloading!', 'success');
@@ -1348,6 +1438,7 @@ async function init() {
     payment: data.payment || {},
     retryPolicy: data.retryPolicy || {},
     useSavedPayment: !!data.useSavedPayment,
+    autoPlaceOrder: !!data.autoPlaceOrder,
   };
 
   if (page === 'product' || page === 'cart') prefetchCheckout();
