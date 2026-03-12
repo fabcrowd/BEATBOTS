@@ -65,16 +65,22 @@ function parseBatchFulfillmentResponse(payload) {
 let bgPollActive     = false;
 let cachedApiKey     = '';
 let cachedRedskyBase = 'https://redsky.target.com';
+let cachedCartsKey   = '';
+let cachedCartsBase  = 'https://carts.target.com';
 // Tracks which tab is assigned to which normalised product URL so we can
 // navigate exactly the right tab when a restock is detected.
 let urlToTabId       = {};
 
-// Load a previously-cached API key from storage (survives SW termination).
+// Load previously-cached API keys from storage (survives SW termination).
 async function loadCachedApiKey() {
-  const { bgApiKey, bgRedskyBase } = await chrome.storage.local.get(['bgApiKey', 'bgRedskyBase']).catch(() => ({}));
-  if (bgApiKey && !cachedApiKey) {
-    cachedApiKey = bgApiKey;
-    if (bgRedskyBase) cachedRedskyBase = bgRedskyBase;
+  const data = await chrome.storage.local.get(['bgApiKey', 'bgRedskyBase', 'bgCartsKey', 'bgCartsBase']).catch(() => ({}));
+  if (data.bgApiKey && !cachedApiKey) {
+    cachedApiKey = data.bgApiKey;
+    if (data.bgRedskyBase) cachedRedskyBase = data.bgRedskyBase;
+  }
+  if (data.bgCartsKey && !cachedCartsKey) {
+    cachedCartsKey = data.bgCartsKey;
+    if (data.bgCartsBase) cachedCartsBase = data.bgCartsBase;
   }
 }
 
@@ -145,6 +151,42 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
   return out;
 }
 
+// ─── TURBO ATC (SW) ──────────────────────────────────────────────────────────
+// Attempts to add a TCIN directly to the Target cart from the service worker.
+// Uses the cached API key and the user's existing session cookies.
+async function bgTurboATC(tcin) {
+  const key = cachedCartsKey || cachedApiKey;
+  if (!tcin || !key) return null;
+  const base = cachedCartsBase || 'https://carts.target.com';
+  const url = `${base}/web_checkouts/v1/cart_items`
+    + `?field_groups=CART%2CCART_ITEMS%2CSUMMARY&key=${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': 'https://www.target.com',
+      },
+      body: JSON.stringify({
+        cart_item: {
+          item_channel_id: '10',
+          tcin: String(tcin),
+          cart_type: 'REGULAR',
+          channel_id: '10',
+          shopping_context: 'DIGITAL',
+        },
+      }),
+    });
+    console.log(`[TCH bg] bgTurboATC tcin=${tcin} status=${res.status}`);
+    return (res.status === 201 || res.status === 200) ? true : false;
+  } catch (err) {
+    console.warn('[TCH bg] bgTurboATC error:', err?.message || err);
+    return null;
+  }
+}
+
 // ─── BACKGROUND POLL LOOP ────────────────────────────────────────────────────
 
 async function runBackgroundPoll() {
@@ -197,6 +239,22 @@ async function runBackgroundPoll() {
       const normUrl = normalizeProductUrl(product.url);
       const tabId = urlToTabId[normUrl];
       console.log(`[TCH bg] RESTOCK: tcin=${tcin} url=${product.url} tabId=${tabId}`);
+
+      // Attempt turbo API cart add from the SW immediately — session cookies
+      // are shared, so this may succeed before the tab even navigates.
+      bgTurboATC(tcin).then(ok => {
+        if (ok === true) {
+          console.log(`[TCH bg] SW turboATC success for tcin=${tcin} — navigating to checkout`);
+          // Navigate tab directly to checkout, skipping the product page.
+          const checkoutUrl = 'https://www.target.com/checkout';
+          if (tabId) {
+            chrome.tabs.update(tabId, { url: checkoutUrl, active: true }).catch(() => {});
+          } else {
+            chrome.tabs.create({ url: checkoutUrl, active: true }).catch(() => {});
+          }
+        }
+        // If turboATC fails, the tab navigation below handles the DOM-based fallback.
+      });
 
       let navigated = false;
       if (tabId) {
@@ -328,14 +386,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Content scripts send the Target API key so the service worker can poll
     // the fulfillment API directly, without relying on throttled tab timers.
     case 'CACHE_API_KEY': {
-      const key  = String(message.apiKey  || '');
-      const base = String(message.redskyBase || '');
+      const key       = String(message.apiKey    || '');
+      const base      = String(message.redskyBase || '');
+      const cartsKey  = String(message.cartsKey  || '');
+      const cartsBase = String(message.cartsBase || '');
       if (key && key !== cachedApiKey) {
         cachedApiKey = key;
         if (base) cachedRedskyBase = base;
-        // Persist so we survive future SW termination/restart cycles.
-        chrome.storage.local.set({ bgApiKey: key, bgRedskyBase: cachedRedskyBase }).catch(() => {});
-        console.log('[TCH bg] API key cached; ensuring poll is running');
+        if (cartsKey) { cachedCartsKey = cartsKey; }
+        if (cartsBase) { cachedCartsBase = cartsBase; }
+        chrome.storage.local.set({
+          bgApiKey: key, bgRedskyBase: cachedRedskyBase,
+          bgCartsKey: cachedCartsKey, bgCartsBase: cachedCartsBase,
+        }).catch(() => {});
+        console.log('[TCH bg] API key + carts key cached; ensuring poll is running');
         chrome.storage.local.get('monitor').then(({ monitor }) => {
           if (monitor?.active) ensureBackgroundPollRunning();
         });

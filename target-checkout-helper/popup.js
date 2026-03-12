@@ -350,12 +350,12 @@ function formatRetryStatus(telemetry) {
   }
   if (event.status === 'watching') {
     if (event.maxAttempts > 0) {
-      return `Watching stock (${event.attempt}/${event.maxAttempts}): ${event.reason}`;
+      return `⚡ Watching stock (${event.attempt}/${event.maxAttempts})`;
     }
-    return `Watching stock (until cancel): ${event.reason}`;
+    return `⚡ Watching stock (until cancel)`;
   }
   if (event.status === 'stock_detected') {
-    return 'Stock detected — reloading now';
+    return '🟢 Stock detected — turbo ATC firing!';
   }
   if (event.status === 'exhausted') {
     return `Retries exhausted (${event.maxAttempts}): ${event.reason}`;
@@ -364,7 +364,7 @@ function formatRetryStatus(telemetry) {
     return 'Retries canceled';
   }
   if (event.status === 'success') {
-    return `Checkout completed after ${event.failedAttempts || 0} failed attempt(s)`;
+    return `✅ Checkout reached after ${event.failedAttempts || 0} failed attempt(s)`;
   }
   return '';
 }

@@ -585,10 +585,12 @@ function cacheApiKeyWhenReady() {
   const read = () => {
     const apiKey    = document.documentElement.dataset.tchKey    || '';
     const redskyBase = document.documentElement.dataset.tchRedsky || 'https://redsky.target.com';
+    const cartsKey  = document.documentElement.dataset.tchCartsKey || '';
+    const cartsBase = document.documentElement.dataset.tchCartsBase || 'https://carts.target.com';
     if (!apiKey) return;
     console.log('[TCH] API key received from main world, caching for SW');
-    chrome.storage.local.set({ bgApiKey: apiKey, bgRedskyBase: redskyBase })
-      .then(() => chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {}))
+    chrome.storage.local.set({ bgApiKey: apiKey, bgRedskyBase: redskyBase, bgCartsKey: cartsKey, bgCartsBase: cartsBase })
+      .then(() => chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase, cartsKey, cartsBase }).catch(() => {}))
       .catch(() => {});
   };
 
@@ -636,6 +638,16 @@ function getPageType() {
   return 'other';
 }
 
+function isLoginWall() {
+  // Target shows a login form over checkout when not authenticated.
+  return !!(
+    document.querySelector('input[id*="username"], input[name="username"], input[placeholder*="mobile phone"], input[placeholder*="Email or mobile"]')
+    || findByText('sign in with password')
+    || findByText('sign in or create account')
+    || document.querySelector('[data-test="login-root"], [data-test="sign-in-root"]')
+  );
+}
+
 function getCheckoutStep(useSavedPayment = false) {
   if (document.querySelector(SEL.placeOrder) || findByText('place order')) return 'review';
   if (document.querySelector(SEL.cardNumber)) return 'payment';
@@ -643,7 +655,86 @@ function getCheckoutStep(useSavedPayment = false) {
     .some(s => document.querySelector(s))) return 'shipping';
   // When using saved payment, a pre-populated step shows a Continue button with no form fields.
   if (useSavedPayment && findContinueButton(true)) return 'saved';
+  if (isLoginWall()) return 'login_required';
   return 'unknown';
+}
+
+// ─── TURBO ATC (direct API) ──────────────────────────────────────────────────
+// Adds a TCIN to cart via the carts.target.com REST API without touching the DOM.
+// Much faster than waiting for the ATC button to be clickable — fires the same
+// request the browser would send, authenticated via existing session cookies.
+
+async function turboATC(tcin, cartsKey, qty = 1) {
+  if (!tcin || !cartsKey) return null;
+  const url = `https://carts.target.com/web_checkouts/v1/cart_items`
+    + `?field_groups=CART%2CCART_ITEMS%2CSUMMARY&key=${encodeURIComponent(cartsKey)}`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': 'https://www.target.com',
+      },
+      body: JSON.stringify({
+        cart_item: {
+          item_channel_id: '10',
+          tcin: String(tcin),
+          quantity: qty,
+          cart_type: 'REGULAR',
+          channel_id: '10',
+          shopping_context: 'DIGITAL',
+        },
+      }),
+    });
+    if (res.status === 201 || res.status === 200) {
+      console.log(`[TCH] turboATC success: tcin=${tcin} status=${res.status}`);
+      return true;
+    }
+    const body = await res.text().catch(() => '');
+    console.warn(`[TCH] turboATC non-201: status=${res.status} body=${body.slice(0, 200)}`);
+    return false;
+  } catch (err) {
+    console.warn('[TCH] turboATC fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+// Reads API keys injected by main_world.js via DOM dataset attributes.
+function getApiKeyFromPage() {
+  return document.documentElement.dataset.tchKey
+    || window.__CONFIG__?.services?.auth?.apiKey
+    || window.__CONFIG__?.services?.apiPlatform?.apiKey
+    || '';
+}
+
+function getCartsKeyFromPage() {
+  return document.documentElement.dataset.tchCartsKey
+    || window.__CONFIG__?.services?.carts?.apiKey
+    || '';
+}
+
+async function getCartsKeyWithFallback() {
+  const fromPage = getCartsKeyFromPage();
+  if (fromPage) return fromPage;
+  try {
+    const { bgCartsKey } = await chrome.storage.local.get('bgCartsKey');
+    return bgCartsKey || '';
+  } catch {
+    return '';
+  }
+}
+
+async function getApiKeyWithFallback() {
+  const fromPage = getApiKeyFromPage();
+  if (fromPage) return fromPage;
+  try {
+    const { bgApiKey } = await chrome.storage.local.get('bgApiKey');
+    return bgApiKey || '';
+  } catch {
+    return '';
+  }
 }
 
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
@@ -654,6 +745,31 @@ async function handleProductPage(settings) {
   const fromRetryNavigation = consumeRetryNavigationMark();
   if (!fromRetryNavigation) clearCheckoutRetryState();
   rememberProductUrl(location.href);
+
+  // ── Turbo pre-ATC: fire the cart API immediately on page load ──────────────
+  // Don't wait for the DOM ATC button — race the API against the page render.
+  // If API add succeeds before we find/click the button, navigate to checkout.
+  const pageTcin = extractTcinFromUrl(location.href);
+  if (pageTcin && !settings.useSavedPayment) {
+    const cartsKey = await getCartsKeyWithFallback();
+    if (cartsKey) {
+      const stopPreATC = startTiming('product_turboATC_pre');
+      const apiResult = await Promise.race([
+        turboATC(pageTcin, cartsKey),
+        sleep(600), // cap wait so DOM path still runs if slow
+      ]);
+      stopPreATC(apiResult === true ? 'success' : 'fallback');
+      if (apiResult === true) {
+        console.log('[TCH] turboATC pre-success — navigating directly to checkout');
+        markCartReady();
+        markCheckoutStart('formfill');
+        showToast('Turbo ATC → checkout…');
+        setNavigationMark('product_to_checkout');
+        window.location.href = 'https://www.target.com/checkout';
+        return;
+      }
+    }
+  }
 
   // If item is already in cart (button shows "N in cart"), skip straight to checkout.
   // Target uses data-test="cartButton" or renders "in cart" within ATC button variants.
@@ -725,6 +841,13 @@ async function handleProductPage(settings) {
   }
 
   console.log('[TCH] clicking ATC');
+  // Fire turbo API add in parallel with the DOM click for maximum speed.
+  const tcin = extractTcinFromUrl(location.href);
+  if (tcin) {
+    getCartsKeyWithFallback().then(cartsKey => {
+      if (cartsKey) turboATC(tcin, cartsKey);
+    });
+  }
   addBtn.click();
 
   markCartReady(); // ATC was clicked — cart should now have this item
@@ -794,11 +917,20 @@ async function handleCheckoutPage(settings) {
   markCheckoutFlow('page_ready');
   const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
-  if (step === 'shipping')    return handleShippingStep(settings);
-  if (step === 'payment')     return handlePaymentStep(settings);
-  if (step === 'review')      return handleReviewStep(settings);
-  if (step === 'saved')       return handleSavedStep(settings);
+  if (step === 'shipping')        return handleShippingStep(settings);
+  if (step === 'payment')         return handlePaymentStep(settings);
+  if (step === 'review')          return handleReviewStep(settings);
+  if (step === 'saved')           return handleSavedStep(settings);
+  if (step === 'login_required')  return handleLoginRequired();
   watchForCheckoutStep(settings);
+}
+
+function handleLoginRequired() {
+  console.warn('[TCH] checkout blocked by login wall — please sign in to Target.com');
+  showToast('Sign in to Target to continue checkout', 'error');
+  // Clear the cart-ready flag so the next retry goes back to the product page
+  // (the item may have been removed from cart by Target on session expiry).
+  try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
 }
 
 function watchForCheckoutStep(settings) {
@@ -819,6 +951,9 @@ function watchForCheckoutStep(settings) {
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown') return;
+    // Login wall is handled but should not be marked as "handled" — re-poll
+    // so we detect when the user actually logs in and a step becomes available.
+    if (step === 'login_required') { handleLoginRequired(); return; }
     handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {
@@ -837,6 +972,7 @@ function watchForCheckoutStep(settings) {
     else if (step === 'payment') await handlePaymentStep(settings);
     else if (step === 'review') await handleReviewStep(settings);
     else if (step === 'saved') await handleSavedStep(settings);
+    else if (step === 'login_required') handleLoginRequired();
   };
 
   const observer = new MutationObserver(async () => {
@@ -1072,7 +1208,10 @@ async function handleReviewStep(settings) {
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
 
 const OOS_STRINGS = ['Preorders have sold out', 'Out of stock', 'Sold out',
-  'This item is not available', 'Item not available', 'Currently unavailable'];
+  'This item is not available', 'Item not available', 'Currently unavailable',
+  'Temporarily out of stock', 'Not available for shipping',
+  // Pokemon TCG / limited release specific
+  'Sold out online', 'Online only - sold out'];
 const WEAK_IN_STOCK_STRINGS = ['>Add to cart<'];
 const FULFILLMENT_SELLABLE_STATUSES = new Set([
   'IN_STOCK',
@@ -1278,8 +1417,27 @@ async function handleMonitoredATC(monitor, product) {
 
   if (currentCount >= product.qty) return;
 
-  // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
   const settings = await getSettings();
+
+  // ── Turbo ATC: attempt API-based add first — fastest possible path ─────────
+  const monTcin = extractTcinFromUrl(product.url);
+  if (monTcin && !settings.useSavedPayment) {
+    const cartsKey = await getCartsKeyWithFallback();
+    if (cartsKey) {
+      const stopTurbo = startTiming('monitor_turboATC');
+      const result = await turboATC(monTcin, cartsKey);
+      stopTurbo(result === true ? 'success' : 'fallback');
+      if (result === true) {
+        markCartReady();
+        showToast(`Monitor: Turbo ATC! (${currentCount + 1}/${product.qty})`, 'success');
+        console.log('[TCH] monitor turboATC succeeded');
+        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+        return;
+      }
+    }
+  }
+
+  // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
   if (settings.useSavedPayment) {
     const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
     if (buyNowBtn && !buyNowBtn.disabled) {
