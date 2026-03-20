@@ -53,3 +53,32 @@
 - [x] Copy `target-checkout-helper.zip` to repo root during build for easy GitHub ZIP usage.
 - [x] Clarify payload requirements in `README.txt` and `INSTALL.html`.
 - [x] Rebuild artifacts, stage, commit, and push.
+
+---
+
+## Round: UI, drop-time polling, test notes & research plan (current)
+
+### Last test round (what existed)
+- No automated suite; prior verification was **manual in Chrome** (infinite retry, stock-watch, auth challenge slowdown) plus **`node --check`** on `popup.js`, `background.js`, `content.js`.
+- Gaps: no regression harness for DOM/selectors; RedSky/API shape changes would only show up live on Target.
+
+### Implemented this round
+- [x] **Expected drop / restock time** (`datetime-local`): stored on `monitor.dropExpectedAt`. Background TCIN poll uses **250ms** sleep in the **10 min pre-drop** window and **3 min post-drop** grace; **2s** when drop is **>45 min** away. Content-script passive monitor polling uses the same windows to cap interval (min 1s near drop, min 3s base when far).
+- [x] **Popup UI**: “Fastest checkout path” card, clearer monitor copy, **collapsible** Shipping / Payment, drop countdown line, slightly wider layout and card styling.
+- [x] Manifest **1.2.0**.
+
+### Follow-up engineering (technical, not calendar)
+- Add optional **content-script self-test** (dev-only flag) that logs selector hits on a saved HTML fixture — low invasiveness, catches renames.
+- Re-verify **Buy It Now / ATC / checkout** selectors after Target deploys; keep **prefetch** and **saved-payment** path as default fast lane.
+- **Monitor**: consider per-URL drop times if multi-SKU drops become common.
+
+### Target checkout & “anti-bot” — research summary (ethical scope)
+- **Checkout shape**: product → ATC modal → cart or direct **checkout** → shipping → payment → **review** (extension intentionally keeps **Place Order** manual unless test flag).
+- **Friction sources**: session/auth, **human verification** pages, rate limits, WAF/bot scores, inventory APIs returning null under load.
+- **Legitimate resilience** (aligned with site rules): single logged-in profile, avoid pointless **reload spam** (already mitigated via stock-watch + API polling), **back off** when challenge copy appears (`humanChallengeDelayMs`), complete **CAPTCHA/challenges manually**, do not parallelize dozens of sessions.
+- **Out of scope**: bypassing CAPTCHAs, spoofing clients, or evading security controls — those violate Target’s terms and applicable law; the product should **degrade gracefully** (slower retries, user takeover) instead.
+
+### “Other models” (alternative approaches to compare)
+- **Official Target app** + saved address/payment: often the supported fast path for consumers.
+- **In-stock alerts** (email/SMS/third-party): notification-only; this extension focuses on **post-restock** navigation and form automation.
+- **Headless / external runners**: higher ban risk and ToS issues; this repo stays **extension-only, user-present**.
