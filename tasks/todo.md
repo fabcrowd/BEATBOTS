@@ -101,3 +101,8 @@
 ### Fix: constant refresh on checkout (v1.2.3)
 - **Cause**: `scheduleCheckoutRetry` + `performRetryNavigation` could redirect **checkout → cart** or reload while the sign-in / loading shell was showing.
 - **Change**: No navigation retries when `pathname` is `/checkout`; `performRetryNavigation` is a no-op on checkout; checkout step watcher defaults to **infinite wait** (no timeout retry).
+
+### Signed-in desktop E2E (after v1.2.3)
+- **Pass**: Product (`/p/…`) → cart → `/checkout` → **review** with Place Order visible; no refresh loop.
+- **Console**: `review reached`, `checkout_total_to_review` timing logged; toast “Reached review — Place Order remains manual.”
+- **Note**: Saved pickup + saved card path; no manual Place Order click (by design).
