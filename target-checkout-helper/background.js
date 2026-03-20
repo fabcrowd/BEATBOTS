@@ -2,6 +2,8 @@
 // Relays messages between popup/content scripts + orchestrates product monitoring.
 // Background TCIN polling runs here — no browser tab throttling.
 
+importScripts('dropPollingTiming.js');
+
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
 function normalizeProductUrl(url) {
@@ -14,23 +16,6 @@ function normalizeProductUrl(url) {
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-/** Tighter polling near user-provided drop time; relaxed when far away (fewer API calls). */
-function computeBackgroundPollSleepMs(monitor) {
-  const base = 500;
-  const raw = monitor?.dropExpectedAt;
-  if (!raw || typeof raw !== 'string') return base;
-  const t = Date.parse(raw);
-  if (!Number.isFinite(t)) return base;
-  const now = Date.now();
-  const until = t - now;
-  const afterDrop = now - t;
-  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
-  const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
-  if (inPrewindow || inGrace) return 250;
-  if (until > 45 * 60 * 1000) return 2000;
-  return base;
-}
 
 function extractTcin(url) {
   try {

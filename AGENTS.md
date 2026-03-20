@@ -11,6 +11,7 @@ This is **Target Checkout Helper**, a Chrome extension (Manifest V3) that automa
 All extension source lives in `target-checkout-helper/`:
 - `manifest.json` — Chrome MV3 manifest
 - `background.js` — Service worker for message relay
+- `dropPollingTiming.js` — shared drop-window poll intervals (loaded by background + content)
 - `content.js` — Content script injected on target.com pages
 - `popup.html`, `popup.js`, `popup.css` — Extension popup UI
 - `icons/` — Extension icons
@@ -22,7 +23,18 @@ There is no ESLint or other linter configured. Use `node --check` to validate JS
 node --check target-checkout-helper/popup.js
 node --check target-checkout-helper/background.js
 node --check target-checkout-helper/content.js
+node --check target-checkout-helper/dropPollingTiming.js
 ```
+
+### Checkout speed tests (Node, no Target.com)
+
+Measures **polling-interval logic** and a tiny CPU benchmark; it does **not** drive a real checkout (that needs Chrome + Target).
+
+```
+node scripts/checkout-speed-test.mjs
+```
+
+End-to-end time from add-to-cart through **review** is logged on the page as `[TCH] timing checkout_total_to_review: …ms` and summarized in the popup from stored `checkoutSpeeds`.
 
 ### Running / testing the extension
 
