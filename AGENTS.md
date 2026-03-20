@@ -38,6 +38,8 @@ End-to-end time from add-to-cart through **review** is logged on the page as `[T
 
 Reaching **shipping/payment/review** requires completing Target’s sign-in or guest checkout in the tab when prompted — the extension detects that gate (`checkout step: signin`), waits without spamming retries, and can click **Continue as guest** when that control is present.
 
+On **`/checkout`**, the extension **does not** auto-reload or send you back to cart (that used to interrupt sign-in). Turn the extension **off** in the popup if you need a manual full page reload.
+
 ### Running / testing the extension
 
 1. Open Chrome and navigate to `chrome://extensions`

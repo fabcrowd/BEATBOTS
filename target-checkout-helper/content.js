@@ -20,7 +20,7 @@ const SEL = {
 const T = {
   observerTimeout: 10000,
   checkoutProbeInterval: 25,       // ms between checkout step polls (was 60)
-  checkoutProbeTimeout: 6000,      // allow slow SPA checkout shell to render
+  checkoutProbeTimeout: 6000,      // legacy; watchForCheckoutStep defaults to no timeout
   reviewDedupWindowMs: 15000,
   retryMaxAttempts: 0,             // 0 => run until user cancels
   retryDelayMs: 1000,
@@ -319,6 +319,13 @@ function getStockWatchDelay(policy, nullStreak = 0) {
 }
 
 function performRetryNavigation() {
+  // Never leave checkout via automation — Target shows sign-in / guest in this shell; bouncing
+  // to cart or reloading was interrupting users mid sign-in (constant "refresh" loop).
+  if (getPageType() === 'checkout') {
+    console.warn('[TCH] performRetryNavigation skipped on checkout (avoid interrupting sign-in)');
+    return;
+  }
+
   // If we already added to cart (ATC succeeded), go straight to cart → checkout
   // to avoid re-landing on the product page where the button shows "1 in cart".
   if (isCartReady()) {
@@ -328,17 +335,11 @@ function performRetryNavigation() {
   }
 
   const remembered = getRememberedProductUrl();
-  const destination = remembered || (getPageType() === 'checkout'
-    ? 'https://www.target.com/cart'
-    : location.href);
+  const destination = remembered || location.href;
   markRetryNavigation(destination);
 
   if (remembered) {
     window.location.href = remembered;
-    return;
-  }
-  if (getPageType() === 'checkout') {
-    window.location.href = 'https://www.target.com/cart';
     return;
   }
   location.reload();
@@ -346,6 +347,12 @@ function performRetryNavigation() {
 
 async function scheduleCheckoutRetry(settings, reason, details = {}) {
   if (!runtimeEnabled) return false;
+  // Do not schedule reload / cart redirect while on checkout — user must sign in or fix the step locally.
+  if (getPageType() === 'checkout') {
+    console.warn('[TCH] navigation retry suppressed on checkout:', reason);
+    showToast('Checkout: no auto-refresh here — finish sign-in, or turn the extension off to reload.', 'persistent');
+    return false;
+  }
   if (checkoutRetryScheduled) return true;
 
   const policy = getRetryPolicy(settings);
@@ -843,18 +850,19 @@ async function handleCheckoutPage(settings) {
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
   if (step === 'saved')       return handleSavedStep(settings);
-  if (step === 'signin')       return handleSignInGateStep(settings);
-  watchForCheckoutStep(settings);
+  if (step === 'signin' || step === 'unknown') {
+    return handleCheckoutPendingStep(settings, step);
+  }
 }
 
-async function handleSignInGateStep(settings) {
-  console.log('[TCH] checkout: auth gate — sign in to Target or use guest checkout if offered');
+/** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
+async function handleCheckoutPendingStep(settings, step) {
+  console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
   if (tryGuestCheckoutClick()) {
     showToast('Guest checkout…');
     await sleep(600);
   }
-  showToast('Finish signing in on this page. Automation continues when shipping or payment loads.', 'persistent');
-  // No probe timeout / no navigation retry — user may need minutes to authenticate.
+  showToast('Sign in if you see a prompt — this tab will not auto-refresh. We continue when forms load.', 'persistent');
   watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });
 }
 
@@ -905,10 +913,11 @@ function watchForCheckoutStep(settings, options = {}) {
   checkoutStepPollId = setInterval(() => {
     runStep(getCheckoutStep(settings.useSavedPayment));
   }, T.checkoutProbeInterval);
+  // Default: no timeout, no navigation retry — checkout SPA + sign-in can take a long time.
   const probeTimeoutMs = typeof options.probeTimeoutMs === 'number'
     ? options.probeTimeoutMs
-    : T.checkoutProbeTimeout;
-  const noRetryOnTimeout = !!options.noRetryOnTimeout;
+    : 0;
+  const noRetryOnTimeout = options.noRetryOnTimeout !== false;
   if (probeTimeoutMs > 0) {
     checkoutStepPollTimer = setTimeout(() => {
       if (!handled && checkoutStepObserver === observer) {

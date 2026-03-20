@@ -97,3 +97,7 @@
 
 ### To reach review in a real session
 - Stay **logged in** on Target, or use **guest** when the site offers it; fill popup **shipping/payment** if not using saved payment.
+
+### Fix: constant refresh on checkout (v1.2.3)
+- **Cause**: `scheduleCheckoutRetry` + `performRetryNavigation` could redirect **checkout → cart** or reload while the sign-in / loading shell was showing.
+- **Change**: No navigation retries when `pathname` is `/checkout`; `performRetryNavigation` is a no-op on checkout; checkout step watcher defaults to **infinite wait** (no timeout retry).
