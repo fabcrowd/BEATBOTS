@@ -1017,10 +1017,20 @@ async function handlePaymentStep(settings) {
   console.log('[TCH] filling payment');
   markCheckoutFlow('payment_start');
 
+  const hasCardInput = !!document.querySelector(SEL.cardNumber);
+
+  // Form-fill mode: if Target only shows wallet (no inputs), do not click Continue — that would
+  // advance checkout on the account’s saved card. User must change payment on Target first.
+  if (!settings.useSavedPayment && !hasCardInput) {
+    console.warn('[TCH] payment: form-fill mode but no card fields — Target wallet UI; not auto-advancing');
+    showToast('Change payment on Target if you need a non-saved card. Extension will not advance this step for you.', 'persistent');
+    watchForCheckoutStep(settings);
+    return;
+  }
+
   // When useSavedPayment and no card number input is visible, a saved payment method is
   // pre-selected — just click Continue rather than trying to fill non-existent inputs.
   if (settings.useSavedPayment) {
-    const hasCardInput = !!document.querySelector(SEL.cardNumber);
     if (!hasCardInput) {
       console.log('[TCH] payment: saved payment detected (no card input), clicking continue');
       const continueClicked = await waitAndClickContinue(5000);
@@ -1132,6 +1142,7 @@ async function handleReviewStep(settings) {
   if (settings.autoPlaceOrder) {
     // Auto Place Order: resolve the button reference freshly in case the DOM
     // was re-rendered while we were processing, then click.
+    console.warn('[TCH] autoPlaceOrder is ON — this will submit the order if the button is enabled');
     const btn = document.querySelector(SEL.placeOrder) || findByText('place order') || placeOrderBtn;
     if (btn && !btn.disabled) {
       console.log('[TCH] autoPlaceOrder: clicking Place Order');

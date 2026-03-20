@@ -106,3 +106,8 @@
 - **Pass**: Product (`/p/…`) → cart → `/checkout` → **review** with Place Order visible; no refresh loop.
 - **Console**: `review reached`, `checkout_total_to_review` timing logged; toast “Reached review — Place Order remains manual.”
 - **Note**: Saved pickup + saved card path; no manual Place Order click (by design).
+
+### Safety + form-fill E2E (v1.2.4)
+- **Auto place order**: verified **OFF** — no charge; banner “Place Order remains manual.”
+- **Target UI**: Logged-in checkout can still **display** saved Visa in wallet even when “Use saved payment” is off — that is Target’s page, not the extension charging.
+- **Code**: If form-fill mode and **no** card input fields exist, extension **does not** click Continue on payment (avoids silently advancing on wallet UI). Popup copy warns about wallet display vs. who places the order.

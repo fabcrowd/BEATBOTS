@@ -40,6 +40,8 @@ Reaching **shipping/payment/review** requires completing Target’s sign-in or g
 
 On **`/checkout`**, the extension **does not** auto-reload or send you back to cart (that used to interrupt sign-in). Turn the extension **off** in the popup if you need a manual full page reload.
 
+**Charges**: Nothing is purchased unless **you** click Target’s **Place order** (or you enable **Auto place order**, which can charge a real card). With form-fill mode off saved payment, if Target shows **wallet-only** payment (no card inputs), the extension **will not** auto-click Continue on that step — change payment on Target first if you need a different card.
+
 ### Running / testing the extension
 
 1. Open Chrome and navigate to `chrome://extensions`

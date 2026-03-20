@@ -705,6 +705,15 @@ input.error {
   color: #a04000;
 }
 
+.option-hint-safe {
+  background: #f0faf3;
+  border: 1px solid #c8e6d4;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  color: #2d4a38;
+}
+
 .option-badge {
   display: inline-block;
   background: #cc7700;

@@ -78,6 +78,7 @@
 
       <section class="card" aria-labelledby="optionsHeading">
         <h2 id="optionsHeading">Checkout options</h2>
+        <p class="option-hint option-hint-safe">Orders are only placed if <strong>you</strong> tap Place order on Target (or you turn on Auto place order — risky). Logged-in Target may still <em>show</em> your saved card on their checkout until you change it there.</p>
         <label class="option-row">
           <input type="checkbox" id="useSavedPayment">
           <span class="option-label">Use saved payment &amp; address</span>
@@ -87,7 +88,7 @@
           <input type="checkbox" id="autoPlaceOrder">
           <span class="option-label">Auto place order <span class="option-badge">TEST</span></span>
         </label>
-        <p class="option-hint option-hint-warn">Clicks Place Order on the review step. Use only with a test card. Normally leave off — you confirm the order yourself.</p>
+        <p class="option-hint option-hint-warn">Clicks Place Order — can charge a real card. <strong>Never turn on</strong> with your real card; use only with Target’s test flow or a disposable test card. Leave off for normal use.</p>
         <div id="speedCompare" class="speed-compare" hidden></div>
       </section>
     </div>
