@@ -274,6 +274,23 @@ function getStockWatchDelay(policy, nullStreak = 0) {
   return Math.min(base + jitter + nullPenalty, T.retryMaxDelayMs);
 }
 
+/** Faster passive polling near optional monitor.dropExpectedAt; slower when the drop is hours away. */
+function getDropAwarePollSeconds(monitor, baseSec) {
+  const b = Math.max(0.25, Number(baseSec) || 1);
+  const raw = monitor?.dropExpectedAt;
+  if (!raw || typeof raw !== 'string') return b;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return b;
+  const now = Date.now();
+  const until = t - now;
+  const afterDrop = now - t;
+  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
+  if (inPrewindow || inGrace) return Math.min(b, 1);
+  if (until > 30 * 60 * 1000) return Math.max(b, 3);
+  return b;
+}
+
 function performRetryNavigation() {
   // If we already added to cart (ATC succeeded), go straight to cart → checkout
   // to avoid re-landing on the product page where the button shows "1 in cart".
@@ -1274,7 +1291,7 @@ async function handleMonitoredATC(monitor, product) {
   rememberProductUrl(product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;
-  const interval = monitor.refreshInterval || 1;
+  const interval = getDropAwarePollSeconds(monitor, monitor.refreshInterval || 1);
 
   if (currentCount >= product.qty) return;
 
@@ -1389,7 +1406,7 @@ async function handleMonitoredATC(monitor, product) {
     } else if (pollCount % 10 === 0) {
       showToast(`Polling… (${pollCount} checks)`, 'persistent');
     }
-  }, interval * 1000);
+  }, Math.round(interval * 1000));
 }
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────

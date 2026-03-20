@@ -15,6 +15,23 @@ function normalizeProductUrl(url) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** Tighter polling near user-provided drop time; relaxed when far away (fewer API calls). */
+function computeBackgroundPollSleepMs(monitor) {
+  const base = 500;
+  const raw = monitor?.dropExpectedAt;
+  if (!raw || typeof raw !== 'string') return base;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return base;
+  const now = Date.now();
+  const until = t - now;
+  const afterDrop = now - t;
+  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
+  if (inPrewindow || inGrace) return 250;
+  if (until > 45 * 60 * 1000) return 2000;
+  return base;
+}
+
 function extractTcin(url) {
   try {
     const u = new URL(url);
@@ -220,7 +237,7 @@ async function runBackgroundPoll() {
       break;
     }
 
-    await sleep(500); // was 1000ms — tighter polling for faster restock detection
+    await sleep(computeBackgroundPollSleepMs(monitor));
   }
   console.log('[TCH bg] background TCIN poll stopped');
 }
@@ -296,7 +313,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'START_MONITOR':
-      startMonitor(message.products, message.refreshInterval)
+      startMonitor(message.products, message.refreshInterval, message.dropExpectedAt)
         .then(() => sendResponse({ ok: true }));
       return true;
 
@@ -382,7 +399,7 @@ function broadcastToTarget(message) {
 
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
 
-async function startMonitor(products, refreshInterval) {
+async function startMonitor(products, refreshInterval, dropExpectedAt) {
   await stopMonitor();
 
   const counts = {};
@@ -396,6 +413,9 @@ async function startMonitor(products, refreshInterval) {
     tabIds: [],
     urlToTabId: {},
   };
+  if (dropExpectedAt && String(dropExpectedAt).trim()) {
+    monitor.dropExpectedAt = String(dropExpectedAt).trim();
+  }
 
   await chrome.storage.local.set({
     monitor,

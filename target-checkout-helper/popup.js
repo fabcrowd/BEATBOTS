@@ -166,6 +166,8 @@ const monitorControls    = $('monitorControls');
 const monitorBtn         = $('monitorBtn');
 const monitorStatusEl    = $('monitorStatus');
 const refreshIntervalIn  = $('refreshInterval');
+const dropExpectedAtIn   = $('dropExpectedAt');
+const dropCountdownEl    = $('dropCountdown');
 
 let products = [];
 let monitorActive = false;
@@ -239,11 +241,51 @@ function renderProducts() {
   });
 }
 
+function readDropExpectedAtValue() {
+  const v = (dropExpectedAtIn?.value || '').trim();
+  return v || null;
+}
+
 async function saveProducts() {
   const { monitor } = await chrome.storage.local.get('monitor');
-  await chrome.storage.local.set({
-    monitor: { ...(monitor || {}), products },
-  });
+  const next = { ...(monitor || {}), products };
+  const dropVal = readDropExpectedAtValue();
+  if (dropVal) next.dropExpectedAt = dropVal;
+  else delete next.dropExpectedAt;
+  await chrome.storage.local.set({ monitor: next });
+}
+
+function formatDropCountdown(iso) {
+  if (!dropCountdownEl || !iso) {
+    if (dropCountdownEl) dropCountdownEl.textContent = '';
+    return;
+  }
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) {
+    dropCountdownEl.textContent = '';
+    return;
+  }
+  const now = Date.now();
+  const d = t - now;
+  const after = now - t;
+  if (after > 3 * 60 * 1000) {
+    dropCountdownEl.textContent = 'Drop time passed — clear or update for next drop';
+    return;
+  }
+  if (d < 0 && after <= 3 * 60 * 1000) {
+    dropCountdownEl.textContent = 'In drop window — fast polling';
+    return;
+  }
+  const s = Math.floor(d / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) {
+    dropCountdownEl.textContent = `${h}h ${m % 60}m until drop`;
+  } else if (m > 0) {
+    dropCountdownEl.textContent = `${m}m ${s % 60}s until drop`;
+  } else {
+    dropCountdownEl.textContent = `${s}s until drop`;
+  }
 }
 
 function addProduct() {
@@ -288,6 +330,7 @@ async function toggleMonitor() {
       type: 'START_MONITOR',
       products,
       refreshInterval: parseInt(refreshIntervalIn.value) || 1,
+      dropExpectedAt: readDropExpectedAtValue(),
     });
     monitorActive = true;
     updateMonitorUI();
@@ -296,12 +339,13 @@ async function toggleMonitor() {
 }
 
 function updateMonitorUI() {
-  monitorBtn.textContent = monitorActive ? 'Stop Monitoring' : 'Start Monitoring';
+  monitorBtn.textContent = monitorActive ? 'Stop monitoring' : 'Start monitoring';
   monitorBtn.classList.toggle('active', monitorActive);
   monitorBtn.disabled = !monitorActive && !products.length;
   productUrlInput.disabled = monitorActive;
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
+  if (dropExpectedAtIn) dropExpectedAtIn.disabled = monitorActive;
   renderProducts();
 }
 
@@ -386,6 +430,7 @@ function stopStatusPoll() {
 async function loadMonitorData() {
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) {
+    formatDropCountdown('');
     pollStatus();
     return;
   }
@@ -393,11 +438,26 @@ async function loadMonitorData() {
   products = monitor.products || [];
   monitorActive = !!monitor.active;
   if (monitor.refreshInterval) refreshIntervalIn.value = monitor.refreshInterval;
+  if (dropExpectedAtIn && monitor.dropExpectedAt) {
+    dropExpectedAtIn.value = monitor.dropExpectedAt;
+  }
 
   renderProducts();
   updateMonitorUI();
+  formatDropCountdown(monitor.dropExpectedAt || readDropExpectedAtValue() || '');
   if (monitorActive) startStatusPoll();
   else pollStatus();
 }
+
+if (dropExpectedAtIn) {
+  dropExpectedAtIn.addEventListener('change', () => {
+    formatDropCountdown(readDropExpectedAtValue() || '');
+    saveProducts();
+  });
+}
+
+setInterval(() => {
+  formatDropCountdown(readDropExpectedAtValue() || '');
+}, 1000);
 
 loadMonitorData();
