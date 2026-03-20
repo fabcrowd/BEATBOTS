@@ -43,7 +43,9 @@ End-to-end time from add-to-cart through **review** is logged on the page as `[T
 3. Click **Load unpacked** → select the `target-checkout-helper` directory
 4. The extension appears in the extensions list and toolbar
 
-To test the popup UI: click the puzzle-piece icon in the Chrome toolbar, then click "Target Checkout Helper". Toggle ON, fill shipping/payment fields, click **Save Settings**.
+To test the popup UI: click the puzzle-piece icon in the Chrome toolbar, then click "Target Checkout Helper". Toggle ON, fill shipping/payment fields, click **Save settings**. Do not open `popup.html` as a `file://` page — `chrome.storage` is unavailable there (tabs and save use the real popup).
+
+Run `node scripts/checkout-speed-test.mjs` for drop-polling logic checks.
 
 ### Key caveats
 
