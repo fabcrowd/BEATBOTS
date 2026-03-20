@@ -36,6 +36,8 @@ node scripts/checkout-speed-test.mjs
 
 End-to-end time from add-to-cart through **review** is logged on the page as `[TCH] timing checkout_total_to_review: …ms` and summarized in the popup from stored `checkoutSpeeds`.
 
+Reaching **shipping/payment/review** requires completing Target’s sign-in or guest checkout in the tab when prompted — the extension detects that gate (`checkout step: signin`), waits without spamming retries, and can click **Continue as guest** when that control is present.
+
 ### Running / testing the extension
 
 1. Open Chrome and navigate to `chrome://extensions`

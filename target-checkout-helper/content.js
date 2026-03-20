@@ -20,7 +20,7 @@ const SEL = {
 const T = {
   observerTimeout: 10000,
   checkoutProbeInterval: 25,       // ms between checkout step polls (was 60)
-  checkoutProbeTimeout: 2500,
+  checkoutProbeTimeout: 6000,      // allow slow SPA checkout shell to render
   reviewDedupWindowMs: 15000,
   retryMaxAttempts: 0,             // 0 => run until user cancels
   retryDelayMs: 1000,
@@ -71,6 +71,50 @@ function fillSelect(select, value) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+
+function isVisible(el) {
+  if (!el || !(el instanceof Element)) return false;
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  const st = getComputedStyle(el);
+  if (st.visibility === 'hidden' || st.display === 'none') return false;
+  return true;
+}
+
+/** Target often shows sign-in / guest choice before shipping — not "unknown" checkout. */
+function hasCheckoutAuthGate() {
+  if (getPageType() !== 'checkout') return false;
+  const authTest = document.querySelector(
+    '[data-test="authModal"], [data-test="loginModal"], [data-test*="signIn" i], [data-test*="SignIn" i]'
+  );
+  if (authTest && isVisible(authTest)) return true;
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  for (const d of dialogs) {
+    if (!isVisible(d)) continue;
+    const tx = (d.innerText || '').toLowerCase();
+    if (tx.includes('sign in') && (tx.includes('password') || tx.includes('email'))) return true;
+  }
+  const t = (document.body?.innerText || '').slice(0, 14000).toLowerCase();
+  if (t.includes('sign in or create account')) return true;
+  if (t.includes('sign in to checkout')) return true;
+  return false;
+}
+
+function tryGuestCheckoutClick() {
+  const needles = ['continue as guest', 'checkout as guest', 'guest checkout', 'continue as a guest'];
+  const candidates = Array.from(document.querySelectorAll('button, a[href], [role="button"]'));
+  for (const needle of needles) {
+    const el = candidates.find((b) => {
+      const raw = b.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+      return raw.includes(needle) && !b.disabled;
+    });
+    if (el) {
+      el.click();
+      return true;
+    }
+  }
+  return false;
+}
 
 function startTiming(label, details = '') {
   const started = performance.now();
@@ -643,6 +687,7 @@ function getCheckoutStep(useSavedPayment = false) {
     .some(s => document.querySelector(s))) return 'shipping';
   // When using saved payment, a pre-populated step shows a Continue button with no form fields.
   if (useSavedPayment && findContinueButton(true)) return 'saved';
+  if (hasCheckoutAuthGate()) return 'signin';
   return 'unknown';
 }
 
@@ -798,10 +843,22 @@ async function handleCheckoutPage(settings) {
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
   if (step === 'saved')       return handleSavedStep(settings);
+  if (step === 'signin')       return handleSignInGateStep(settings);
   watchForCheckoutStep(settings);
 }
 
-function watchForCheckoutStep(settings) {
+async function handleSignInGateStep(settings) {
+  console.log('[TCH] checkout: auth gate — sign in to Target or use guest checkout if offered');
+  if (tryGuestCheckoutClick()) {
+    showToast('Guest checkout…');
+    await sleep(600);
+  }
+  showToast('Finish signing in on this page. Automation continues when shipping or payment loads.', 'persistent');
+  // No probe timeout / no navigation retry — user may need minutes to authenticate.
+  watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });
+}
+
+function watchForCheckoutStep(settings, options = {}) {
   if (checkoutStepObserver) {
     checkoutStepObserver.disconnect();
     checkoutStepObserver = null;
@@ -818,7 +875,7 @@ function watchForCheckoutStep(settings) {
   let handled = false;
   const runStep = async (step) => {
     if (handled) return;
-    if (step === 'unknown') return;
+    if (step === 'unknown' || step === 'signin') return;
     handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {
@@ -848,20 +905,30 @@ function watchForCheckoutStep(settings) {
   checkoutStepPollId = setInterval(() => {
     runStep(getCheckoutStep(settings.useSavedPayment));
   }, T.checkoutProbeInterval);
-  checkoutStepPollTimer = setTimeout(() => {
-    if (!handled && checkoutStepObserver === observer) {
-      observer.disconnect();
-      checkoutStepObserver = null;
-    }
-    if (checkoutStepPollId) {
-      clearInterval(checkoutStepPollId);
-      checkoutStepPollId = null;
-    }
-    if (!handled) {
-      scheduleCheckoutRetry(settings, 'Checkout step detection timed out');
-    }
-    checkoutStepPollTimer = null;
-  }, T.checkoutProbeTimeout);
+  const probeTimeoutMs = typeof options.probeTimeoutMs === 'number'
+    ? options.probeTimeoutMs
+    : T.checkoutProbeTimeout;
+  const noRetryOnTimeout = !!options.noRetryOnTimeout;
+  if (probeTimeoutMs > 0) {
+    checkoutStepPollTimer = setTimeout(() => {
+      if (!handled && checkoutStepObserver === observer) {
+        observer.disconnect();
+        checkoutStepObserver = null;
+      }
+      if (checkoutStepPollId) {
+        clearInterval(checkoutStepPollId);
+        checkoutStepPollId = null;
+      }
+      if (!handled) {
+        if (noRetryOnTimeout) {
+          console.warn('[TCH] checkout step watch stopped by timeout (sign-in flow may need more time)');
+        } else {
+          scheduleCheckoutRetry(settings, 'Checkout step detection timed out');
+        }
+      }
+      checkoutStepPollTimer = null;
+    }, probeTimeoutMs);
+  }
 }
 
 async function handleShippingStep(settings) {

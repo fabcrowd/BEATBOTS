@@ -82,3 +82,18 @@
 - **Official Target app** + saved address/payment: often the supported fast path for consumers.
 - **In-stock alerts** (email/SMS/third-party): notification-only; this extension focuses on **post-restock** navigation and form automation.
 - **Headless / external runners**: higher ban risk and ToS issues; this repo stays **extension-only, user-present**.
+
+---
+
+## Checkout E2E iterations (auth gate)
+
+### Desktop test (Mar 2025)
+- **Reached** `https://www.target.com/checkout` from browse → product → ATC → cart flow with extension enabled.
+- **Blocked** at Target **sign-in / account** UI — expected without stored session.
+- **Console**: previously `checkout step: unknown` then probe timeout; **fixed** by detecting `signin` gate, optional **guest** click, and **indefinite watch** (no navigation retry) until shipping/payment DOM appears.
+
+### Automated checks
+- `node --check` on touched JS; `node scripts/checkout-speed-test.mjs` for drop polling math.
+
+### To reach review in a real session
+- Stay **logged in** on Target, or use **guest** when the site offers it; fill popup **shipping/payment** if not using saved payment.
