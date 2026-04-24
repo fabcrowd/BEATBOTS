@@ -53,3 +53,61 @@
 - [x] Copy `target-checkout-helper.zip` to repo root during build for easy GitHub ZIP usage.
 - [x] Clarify payload requirements in `README.txt` and `INSTALL.html`.
 - [x] Rebuild artifacts, stage, commit, and push.
+
+---
+
+## Round: UI, drop-time polling, test notes & research plan (current)
+
+### Last test round (what existed)
+- No automated suite; prior verification was **manual in Chrome** (infinite retry, stock-watch, auth challenge slowdown) plus **`node --check`** on `popup.js`, `background.js`, `content.js`.
+- Gaps: no regression harness for DOM/selectors; RedSky/API shape changes would only show up live on Target.
+
+### Implemented this round
+- [x] **Expected drop / restock time** (`datetime-local`): stored on `monitor.dropExpectedAt`. Background TCIN poll uses **250ms** sleep in the **10 min pre-drop** window and **3 min post-drop** grace; **2s** when drop is **>45 min** away. Content-script passive monitor polling uses the same windows to cap interval (min 1s near drop, min 3s base when far).
+- [x] **Popup UI**: “Fastest checkout path” card, clearer monitor copy, **collapsible** Shipping / Payment, drop countdown line, slightly wider layout and card styling.
+- [x] Manifest **1.2.0**.
+
+### Follow-up engineering (technical, not calendar)
+- Add optional **content-script self-test** (dev-only flag) that logs selector hits on a saved HTML fixture — low invasiveness, catches renames.
+- Re-verify **Buy It Now / ATC / checkout** selectors after Target deploys; keep **prefetch** and **saved-payment** path as default fast lane.
+- **Monitor**: consider per-URL drop times if multi-SKU drops become common.
+
+### Target checkout & “anti-bot” — research summary (ethical scope)
+- **Checkout shape**: product → ATC modal → cart or direct **checkout** → shipping → payment → **review** (extension intentionally keeps **Place Order** manual unless test flag).
+- **Friction sources**: session/auth, **human verification** pages, rate limits, WAF/bot scores, inventory APIs returning null under load.
+- **Legitimate resilience** (aligned with site rules): single logged-in profile, avoid pointless **reload spam** (already mitigated via stock-watch + API polling), **back off** when challenge copy appears (`humanChallengeDelayMs`), complete **CAPTCHA/challenges manually**, do not parallelize dozens of sessions.
+- **Out of scope**: bypassing CAPTCHAs, spoofing clients, or evading security controls — those violate Target’s terms and applicable law; the product should **degrade gracefully** (slower retries, user takeover) instead.
+
+### “Other models” (alternative approaches to compare)
+- **Official Target app** + saved address/payment: often the supported fast path for consumers.
+- **In-stock alerts** (email/SMS/third-party): notification-only; this extension focuses on **post-restock** navigation and form automation.
+- **Headless / external runners**: higher ban risk and ToS issues; this repo stays **extension-only, user-present**.
+
+---
+
+## Checkout E2E iterations (auth gate)
+
+### Desktop test (Mar 2025)
+- **Reached** `https://www.target.com/checkout` from browse → product → ATC → cart flow with extension enabled.
+- **Blocked** at Target **sign-in / account** UI — expected without stored session.
+- **Console**: previously `checkout step: unknown` then probe timeout; **fixed** by detecting `signin` gate, optional **guest** click, and **indefinite watch** (no navigation retry) until shipping/payment DOM appears.
+
+### Automated checks
+- `node --check` on touched JS; `node scripts/checkout-speed-test.mjs` for drop polling math.
+
+### To reach review in a real session
+- Stay **logged in** on Target, or use **guest** when the site offers it; fill popup **shipping/payment** if not using saved payment.
+
+### Fix: constant refresh on checkout (v1.2.3)
+- **Cause**: `scheduleCheckoutRetry` + `performRetryNavigation` could redirect **checkout → cart** or reload while the sign-in / loading shell was showing.
+- **Change**: No navigation retries when `pathname` is `/checkout`; `performRetryNavigation` is a no-op on checkout; checkout step watcher defaults to **infinite wait** (no timeout retry).
+
+### Signed-in desktop E2E (after v1.2.3)
+- **Pass**: Product (`/p/…`) → cart → `/checkout` → **review** with Place Order visible; no refresh loop.
+- **Console**: `review reached`, `checkout_total_to_review` timing logged; toast “Reached review — Place Order remains manual.”
+- **Note**: Saved pickup + saved card path; no manual Place Order click (by design).
+
+### Safety + form-fill E2E (v1.2.4)
+- **Auto place order**: verified **OFF** — no charge; banner “Place Order remains manual.”
+- **Target UI**: Logged-in checkout can still **display** saved Visa in wallet even when “Use saved payment” is off — that is Target’s page, not the extension charging.
+- **Code**: If form-fill mode and **no** card input fields exist, extension **does not** click Continue on payment (avoids silently advancing on wallet UI). Popup copy warns about wallet display vs. who places the order.

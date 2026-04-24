@@ -2,115 +2,156 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header>
+  <header class="app-header">
     <div class="header-row">
-      <h1>Target Checkout Helper</h1>
-      <label class="toggle">
-        <input type="checkbox" id="enableToggle">
-        <span class="slider"></span>
+      <div class="header-title-block">
+        <h1 id="appTitle">Target Checkout Helper</h1>
+        <div class="header-status-row">
+          <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+          <p class="subtitle" id="statusText" role="status">Extension disabled</p>
+        </div>
+      </div>
+      <label class="toggle" title="Turn automation on or off">
+        <span class="sr-only">Extension enabled</span>
+        <input type="checkbox" id="enableToggle" aria-describedby="statusText">
+        <span class="slider" aria-hidden="true"></span>
       </label>
     </div>
-    <p class="subtitle" id="statusText">Extension disabled</p>
   </header>
 
-  <main>
-    <!-- Product Monitor Section -->
-    <section class="card">
-      <h2>Product Monitor</h2>
-      <div class="product-input-row">
-        <input type="url" id="productUrl" placeholder="Paste Target product URL">
-        <button id="addProductBtn" class="btn-icon">+</button>
-      </div>
-      <ul id="productList" class="product-list"></ul>
-      <div id="monitorControls" style="display:none">
-        <div class="monitor-interval">
-          Retry every <input type="number" id="refreshInterval" value="1" min="1" max="60"> sec
-        </div>
-        <div class="monitor-retry">
-          Checkout retries <input type="number" id="checkoutRetryMax" value="0" min="0" max="50">
-          <span class="retry-note">(0 = until cancel)</span>
-        </div>
-        <div class="monitor-retry">
-          Retry delay <input type="number" id="checkoutRetryDelay" value="1" min="1" max="60"> sec
-        </div>
-        <button id="monitorBtn" class="btn-monitor">Start Monitoring</button>
-      </div>
-      <p id="monitorStatus" class="monitor-status"></p>
-    </section>
+  <nav class="tab-nav" role="tablist" aria-label="Popup sections">
+    <button type="button" role="tab" id="tabMain" class="tab-btn tab-btn-active" aria-selected="true" aria-controls="panelMain" data-panel="main">Monitor &amp; options</button>
+    <button type="button" role="tab" id="tabForms" class="tab-btn" aria-selected="false" aria-controls="panelForms" data-panel="forms">Shipping &amp; payment</button>
+  </nav>
 
-    <!-- Shipping Section -->
-    <section class="card">
-      <h2>Shipping</h2>
-      <div class="field-row">
-        <input type="text" id="firstName" placeholder="First name" autocomplete="given-name">
-        <input type="text" id="lastName" placeholder="Last name" autocomplete="family-name">
-      </div>
-      <input type="text" id="address1" placeholder="Address line 1" autocomplete="address-line1">
-      <input type="text" id="address2" placeholder="Address line 2 (optional)" autocomplete="address-line2">
-      <div class="field-row">
-        <input type="text" id="city" placeholder="City" autocomplete="address-level2">
-        <select id="state" autocomplete="address-level1">
-          <option value="">State</option>
-          <option value="AL">AL</option><option value="AK">AK</option><option value="AZ">AZ</option>
-          <option value="AR">AR</option><option value="CA">CA</option><option value="CO">CO</option>
-          <option value="CT">CT</option><option value="DE">DE</option><option value="FL">FL</option>
-          <option value="GA">GA</option><option value="HI">HI</option><option value="ID">ID</option>
-          <option value="IL">IL</option><option value="IN">IN</option><option value="IA">IA</option>
-          <option value="KS">KS</option><option value="KY">KY</option><option value="LA">LA</option>
-          <option value="ME">ME</option><option value="MD">MD</option><option value="MA">MA</option>
-          <option value="MI">MI</option><option value="MN">MN</option><option value="MS">MS</option>
-          <option value="MO">MO</option><option value="MT">MT</option><option value="NE">NE</option>
-          <option value="NV">NV</option><option value="NH">NH</option><option value="NJ">NJ</option>
-          <option value="NM">NM</option><option value="NY">NY</option><option value="NC">NC</option>
-          <option value="ND">ND</option><option value="OH">OH</option><option value="OK">OK</option>
-          <option value="OR">OR</option><option value="PA">PA</option><option value="RI">RI</option>
-          <option value="SC">SC</option><option value="SD">SD</option><option value="TN">TN</option>
-          <option value="TX">TX</option><option value="UT">UT</option><option value="VT">VT</option>
-          <option value="VA">VA</option><option value="WA">WA</option><option value="WV">WV</option>
-          <option value="WI">WI</option><option value="WY">WY</option><option value="DC">DC</option>
-        </select>
-      </div>
-      <div class="field-row">
-        <input type="text" id="zip" placeholder="ZIP code" autocomplete="postal-code" maxlength="10">
-        <input type="tel" id="phone" placeholder="Phone" autocomplete="tel">
-      </div>
-    </section>
+  <main id="popupMain">
+    <div id="panelMain" class="tab-panel" role="tabpanel" aria-labelledby="tabMain">
+      <details class="card card-tips">
+        <summary class="tips-summary">Quick tips for the fastest checkout</summary>
+        <ol class="quick-path">
+          <li>Stay <strong>logged in</strong> on Target in a dedicated window.</li>
+          <li>On the <strong>Shipping &amp; payment</strong> tab, turn on <strong>Use saved payment &amp; address</strong> when your card and address are saved on Target.</li>
+          <li>Enable the extension, open a <strong>product</strong> page (<code>/p/…</code>), then let it add to cart and continue to checkout.</li>
+          <li>For drops, set <strong>Expected drop time</strong> so polling tightens near go-time.</li>
+        </ol>
+      </details>
 
-    <!-- Payment Section -->
-    <section class="card">
-      <h2>Payment</h2>
-      <input type="text" id="cardNumber" placeholder="Card number" autocomplete="cc-number" maxlength="19">
-      <div class="field-row triple">
-        <input type="text" id="expMonth" placeholder="MM" autocomplete="cc-exp-month" maxlength="2">
-        <input type="text" id="expYear" placeholder="YYYY" autocomplete="cc-exp-year" maxlength="4">
-        <input type="text" id="cvv" placeholder="CVV" autocomplete="cc-csc" maxlength="4">
-      </div>
-      <input type="text" id="billingZip" placeholder="Billing ZIP (if different)" maxlength="10">
-    </section>
+      <section class="card" aria-labelledby="monitorHeading">
+        <h2 id="monitorHeading">Product monitor</h2>
+        <p class="section-lead">Opens a background tab per URL and polls inventory. When stock appears, that tab reloads and runs add-to-cart → checkout.</p>
+        <div class="product-input-row">
+          <input type="url" id="productUrl" placeholder="https://www.target.com/p/…" autocomplete="off" aria-label="Target product URL">
+          <button type="button" id="addProductBtn" class="btn-icon" aria-label="Add product to list">+</button>
+        </div>
+        <p id="productListEmpty" class="empty-hint" hidden>No products yet — paste a product link and tap +</p>
+        <ul id="productList" class="product-list" aria-label="Monitored products"></ul>
+        <div id="monitorControls" class="monitor-controls" hidden>
+          <div class="drop-block">
+            <label class="field-label" for="dropExpectedAt">Expected drop / restock (local time)</label>
+            <input type="datetime-local" id="dropExpectedAt" class="input-datetime" aria-describedby="dropHint">
+            <p id="dropCountdown" class="drop-countdown" aria-live="polite"></p>
+            <p id="dropHint" class="field-hint">Optional. Polling speeds up in the 10 minutes before this time (and briefly after).</p>
+          </div>
+          <div class="monitor-grid">
+            <div class="monitor-field">
+              <label class="field-label" for="refreshInterval">Poll every (sec)</label>
+              <input type="number" id="refreshInterval" value="1" min="1" max="60">
+            </div>
+            <div class="monitor-field">
+              <label class="field-label" for="checkoutRetryMax">Checkout retries</label>
+              <input type="number" id="checkoutRetryMax" value="0" min="0" max="50" aria-describedby="retryMaxHint">
+              <span id="retryMaxHint" class="inline-hint">0 = until you cancel</span>
+            </div>
+            <div class="monitor-field monitor-field-wide">
+              <label class="field-label" for="checkoutRetryDelay">Retry delay (sec)</label>
+              <input type="number" id="checkoutRetryDelay" value="1" min="1" max="60">
+            </div>
+          </div>
+          <button type="button" id="monitorBtn" class="btn-monitor">Start monitoring</button>
+        </div>
+        <div id="monitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
+      </section>
 
-    <!-- Checkout Options Section -->
-    <section class="card">
-      <h2>Checkout Options</h2>
-      <label class="option-row">
-        <input type="checkbox" id="useSavedPayment">
-        <span class="option-label">Use saved payment &amp; address</span>
-      </label>
-      <p class="option-hint">Clicks "Buy It Now" or uses "View Cart &amp; Check Out" after ATC — uses your Target account's saved info. Requires being logged in with a saved address &amp; payment method.</p>
-      <label class="option-row">
-        <input type="checkbox" id="autoPlaceOrder">
-        <span class="option-label">Auto Place Order <span class="option-badge">TEST</span></span>
-      </label>
-      <p class="option-hint option-hint-warn">Automatically clicks "Place Order" at the review step. Use a test card to verify the full checkout flow (you will see a card decline). Leave OFF for normal use.</p>
-      <div id="speedCompare" class="speed-compare" style="display:none"></div>
-    </section>
+      <section class="card" aria-labelledby="optionsHeading">
+        <h2 id="optionsHeading">Checkout options</h2>
+        <p class="option-hint option-hint-safe">Orders are only placed if <strong>you</strong> tap Place order on Target (or you turn on Auto place order — risky). Logged-in Target may still <em>show</em> your saved card on their checkout until you change it there.</p>
+        <label class="option-row">
+          <input type="checkbox" id="useSavedPayment">
+          <span class="option-label">Use saved payment &amp; address</span>
+        </label>
+        <p class="option-hint">Uses Buy It Now or “View cart &amp; check out” after add-to-cart when you are logged in with saved address and card.</p>
+        <label class="option-row">
+          <input type="checkbox" id="autoPlaceOrder">
+          <span class="option-label">Auto place order <span class="option-badge">TEST</span></span>
+        </label>
+        <p class="option-hint option-hint-warn">Clicks Place Order — can charge a real card. <strong>Never turn on</strong> with your real card; use only with Target’s test flow or a disposable test card. Leave off for normal use.</p>
+        <div id="speedCompare" class="speed-compare" hidden></div>
+      </section>
+    </div>
+
+    <div id="panelForms" class="tab-panel" role="tabpanel" aria-labelledby="tabForms" hidden>
+      <section class="card form-section">
+        <h2>Shipping</h2>
+        <div class="field-row">
+          <input type="text" id="firstName" placeholder="First name" autocomplete="given-name">
+          <input type="text" id="lastName" placeholder="Last name" autocomplete="family-name">
+        </div>
+        <input type="text" id="address1" placeholder="Address line 1" autocomplete="address-line1">
+        <input type="text" id="address2" placeholder="Address line 2 (optional)" autocomplete="address-line2">
+        <div class="field-row">
+          <input type="text" id="city" placeholder="City" autocomplete="address-level2">
+          <select id="state" autocomplete="address-level1">
+            <option value="">State</option>
+            <option value="AL">AL</option><option value="AK">AK</option><option value="AZ">AZ</option>
+            <option value="AR">AR</option><option value="CA">CA</option><option value="CO">CO</option>
+            <option value="CT">CT</option><option value="DE">DE</option><option value="FL">FL</option>
+            <option value="GA">GA</option><option value="HI">HI</option><option value="ID">ID</option>
+            <option value="IL">IL</option><option value="IN">IN</option><option value="IA">IA</option>
+            <option value="KS">KS</option><option value="KY">KY</option><option value="LA">LA</option>
+            <option value="ME">ME</option><option value="MD">MD</option><option value="MA">MA</option>
+            <option value="MI">MI</option><option value="MN">MN</option><option value="MS">MS</option>
+            <option value="MO">MO</option><option value="MT">MT</option><option value="NE">NE</option>
+            <option value="NV">NV</option><option value="NH">NH</option><option value="NJ">NJ</option>
+            <option value="NM">NM</option><option value="NY">NY</option><option value="NC">NC</option>
+            <option value="ND">ND</option><option value="OH">OH</option><option value="OK">OK</option>
+            <option value="OR">OR</option><option value="PA">PA</option><option value="RI">RI</option>
+            <option value="SC">SC</option><option value="SD">SD</option><option value="TN">TN</option>
+            <option value="TX">TX</option><option value="UT">UT</option><option value="VT">VT</option>
+            <option value="VA">VA</option><option value="WA">WA</option><option value="WV">WV</option>
+            <option value="WI">WI</option><option value="WY">WY</option><option value="DC">DC</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <input type="text" id="zip" placeholder="ZIP code" autocomplete="postal-code" maxlength="10">
+          <input type="tel" id="phone" placeholder="Phone" autocomplete="tel">
+        </div>
+      </section>
+
+      <section class="card form-section">
+        <h2>Payment</h2>
+        <input type="text" id="cardNumber" placeholder="Card number" autocomplete="cc-number" maxlength="19">
+        <div class="field-row triple">
+          <input type="text" id="expMonth" placeholder="MM" autocomplete="cc-exp-month" maxlength="2">
+          <input type="text" id="expYear" placeholder="YYYY" autocomplete="cc-exp-year" maxlength="4">
+          <input type="text" id="cvv" placeholder="CVV" autocomplete="cc-csc" maxlength="4">
+        </div>
+        <input type="text" id="billingZip" placeholder="Billing ZIP (if different)" maxlength="10">
+      </section>
+    </div>
   </main>
 
-  <footer>
-    <button id="saveBtn" class="btn-primary">Save Settings</button>
-    <p class="footer-note">Your data is stored locally — never sent anywhere.</p>
+  <div id="toastRegion" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <footer class="app-footer">
+    <button type="button" id="saveBtn" class="btn-primary">Save settings</button>
+    <p class="footer-meta">
+      <span class="footer-note">Stored only on this device.</span>
+      <span id="extVersion" class="footer-version"></span>
+    </p>
   </footer>
 
   <script src="popup.js"></script>

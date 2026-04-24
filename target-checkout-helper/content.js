@@ -20,7 +20,7 @@ const SEL = {
 const T = {
   observerTimeout: 10000,
   checkoutProbeInterval: 25,       // ms between checkout step polls (was 60)
-  checkoutProbeTimeout: 2500,
+  checkoutProbeTimeout: 6000,      // legacy; watchForCheckoutStep defaults to no timeout
   reviewDedupWindowMs: 15000,
   retryMaxAttempts: 0,             // 0 => run until user cancels
   retryDelayMs: 1000,
@@ -71,6 +71,50 @@ function fillSelect(select, value) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+
+function isVisible(el) {
+  if (!el || !(el instanceof Element)) return false;
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  const st = getComputedStyle(el);
+  if (st.visibility === 'hidden' || st.display === 'none') return false;
+  return true;
+}
+
+/** Target often shows sign-in / guest choice before shipping — not "unknown" checkout. */
+function hasCheckoutAuthGate() {
+  if (getPageType() !== 'checkout') return false;
+  const authTest = document.querySelector(
+    '[data-test="authModal"], [data-test="loginModal"], [data-test*="signIn" i], [data-test*="SignIn" i]'
+  );
+  if (authTest && isVisible(authTest)) return true;
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  for (const d of dialogs) {
+    if (!isVisible(d)) continue;
+    const tx = (d.innerText || '').toLowerCase();
+    if (tx.includes('sign in') && (tx.includes('password') || tx.includes('email'))) return true;
+  }
+  const t = (document.body?.innerText || '').slice(0, 14000).toLowerCase();
+  if (t.includes('sign in or create account')) return true;
+  if (t.includes('sign in to checkout')) return true;
+  return false;
+}
+
+function tryGuestCheckoutClick() {
+  const needles = ['continue as guest', 'checkout as guest', 'guest checkout', 'continue as a guest'];
+  const candidates = Array.from(document.querySelectorAll('button, a[href], [role="button"]'));
+  for (const needle of needles) {
+    const el = candidates.find((b) => {
+      const raw = b.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+      return raw.includes(needle) && !b.disabled;
+    });
+    if (el) {
+      el.click();
+      return true;
+    }
+  }
+  return false;
+}
 
 function startTiming(label, details = '') {
   const started = performance.now();
@@ -275,6 +319,13 @@ function getStockWatchDelay(policy, nullStreak = 0) {
 }
 
 function performRetryNavigation() {
+  // Never leave checkout via automation — Target shows sign-in / guest in this shell; bouncing
+  // to cart or reloading was interrupting users mid sign-in (constant "refresh" loop).
+  if (getPageType() === 'checkout') {
+    console.warn('[TCH] performRetryNavigation skipped on checkout (avoid interrupting sign-in)');
+    return;
+  }
+
   // If we already added to cart (ATC succeeded), go straight to cart → checkout
   // to avoid re-landing on the product page where the button shows "1 in cart".
   if (isCartReady()) {
@@ -284,17 +335,11 @@ function performRetryNavigation() {
   }
 
   const remembered = getRememberedProductUrl();
-  const destination = remembered || (getPageType() === 'checkout'
-    ? 'https://www.target.com/cart'
-    : location.href);
+  const destination = remembered || location.href;
   markRetryNavigation(destination);
 
   if (remembered) {
     window.location.href = remembered;
-    return;
-  }
-  if (getPageType() === 'checkout') {
-    window.location.href = 'https://www.target.com/cart';
     return;
   }
   location.reload();
@@ -302,6 +347,12 @@ function performRetryNavigation() {
 
 async function scheduleCheckoutRetry(settings, reason, details = {}) {
   if (!runtimeEnabled) return false;
+  // Do not schedule reload / cart redirect while on checkout — user must sign in or fix the step locally.
+  if (getPageType() === 'checkout') {
+    console.warn('[TCH] navigation retry suppressed on checkout:', reason);
+    showToast('Checkout: no auto-refresh here — finish sign-in, or turn the extension off to reload.', 'persistent');
+    return false;
+  }
   if (checkoutRetryScheduled) return true;
 
   const policy = getRetryPolicy(settings);
@@ -643,6 +694,7 @@ function getCheckoutStep(useSavedPayment = false) {
     .some(s => document.querySelector(s))) return 'shipping';
   // When using saved payment, a pre-populated step shows a Continue button with no form fields.
   if (useSavedPayment && findContinueButton(true)) return 'saved';
+  if (hasCheckoutAuthGate()) return 'signin';
   return 'unknown';
 }
 
@@ -798,10 +850,23 @@ async function handleCheckoutPage(settings) {
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
   if (step === 'saved')       return handleSavedStep(settings);
-  watchForCheckoutStep(settings);
+  if (step === 'signin' || step === 'unknown') {
+    return handleCheckoutPendingStep(settings, step);
+  }
 }
 
-function watchForCheckoutStep(settings) {
+/** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
+async function handleCheckoutPendingStep(settings, step) {
+  console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
+  if (tryGuestCheckoutClick()) {
+    showToast('Guest checkout…');
+    await sleep(600);
+  }
+  showToast('Sign in if you see a prompt — this tab will not auto-refresh. We continue when forms load.', 'persistent');
+  watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });
+}
+
+function watchForCheckoutStep(settings, options = {}) {
   if (checkoutStepObserver) {
     checkoutStepObserver.disconnect();
     checkoutStepObserver = null;
@@ -818,7 +883,7 @@ function watchForCheckoutStep(settings) {
   let handled = false;
   const runStep = async (step) => {
     if (handled) return;
-    if (step === 'unknown') return;
+    if (step === 'unknown' || step === 'signin') return;
     handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {
@@ -848,20 +913,31 @@ function watchForCheckoutStep(settings) {
   checkoutStepPollId = setInterval(() => {
     runStep(getCheckoutStep(settings.useSavedPayment));
   }, T.checkoutProbeInterval);
-  checkoutStepPollTimer = setTimeout(() => {
-    if (!handled && checkoutStepObserver === observer) {
-      observer.disconnect();
-      checkoutStepObserver = null;
-    }
-    if (checkoutStepPollId) {
-      clearInterval(checkoutStepPollId);
-      checkoutStepPollId = null;
-    }
-    if (!handled) {
-      scheduleCheckoutRetry(settings, 'Checkout step detection timed out');
-    }
-    checkoutStepPollTimer = null;
-  }, T.checkoutProbeTimeout);
+  // Default: no timeout, no navigation retry — checkout SPA + sign-in can take a long time.
+  const probeTimeoutMs = typeof options.probeTimeoutMs === 'number'
+    ? options.probeTimeoutMs
+    : 0;
+  const noRetryOnTimeout = options.noRetryOnTimeout !== false;
+  if (probeTimeoutMs > 0) {
+    checkoutStepPollTimer = setTimeout(() => {
+      if (!handled && checkoutStepObserver === observer) {
+        observer.disconnect();
+        checkoutStepObserver = null;
+      }
+      if (checkoutStepPollId) {
+        clearInterval(checkoutStepPollId);
+        checkoutStepPollId = null;
+      }
+      if (!handled) {
+        if (noRetryOnTimeout) {
+          console.warn('[TCH] checkout step watch stopped by timeout (sign-in flow may need more time)');
+        } else {
+          scheduleCheckoutRetry(settings, 'Checkout step detection timed out');
+        }
+      }
+      checkoutStepPollTimer = null;
+    }, probeTimeoutMs);
+  }
 }
 
 async function handleShippingStep(settings) {
@@ -941,10 +1017,20 @@ async function handlePaymentStep(settings) {
   console.log('[TCH] filling payment');
   markCheckoutFlow('payment_start');
 
+  const hasCardInput = !!document.querySelector(SEL.cardNumber);
+
+  // Form-fill mode: if Target only shows wallet (no inputs), do not click Continue — that would
+  // advance checkout on the account’s saved card. User must change payment on Target first.
+  if (!settings.useSavedPayment && !hasCardInput) {
+    console.warn('[TCH] payment: form-fill mode but no card fields — Target wallet UI; not auto-advancing');
+    showToast('Change payment on Target if you need a non-saved card. Extension will not advance this step for you.', 'persistent');
+    watchForCheckoutStep(settings);
+    return;
+  }
+
   // When useSavedPayment and no card number input is visible, a saved payment method is
   // pre-selected — just click Continue rather than trying to fill non-existent inputs.
   if (settings.useSavedPayment) {
-    const hasCardInput = !!document.querySelector(SEL.cardNumber);
     if (!hasCardInput) {
       console.log('[TCH] payment: saved payment detected (no card input), clicking continue');
       const continueClicked = await waitAndClickContinue(5000);
@@ -1056,6 +1142,7 @@ async function handleReviewStep(settings) {
   if (settings.autoPlaceOrder) {
     // Auto Place Order: resolve the button reference freshly in case the DOM
     // was re-rendered while we were processing, then click.
+    console.warn('[TCH] autoPlaceOrder is ON — this will submit the order if the button is enabled');
     const btn = document.querySelector(SEL.placeOrder) || findByText('place order') || placeOrderBtn;
     if (btn && !btn.disabled) {
       console.log('[TCH] autoPlaceOrder: clicking Place Order');
@@ -1274,7 +1361,7 @@ async function handleMonitoredATC(monitor, product) {
   rememberProductUrl(product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;
-  const interval = monitor.refreshInterval || 1;
+  const interval = getDropAwarePollSeconds(monitor, monitor.refreshInterval || 1);
 
   if (currentCount >= product.qty) return;
 
@@ -1389,7 +1476,7 @@ async function handleMonitoredATC(monitor, product) {
     } else if (pollCount % 10 === 0) {
       showToast(`Polling… (${pollCount} checks)`, 'persistent');
     }
-  }, interval * 1000);
+  }, Math.round(interval * 1000));
 }
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────

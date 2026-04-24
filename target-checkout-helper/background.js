@@ -2,6 +2,8 @@
 // Relays messages between popup/content scripts + orchestrates product monitoring.
 // Background TCIN polling runs here — no browser tab throttling.
 
+importScripts('dropPollingTiming.js');
+
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
 function normalizeProductUrl(url) {
@@ -220,7 +222,7 @@ async function runBackgroundPoll() {
       break;
     }
 
-    await sleep(500); // was 1000ms — tighter polling for faster restock detection
+    await sleep(computeBackgroundPollSleepMs(monitor));
   }
   console.log('[TCH bg] background TCIN poll stopped');
 }
@@ -296,7 +298,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'START_MONITOR':
-      startMonitor(message.products, message.refreshInterval)
+      startMonitor(message.products, message.refreshInterval, message.dropExpectedAt)
         .then(() => sendResponse({ ok: true }));
       return true;
 
@@ -382,7 +384,7 @@ function broadcastToTarget(message) {
 
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
 
-async function startMonitor(products, refreshInterval) {
+async function startMonitor(products, refreshInterval, dropExpectedAt) {
   await stopMonitor();
 
   const counts = {};
@@ -396,6 +398,9 @@ async function startMonitor(products, refreshInterval) {
     tabIds: [],
     urlToTabId: {},
   };
+  if (dropExpectedAt && String(dropExpectedAt).trim()) {
+    monitor.dropExpectedAt = String(dropExpectedAt).trim();
+  }
 
   await chrome.storage.local.set({
     monitor,

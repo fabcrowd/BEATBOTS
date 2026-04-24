@@ -1,13 +1,25 @@
 const SHIPPING_FIELDS = ['firstName', 'lastName', 'address1', 'address2', 'city', 'state', 'zip', 'phone'];
 const PAYMENT_FIELDS  = ['cardNumber', 'expMonth', 'expYear', 'cvv', 'billingZip'];
 
+const SAVE_LABEL = 'Save settings';
+const SAVE_OK_LABEL = 'Saved!';
+
 const $ = (id) => document.getElementById(id);
+
+function hasChromeStorage() {
+  return typeof chrome !== 'undefined' && !!chrome.storage?.local;
+}
 
 const enableToggle = $('enableToggle');
 const statusText   = $('statusText');
 const saveBtn      = $('saveBtn');
 const checkoutRetryMaxIn = $('checkoutRetryMax');
 const checkoutRetryDelayIn = $('checkoutRetryDelay');
+const tabMain = $('tabMain');
+const tabForms = $('tabForms');
+const panelMain = $('panelMain');
+const panelForms = $('panelForms');
+const productListEmpty = $('productListEmpty');
 
 function parseIntInRange(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -15,8 +27,11 @@ function parseIntInRange(value, min, max, fallback) {
   return Math.max(min, Math.min(max, parsed));
 }
 
-function updateStatusText(enabled) {
-  statusText.textContent = enabled ? 'Extension active — ready to assist' : 'Extension disabled';
+function updateHeaderVisualState(enabled) {
+  statusText.textContent = enabled
+    ? 'On — open a Target product page to run checkout help'
+    : 'Off — automation paused';
+  document.querySelector('.app-header')?.classList.toggle('is-active', !!enabled);
 }
 
 function gatherSettings() {
@@ -45,12 +60,25 @@ function gatherSettings() {
   };
 }
 
+let toastTimer = null;
+function showToast(msg) {
+  const el = $('toastRegion');
+  if (!el || !msg) return;
+  el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.textContent = ''; }, 2400);
+}
+
 function renderSpeedComparison(speeds) {
   const el = $('speedCompare');
   if (!el) return;
 
   const entries = Array.isArray(speeds) ? speeds : [];
-  if (!entries.length) { el.style.display = 'none'; return; }
+  if (!entries.length) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
 
   const saved    = entries.filter(e => e.mode === 'saved');
   const formfill = entries.filter(e => e.mode === 'formfill');
@@ -88,14 +116,14 @@ function renderSpeedComparison(speeds) {
   html += '</div>';
 
   el.innerHTML = html;
-  el.style.display = '';
+  el.hidden = false;
 }
 
 function populateFields(data) {
   if (data.enabled) {
     enableToggle.checked = true;
   }
-  updateStatusText(!!data.enabled);
+  updateHeaderVisualState(!!data.enabled);
 
   if (data.shipping) {
     for (const id of SHIPPING_FIELDS) {
@@ -130,32 +158,89 @@ function populateFields(data) {
 }
 
 async function save() {
-  const settings = gatherSettings();
-  await chrome.storage.local.set(settings);
+  if (!hasChromeStorage()) {
+    showToast('Open from the toolbar puzzle icon');
+    return;
+  }
+  saveBtn.disabled = true;
+  try {
+    const settings = gatherSettings();
+    await chrome.storage.local.set(settings);
 
-  chrome.runtime.sendMessage({
-    type: 'SETTINGS_UPDATED',
-    enabled: settings.enabled,
-  });
+    chrome.runtime.sendMessage({
+      type: 'SETTINGS_UPDATED',
+      enabled: settings.enabled,
+    });
 
-  saveBtn.textContent = 'Saved!';
-  saveBtn.classList.add('saved');
-  setTimeout(() => {
-    saveBtn.textContent = 'Save Settings';
-    saveBtn.classList.remove('saved');
-  }, 1500);
+    saveBtn.textContent = SAVE_OK_LABEL;
+    saveBtn.classList.add('saved');
+    showToast('Settings saved');
+    setTimeout(() => {
+      saveBtn.textContent = SAVE_LABEL;
+      saveBtn.classList.remove('saved');
+    }, 1600);
+  } finally {
+    saveBtn.disabled = false;
+  }
 }
 
-enableToggle.addEventListener('change', () => {
-  updateStatusText(enableToggle.checked);
+enableToggle.addEventListener('change', async () => {
+  const enabled = enableToggle.checked;
+  updateHeaderVisualState(enabled);
+  if (!hasChromeStorage()) return;
+  try {
+    const data = await chrome.storage.local.get(null);
+    await chrome.storage.local.set({ ...data, enabled });
+    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled });
+  } catch (_) {}
 });
 
 saveBtn.addEventListener('click', save);
 
-chrome.storage.local.get(
-  ['enabled', 'shipping', 'payment', 'retryPolicy', 'useSavedPayment', 'autoPlaceOrder', 'checkoutSpeeds'],
-  populateFields
-);
+if (hasChromeStorage()) {
+  chrome.storage.local.get(
+    ['enabled', 'shipping', 'payment', 'retryPolicy', 'useSavedPayment', 'autoPlaceOrder', 'checkoutSpeeds'],
+    populateFields
+  );
+} else {
+  populateFields({});
+}
+
+try {
+  const ver = hasChromeStorage() ? chrome.runtime.getManifest?.()?.version : '';
+  const el = $('extVersion');
+  if (ver && el) el.textContent = `v${ver}`;
+} catch (_) {}
+
+// ─── Tabs ───────────────────────────────────────────────────────────────────
+
+function setActiveTab(panel) {
+  const isMain = panel === 'main';
+  tabMain.classList.toggle('tab-btn-active', isMain);
+  tabMain.setAttribute('aria-selected', isMain);
+  tabForms.classList.toggle('tab-btn-active', !isMain);
+  tabForms.setAttribute('aria-selected', !isMain);
+  panelMain.hidden = !isMain;
+  panelForms.hidden = isMain;
+}
+
+tabMain.addEventListener('click', () => setActiveTab('main'));
+tabForms.addEventListener('click', () => setActiveTab('forms'));
+
+tabMain.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    tabForms.focus();
+    setActiveTab('forms');
+  }
+});
+tabForms.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    tabMain.focus();
+    setActiveTab('main');
+  }
+});
 
 // ─── PRODUCT MONITOR ─────────────────────────────────────────────────────────
 
@@ -166,6 +251,8 @@ const monitorControls    = $('monitorControls');
 const monitorBtn         = $('monitorBtn');
 const monitorStatusEl    = $('monitorStatus');
 const refreshIntervalIn  = $('refreshInterval');
+const dropExpectedAtIn   = $('dropExpectedAt');
+const dropCountdownEl    = $('dropCountdown');
 
 let products = [];
 let monitorActive = false;
@@ -196,7 +283,8 @@ function extractProductName(url) {
 
 function renderProducts() {
   productListEl.innerHTML = '';
-  monitorControls.style.display = '';
+  if (monitorControls) monitorControls.hidden = false;
+  if (productListEmpty) productListEmpty.hidden = products.length > 0;
 
   products.forEach((p, i) => {
     const li = document.createElement('li');
@@ -210,6 +298,7 @@ function renderProducts() {
     const qtySelect = document.createElement('select');
     qtySelect.className = 'qty-select';
     qtySelect.disabled = monitorActive;
+    qtySelect.setAttribute('aria-label', 'Quantity');
     for (let n = 1; n <= 5; n++) {
       const opt = document.createElement('option');
       opt.value = n;
@@ -218,13 +307,15 @@ function renderProducts() {
       qtySelect.appendChild(opt);
     }
     qtySelect.addEventListener('change', () => {
-      products[i].qty = parseInt(qtySelect.value);
+      products[i].qty = parseInt(qtySelect.value, 10);
       saveProducts();
     });
 
     const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
     removeBtn.className = 'btn-remove';
     removeBtn.textContent = '×';
+    removeBtn.setAttribute('aria-label', 'Remove product');
     removeBtn.disabled = monitorActive;
     removeBtn.addEventListener('click', () => {
       products.splice(i, 1);
@@ -239,11 +330,52 @@ function renderProducts() {
   });
 }
 
+function readDropExpectedAtValue() {
+  const v = (dropExpectedAtIn?.value || '').trim();
+  return v || null;
+}
+
 async function saveProducts() {
+  if (!hasChromeStorage()) return;
   const { monitor } = await chrome.storage.local.get('monitor');
-  await chrome.storage.local.set({
-    monitor: { ...(monitor || {}), products },
-  });
+  const next = { ...(monitor || {}), products };
+  const dropVal = readDropExpectedAtValue();
+  if (dropVal) next.dropExpectedAt = dropVal;
+  else delete next.dropExpectedAt;
+  await chrome.storage.local.set({ monitor: next });
+}
+
+function formatDropCountdown(iso) {
+  if (!dropCountdownEl || !iso) {
+    if (dropCountdownEl) dropCountdownEl.textContent = '';
+    return;
+  }
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) {
+    dropCountdownEl.textContent = '';
+    return;
+  }
+  const now = Date.now();
+  const d = t - now;
+  const after = now - t;
+  if (after > 3 * 60 * 1000) {
+    dropCountdownEl.textContent = 'Drop time passed — clear or update for next drop';
+    return;
+  }
+  if (d < 0 && after <= 3 * 60 * 1000) {
+    dropCountdownEl.textContent = 'In drop window — fast polling';
+    return;
+  }
+  const s = Math.floor(d / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) {
+    dropCountdownEl.textContent = `${h}h ${m % 60}m until drop`;
+  } else if (m > 0) {
+    dropCountdownEl.textContent = `${m}m ${s % 60}s until drop`;
+  } else {
+    dropCountdownEl.textContent = `${s}s until drop`;
+  }
 }
 
 function addProduct() {
@@ -252,13 +384,16 @@ function addProduct() {
 
   if (!/^https?:\/\/(www\.)?target\.com\/p\//i.test(url)) {
     productUrlInput.classList.add('error');
+    showToast('Use a Target product URL (/p/…)');
     setTimeout(() => productUrlInput.classList.remove('error'), 1500);
     return;
   }
 
   const norm = normalizeProductUrl(url);
   if (products.some((p) => normalizeProductUrl(p.url) === norm)) {
+    showToast('Already in list');
     productUrlInput.value = '';
+    productUrlInput.focus();
     return;
   }
 
@@ -266,6 +401,7 @@ function addProduct() {
   productUrlInput.value = '';
   saveProducts();
   renderProducts();
+  showToast('Added to list');
 }
 
 addProductBtn.addEventListener('click', addProduct);
@@ -273,49 +409,56 @@ productUrlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addProduct();
 });
 
-// Monitor start / stop
-
 async function toggleMonitor() {
+  if (!hasChromeStorage()) {
+    showToast('Monitoring needs the real extension popup');
+    return;
+  }
   if (monitorActive) {
     await chrome.runtime.sendMessage({ type: 'STOP_MONITOR' });
     monitorActive = false;
     updateMonitorUI();
     stopStatusPoll();
     monitorStatusEl.textContent = '';
+    monitorStatusEl.classList.remove('is-live');
+    showToast('Monitoring stopped');
   } else {
     if (!products.length) return;
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
       products,
-      refreshInterval: parseInt(refreshIntervalIn.value) || 1,
+      refreshInterval: parseInt(refreshIntervalIn.value, 10) || 1,
+      dropExpectedAt: readDropExpectedAtValue(),
     });
     monitorActive = true;
     updateMonitorUI();
     startStatusPoll();
+    showToast('Monitoring — keep Chrome open');
   }
 }
 
 function updateMonitorUI() {
-  monitorBtn.textContent = monitorActive ? 'Stop Monitoring' : 'Start Monitoring';
+  monitorBtn.textContent = monitorActive ? 'Stop monitoring' : 'Start monitoring';
   monitorBtn.classList.toggle('active', monitorActive);
   monitorBtn.disabled = !monitorActive && !products.length;
   productUrlInput.disabled = monitorActive;
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
+  if (dropExpectedAtIn) dropExpectedAtIn.disabled = monitorActive;
   renderProducts();
 }
 
 monitorBtn.addEventListener('click', toggleMonitor);
 
-// Status polling
-
 async function pollStatus() {
+  if (!hasChromeStorage()) return;
   try {
     const m = await chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' });
     if (!m) return;
     const retryStatus = formatRetryStatus(m.checkoutTelemetry);
 
     if (m.active) {
+      monitorStatusEl.classList.add('is-live');
       const parts = (m.products || []).map((p) => {
         const name = extractProductName(p.url);
         const count = m.counts?.[normalizeProductUrl(p.url)] || 0;
@@ -329,13 +472,15 @@ async function pollStatus() {
       monitorActive = false;
       updateMonitorUI();
       stopStatusPoll();
+      monitorStatusEl.classList.remove('is-live');
       monitorStatusEl.textContent = retryStatus
-        ? `Done — proceeding to checkout! | ${retryStatus}`
-        : 'Done — proceeding to checkout!';
-    } else if (retryStatus) {
-      monitorStatusEl.textContent = retryStatus;
+        ? `Done — heading to checkout · ${retryStatus}`
+        : 'Done — heading to checkout';
+    } else {
+      monitorStatusEl.classList.remove('is-live');
+      monitorStatusEl.textContent = retryStatus || '';
     }
-  } catch {}
+  } catch (_) {}
 }
 
 function formatRetryStatus(telemetry) {
@@ -381,11 +526,20 @@ function stopStatusPoll() {
   }
 }
 
-// Load monitor data on popup open
-
 async function loadMonitorData() {
+  if (!hasChromeStorage()) {
+    products = [];
+    renderProducts();
+    updateMonitorUI();
+    formatDropCountdown('');
+    return;
+  }
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) {
+    products = [];
+    renderProducts();
+    updateMonitorUI();
+    formatDropCountdown('');
     pollStatus();
     return;
   }
@@ -393,11 +547,26 @@ async function loadMonitorData() {
   products = monitor.products || [];
   monitorActive = !!monitor.active;
   if (monitor.refreshInterval) refreshIntervalIn.value = monitor.refreshInterval;
+  if (dropExpectedAtIn && monitor.dropExpectedAt) {
+    dropExpectedAtIn.value = monitor.dropExpectedAt;
+  }
 
   renderProducts();
   updateMonitorUI();
+  formatDropCountdown(monitor.dropExpectedAt || readDropExpectedAtValue() || '');
   if (monitorActive) startStatusPoll();
   else pollStatus();
 }
+
+if (dropExpectedAtIn) {
+  dropExpectedAtIn.addEventListener('change', () => {
+    formatDropCountdown(readDropExpectedAtValue() || '');
+    saveProducts();
+  });
+}
+
+setInterval(() => {
+  formatDropCountdown(readDropExpectedAtValue() || '');
+}, 1000);
 
 loadMonitorData();
