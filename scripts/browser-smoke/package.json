@@ -1,0 +1,18 @@
+{
+  "name": "tch-browser-smoke",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install-chromium": "playwright install chromium",
+    "smoke": "node run.mjs",
+    "e2e": "node extension-e2e.mjs",
+    "functional": "node extension-functional.mjs",
+    "test:extension": "node extension-e2e.mjs && node extension-functional.mjs",
+    "manual-account": "node manual-account-test.mjs",
+    "checkout-rehearsal": "node checkout-rehearsal.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.49.1",
+    "puppeteer-core": "23.11.1"
+  }
+}

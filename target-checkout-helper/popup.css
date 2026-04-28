@@ -629,6 +629,55 @@ select:focus {
   background: #a30000;
 }
 
+.harvest-lead code {
+  font-size: 11px;
+}
+
+.harvest-grid {
+  margin-top: 8px;
+}
+
+.harvest-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid #c8c8d0;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.harvest-btn:hover:not(:disabled) {
+  background: #f4f4f6;
+}
+
+.harvest-btn-danger {
+  border-color: #e0a8a8;
+  color: #8b1a1a;
+}
+
+.harvest-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.harvest-actions .harvest-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
+.harvest-count {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 10px;
+  color: #333;
+}
+
 .monitor-status-panel {
   font-size: 11px;
   color: #555;

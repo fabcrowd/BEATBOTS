@@ -2,7 +2,7 @@
 // Relays messages between popup/content scripts + orchestrates product monitoring.
 // Background TCIN polling runs here — no browser tab throttling.
 
-importScripts('dropPollingTiming.js');
+importScripts('dropPollingTiming.js', 'core/hosts.js', 'core/debuggerBridge.js', 'cookieHarvest.js');
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
@@ -16,6 +16,14 @@ function normalizeProductUrl(url) {
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function notifyTargetTabsSessionHint() {
+  chrome.tabs.query({ url: '*://*.target.com/*' }, (tabs) => {
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, { type: 'TCH_SESSION_HINT' }).catch(() => {});
+    }
+  });
+}
 
 function extractTcin(url) {
   try {
@@ -103,6 +111,10 @@ async function checkSingleTcin(tcin, apiKey, redskyBase) {
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       signal: AbortSignal.timeout(3000),
     });
+    if (res.status === 401 || res.status === 403) {
+      notifyTargetTabsSessionHint();
+      return null;
+    }
     if (!res.ok) return null;
     const json = await res.json();
     return parseFulfillmentBlock(json?.data?.product?.fulfillment);
@@ -129,6 +141,9 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       signal: AbortSignal.timeout(4000),
     });
+    if (res.status === 401 || res.status === 403) {
+      notifyTargetTabsSessionHint();
+    }
     if (res.ok) {
       const json = await res.json();
       const batchMap = parseBatchFulfillmentResponse(json);
@@ -343,6 +358,74 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }
       sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'HARVEST_CAPTURE_BURST':
+      tchCaptureBurst(
+        message.data?.count,
+        message.data?.kind,
+        message.data?.url || '',
+        message.data?.retailer || 'target'
+      )
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false, total: 0 }));
+      return true;
+
+    case 'DEBUGGER_ATTACH': {
+      const tabId = Number(message.tabId);
+      const tabUrl = String(message.tabUrl || '');
+      tchDebuggerAttach(tabId, tabUrl)
+        .then((r) => sendResponse(r))
+        .catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
+      return true;
+    }
+
+    case 'DEBUGGER_DETACH':
+      tchDebuggerDetach()
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case 'DEBUGGER_STATUS':
+      tchDebuggerStatus()
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case 'HARVEST_CLEAR':
+      tchClearHarvestEntries()
+        .then(() => tchHarvestStatus())
+        .then((s) => sendResponse(s))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case 'HARVEST_APPLY_NEXT':
+      tchApplyNextSnapshot()
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false, reason: 'error' }));
+      return true;
+
+    case 'HARVEST_GET_STATUS':
+      tchHarvestStatus()
+        .then((s) => sendResponse(s))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case 'HARVEST_UPDATE_CONFIG': {
+      (async () => {
+        try {
+          const cur = await tchGetHarvestConfig();
+          const next = { ...cur, ...(message.data || {}) };
+          if (message.data && message.data.harvestingEnabled === false) {
+            await tchClearHarvestEntries();
+          }
+          await tchSetHarvestConfig(next);
+          sendResponse({ ok: true, ...(await tchHarvestStatus()) });
+        } catch {
+          sendResponse({ ok: false });
+        }
+      })();
       return true;
     }
 

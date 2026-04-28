@@ -36,9 +36,48 @@
           <li>Stay <strong>logged in</strong> on Target in a dedicated window.</li>
           <li>On the <strong>Shipping &amp; payment</strong> tab, turn on <strong>Use saved payment &amp; address</strong> when your card and address are saved on Target.</li>
           <li>Enable the extension, open a <strong>product</strong> page (<code>/p/…</code>), then let it add to cart and continue to checkout.</li>
-          <li>For drops, set <strong>Expected drop time</strong> so polling tightens near go-time.</li>
+          <li>For drops, set <strong>Expected drop time</strong> so polling tightens near go-time (same idea as only going “live” right before go-time elsewhere).</li>
+          <li>Use <strong>one Target tab</strong> with this extension per profile so sessions and retries do not fight each other.</li>
+          <li><strong>Clear your cart</strong> on Target before a checkout run so old items do not block or confuse the flow.</li>
+          <li>On <strong>PC</strong> (especially on Ethernet), some buyers restart the connection and <strong>clear stale Target cookies</strong> for a fresher session—you can keep browser autofill. Results vary; never share passwords.</li>
         </ol>
       </details>
+
+      <section class="card" aria-labelledby="harvestHeading">
+        <h2 id="harvestHeading">Cookie harvest (Target)</h2>
+        <p class="section-lead harvest-lead">Snapshots of <code>target.com</code> cookies while you browse (login or product pages). Stored only in <strong>session storage</strong> — cleared when you quit Chrome. Matches the workflow used by pro checkout companions (harvest → pool → apply before checkout).</p>
+        <label class="option-row">
+          <input type="checkbox" id="harvestEnabled">
+          <span class="option-label">Harvesting on</span>
+        </label>
+        <div class="monitor-grid harvest-grid">
+          <div class="monitor-field">
+            <label class="field-label" for="harvestPerLoad">Harvests per page load</label>
+            <input type="number" id="harvestPerLoad" value="1" min="1" max="5" aria-describedby="harvestPerHint">
+            <span id="harvestPerHint" class="inline-hint">Usually 1; more on login if needed</span>
+          </div>
+          <div class="monitor-field">
+            <label class="field-label" for="harvestExpireMin">Data expiration (min)</label>
+            <input type="number" id="harvestExpireMin" value="3" min="1" max="120">
+          </div>
+        </div>
+        <label class="option-row">
+          <input type="checkbox" id="harvestDontStop">
+          <span class="option-label">Re-harvest same page every ~60s while on (don’t stop)</span>
+        </label>
+        <label class="option-row">
+          <input type="checkbox" id="harvestApplyNext">
+          <span class="option-label">Apply next snapshot before navigating to checkout</span>
+        </label>
+        <p class="field-hint" id="harvestOrderLabel">Cookie order: use newest first (LIFO)</p>
+        <button type="button" id="harvestOrderBtn" class="harvest-btn">Use oldest first (FIFO)</button>
+        <div class="harvest-actions">
+          <button type="button" id="harvestNowBtn" class="harvest-btn">Harvest now</button>
+          <button type="button" id="harvestClearBtn" class="harvest-btn harvest-btn-danger">Clear harvested</button>
+        </div>
+        <p id="harvestCountText" class="harvest-count" role="status">Snapshots ready: —</p>
+        <p id="harvestSessionWarn" class="field-hint" hidden>Session storage unavailable in this Chrome — snapshots will not persist across extension restarts.</p>
+      </section>
 
       <section class="card" aria-labelledby="monitorHeading">
         <h2 id="monitorHeading">Product monitor</h2>
@@ -54,7 +93,7 @@
             <label class="field-label" for="dropExpectedAt">Expected drop / restock (local time)</label>
             <input type="datetime-local" id="dropExpectedAt" class="input-datetime" aria-describedby="dropHint">
             <p id="dropCountdown" class="drop-countdown" aria-live="polite"></p>
-            <p id="dropHint" class="field-hint">Optional. Polling speeds up in the 10 minutes before this time (and briefly after).</p>
+            <p id="dropHint" class="field-hint">Optional. Polling speeds up in the 10 minutes before this time (and briefly after). Before go-time: stay logged in on the product tab and avoid flipping extension settings in the last minute.</p>
           </div>
           <div class="monitor-grid">
             <div class="monitor-field">
@@ -91,6 +130,20 @@
         <p class="option-hint option-hint-warn">Clicks Place Order — can charge a real card. <strong>Never turn on</strong> with your real card; use only with Target’s test flow or a disposable test card. Leave off for normal use.</p>
         <div id="speedCompare" class="speed-compare" hidden></div>
       </section>
+
+      <details class="card card-advanced">
+        <summary class="tips-summary">Advanced (debugger)</summary>
+        <p class="section-lead">Attaches Chrome’s debugger to the <strong>current tab</strong> for CDP network capture. By default only <strong>Target</strong> tabs are allowed; turn on “any site” only for your own debugging — it is a broad privilege.</p>
+        <label class="option-row">
+          <input type="checkbox" id="debuggerAllowAnyTab">
+          <span class="option-label">Allow debugger on any site (not just Target)</span>
+        </label>
+        <div class="harvest-actions">
+          <button type="button" id="debuggerAttachBtn" class="harvest-btn">Attach to current tab</button>
+          <button type="button" id="debuggerDetachBtn" class="harvest-btn">Detach</button>
+        </div>
+        <p id="debuggerStatusText" class="harvest-count" role="status">Debugger: —</p>
+      </details>
     </div>
 
     <div id="panelForms" class="tab-panel" role="tabpanel" aria-labelledby="tabForms" hidden>

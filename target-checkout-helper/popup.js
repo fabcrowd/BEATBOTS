@@ -21,6 +21,76 @@ const panelMain = $('panelMain');
 const panelForms = $('panelForms');
 const productListEmpty = $('productListEmpty');
 
+/** LIFO = newest snapshot consumed first (matches common “use newest first” bot UI). */
+let harvestRemovalIsLifo = true;
+
+function gatherHarvestConfigFromDom() {
+  const per = $('harvestPerLoad');
+  const ex = $('harvestExpireMin');
+  const he = $('harvestEnabled');
+  const ds = $('harvestDontStop');
+  const ap = $('harvestApplyNext');
+  return {
+    harvestingEnabled: !!(he && he.checked),
+    harvestsPerPageLoad: per ? parseIntInRange(per.value, 1, 5, 1) : 1,
+    expirationMinutes: ex ? parseIntInRange(ex.value, 1, 120, 3) : 3,
+    removalOrder: harvestRemovalIsLifo ? 'lifo' : 'fifo',
+    dontStopHarvesting: !!(ds && ds.checked),
+    applyNextBeforeCheckout: !!(ap && ap.checked),
+  };
+}
+
+function updateHarvestOrderLabels() {
+  const label = $('harvestOrderLabel');
+  const btn = $('harvestOrderBtn');
+  if (!label || !btn) return;
+  if (harvestRemovalIsLifo) {
+    label.textContent = 'Cookie order: use newest first (LIFO)';
+    btn.textContent = 'Use oldest first (FIFO)';
+  } else {
+    label.textContent = 'Cookie order: use oldest first (FIFO)';
+    btn.textContent = 'Use newest first (LIFO)';
+  }
+}
+
+async function refreshDebuggerStatus() {
+  if (!hasChromeStorage()) return;
+  try {
+    const st = await chrome.runtime.sendMessage({ type: 'DEBUGGER_STATUS' });
+    const el = $('debuggerStatusText');
+    if (!el || !st) return;
+    if (st.ok === false) {
+      el.textContent = 'Debugger: status unavailable';
+      return;
+    }
+    el.textContent = st.attached
+      ? `Debugger: attached to tab ${st.tabId}`
+      : 'Debugger: not attached';
+  } catch (_) {}
+}
+
+async function refreshHarvestStatus() {
+  if (!hasChromeStorage()) return;
+  try {
+    const s = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
+    const c = $('harvestCountText');
+    const w = $('harvestSessionWarn');
+    if (c && s && s.ok !== false) {
+      c.textContent = `Snapshots ready: ${typeof s.count === 'number' ? s.count : '—'}`;
+    }
+    if (w && s) w.hidden = !!s.sessionStorage;
+  } catch (_) {}
+}
+
+async function pushHarvestConfig(data) {
+  if (!hasChromeStorage()) return;
+  try {
+    await chrome.runtime.sendMessage({ type: 'HARVEST_UPDATE_CONFIG', data: data || gatherHarvestConfigFromDom() });
+    await refreshHarvestStatus();
+    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: enableToggle.checked });
+  } catch (_) {}
+}
+
 function parseIntInRange(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -57,6 +127,7 @@ function gatherSettings() {
     retryPolicy,
     useSavedPayment: $('useSavedPayment').checked,
     autoPlaceOrder: $('autoPlaceOrder').checked,
+    harvestConfig: gatherHarvestConfigFromDom(),
   };
 }
 
@@ -154,7 +225,27 @@ function populateFields(data) {
     $('autoPlaceOrder').checked = true;
   }
 
+  const hc = data.harvestConfig || {};
+  harvestRemovalIsLifo = (hc.removalOrder || 'lifo') === 'lifo';
+  updateHarvestOrderLabels();
+  const he = $('harvestEnabled');
+  if (he) he.checked = !!hc.harvestingEnabled;
+  const hpl = $('harvestPerLoad');
+  if (hpl && typeof hc.harvestsPerPageLoad === 'number') hpl.value = String(hc.harvestsPerPageLoad);
+  const hex = $('harvestExpireMin');
+  if (hex && typeof hc.expirationMinutes === 'number') hex.value = String(hc.expirationMinutes);
+  const hds = $('harvestDontStop');
+  if (hds) hds.checked = !!hc.dontStopHarvesting;
+  const hap = $('harvestApplyNext');
+  if (hap) hap.checked = !!hc.applyNextBeforeCheckout;
+
   renderSpeedComparison(data.checkoutSpeeds);
+  void refreshHarvestStatus();
+
+  const adv = data.advancedSettings || {};
+  const dbgAny = $('debuggerAllowAnyTab');
+  if (dbgAny) dbgAny.checked = !!adv.allowDebuggerAnyTab;
+  void refreshDebuggerStatus();
 }
 
 async function save() {
@@ -164,8 +255,15 @@ async function save() {
   }
   saveBtn.disabled = true;
   try {
+    const prev = await chrome.storage.local.get('advancedSettings');
     const settings = gatherSettings();
-    await chrome.storage.local.set(settings);
+    await chrome.storage.local.set({
+      ...settings,
+      advancedSettings: {
+        ...(prev.advancedSettings || {}),
+        allowDebuggerAnyTab: !!$('debuggerAllowAnyTab')?.checked,
+      },
+    });
 
     chrome.runtime.sendMessage({
       type: 'SETTINGS_UPDATED',
@@ -199,12 +297,117 @@ saveBtn.addEventListener('click', save);
 
 if (hasChromeStorage()) {
   chrome.storage.local.get(
-    ['enabled', 'shipping', 'payment', 'retryPolicy', 'useSavedPayment', 'autoPlaceOrder', 'checkoutSpeeds'],
+    [
+      'enabled',
+      'shipping',
+      'payment',
+      'retryPolicy',
+      'useSavedPayment',
+      'autoPlaceOrder',
+      'checkoutSpeeds',
+      'harvestConfig',
+      'advancedSettings',
+    ],
     populateFields
   );
 } else {
   populateFields({});
 }
+
+function wireHarvestControls() {
+  $('harvestEnabled')?.addEventListener('change', () => { void pushHarvestConfig(); });
+  $('harvestPerLoad')?.addEventListener('change', () => { void pushHarvestConfig(); });
+  $('harvestExpireMin')?.addEventListener('change', () => { void pushHarvestConfig(); });
+  $('harvestDontStop')?.addEventListener('change', () => { void pushHarvestConfig(); });
+  $('harvestApplyNext')?.addEventListener('change', () => { void pushHarvestConfig(); });
+  $('harvestOrderBtn')?.addEventListener('click', () => {
+    harvestRemovalIsLifo = !harvestRemovalIsLifo;
+    updateHarvestOrderLabels();
+    void pushHarvestConfig({ removalOrder: harvestRemovalIsLifo ? 'lifo' : 'fifo' });
+  });
+  $('harvestClearBtn')?.addEventListener('click', async () => {
+    if (!hasChromeStorage()) return;
+    try {
+      await chrome.runtime.sendMessage({ type: 'HARVEST_CLEAR' });
+      showToast('Harvest cleared');
+      await refreshHarvestStatus();
+      chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: enableToggle.checked });
+    } catch (_) {}
+  });
+  $('harvestNowBtn')?.addEventListener('click', async () => {
+    if (!hasChromeStorage()) return;
+    const cfg = gatherHarvestConfigFromDom();
+    if (!cfg.harvestingEnabled) {
+      showToast('Turn harvesting on first');
+      return;
+    }
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabUrl = tabs[0]?.url || '';
+      let retailer = 'target';
+      try {
+        const h = new URL(tabUrl).hostname.toLowerCase();
+        if (h === 'walmart.com' || h.endsWith('.walmart.com')) retailer = 'walmart';
+      } catch (_) {}
+      const r = await chrome.runtime.sendMessage({
+        type: 'HARVEST_CAPTURE_BURST',
+        data: { count: 1, kind: 'manual', url: tabUrl, retailer },
+      });
+      showToast(r?.ok ? 'Captured 1 snapshot' : 'Capture failed');
+      await refreshHarvestStatus();
+    } catch (_) {
+      showToast('Capture failed');
+    }
+  });
+}
+
+wireHarvestControls();
+
+function wireAdvancedDebuggerControls() {
+  $('debuggerAllowAnyTab')?.addEventListener('change', async () => {
+    if (!hasChromeStorage()) return;
+    const checked = !!$('debuggerAllowAnyTab')?.checked;
+    try {
+      const prev = await chrome.storage.local.get('advancedSettings');
+      await chrome.storage.local.set({
+        advancedSettings: { ...(prev.advancedSettings || {}), allowDebuggerAnyTab: checked },
+      });
+      showToast('Advanced setting saved');
+    } catch (_) {}
+  });
+  $('debuggerAttachBtn')?.addEventListener('click', async () => {
+    if (!hasChromeStorage()) return;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) {
+        showToast('No active tab');
+        return;
+      }
+      const r = await chrome.runtime.sendMessage({
+        type: 'DEBUGGER_ATTACH',
+        tabId: tab.id,
+        tabUrl: tab.url || '',
+      });
+      const hint = r?.hint ? ` — ${r.hint}` : '';
+      showToast(r?.ok ? 'Debugger attached' : `Attach failed${hint}`);
+      await refreshDebuggerStatus();
+    } catch (_) {
+      showToast('Attach failed');
+    }
+  });
+  $('debuggerDetachBtn')?.addEventListener('click', async () => {
+    if (!hasChromeStorage()) return;
+    try {
+      await chrome.runtime.sendMessage({ type: 'DEBUGGER_DETACH' });
+      showToast('Detached');
+      await refreshDebuggerStatus();
+    } catch (_) {
+      showToast('Detach failed');
+    }
+  });
+}
+
+wireAdvancedDebuggerControls();
 
 try {
   const ver = hasChromeStorage() ? chrome.runtime.getManifest?.()?.version : '';

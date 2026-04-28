@@ -80,6 +80,27 @@ section('Drop polling logic (mocked clock)');
 }
 
 {
+  const mon = { dropExpectedAt: dropIso };
+  const { isInDropTensionWindow } = loadHelpers(DROP_MS - 7 * 60 * 1000);
+  assert(isInDropTensionWindow(mon) === true, 'tension window true in pre-window');
+}
+{
+  const mon = { dropExpectedAt: dropIso };
+  const { isInDropTensionWindow } = loadHelpers(DROP_MS - 50 * 60 * 1000);
+  assert(isInDropTensionWindow(mon) === false, 'tension window false when far before drop');
+}
+{
+  const mon = { dropExpectedAt: dropIso };
+  const { isInDropTensionWindow } = loadHelpers(DROP_MS + 90 * 1000);
+  assert(isInDropTensionWindow(mon) === true, 'tension window true in grace');
+}
+{
+  const mon = { dropExpectedAt: dropIso };
+  const { isInDropTensionWindow } = loadHelpers(DROP_MS + 4 * 60 * 1000);
+  assert(isInDropTensionWindow(mon) === false, 'tension window false after grace');
+}
+
+{
   const now = DROP_MS - 20 * 60 * 1000; // 20m before: between 10m and 45m rules
   const { computeBackgroundPollSleepMs, getDropAwarePollSeconds } = loadHelpers(now);
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: dropIso }) === 500, 'bg base 500 in mid window');

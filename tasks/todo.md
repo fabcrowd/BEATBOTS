@@ -111,3 +111,13 @@
 - **Auto place order**: verified **OFF** — no charge; banner “Place Order remains manual.”
 - **Target UI**: Logged-in checkout can still **display** saved Visa in wallet even when “Use saved payment” is off — that is Target’s page, not the extension charging.
 - **Code**: If form-fill mode and **no** card input fields exist, extension **does not** click Continue on payment (avoids silently advancing on wallet UI). Popup copy warns about wallet display vs. who places the order.
+
+---
+
+## Walmart (deferred)
+
+- [ ] **Walmart checkout automation** — content selectors, cart/checkout navigation, session handling (parity with Target flow where appropriate).
+- [ ] **Walmart cookie harvest** — define `WALMART` in `core/hosts.js` (`cookieDomains`, `hostSuffixes`), implement `tchReadCookiesForRetailer('walmart')` / apply path when snapshots should replay on `walmart.com`.
+- [ ] **Docs & QA** — update `AGENTS.md` / popup copy for Walmart when shipped; manual E2E on walmart.com.
+
+*Status:* Host detection + one-time console TODO on walmart.com only; no Walmart automation in this build.

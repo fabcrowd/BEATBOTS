@@ -45,12 +45,68 @@ async function getSettings() {
       'retryPolicy',
       'useSavedPayment',
       'autoPlaceOrder',
+      'harvestConfig',
     ]);
   }
   return settingsCache;
 }
 
 function invalidateCache() { settingsCache = null; }
+
+// ─── COOKIE HARVEST (Target-only; snapshots in chrome.storage.session) ───────
+
+let harvestBurstInProgress = false;
+let harvestBurstUrl = '';
+let harvestBurstAt = 0;
+
+async function maybeApplyHarvestedSession(settings) {
+  try {
+    if (!settings?.harvestConfig?.applyNextBeforeCheckout) return;
+    const r = await chrome.runtime.sendMessage({ type: 'HARVEST_APPLY_NEXT' });
+    if (r?.ok) console.log('[TCH] applied harvested cookie snapshot; remaining:', r.remaining);
+  } catch (e) {
+    console.warn('[TCH] harvest apply skipped', e);
+  }
+}
+
+/** Refract-style: on product/login while harvesting is on, snapshot after page settles. */
+async function maybeAutoHarvestBurst(data) {
+  const h = data.harvestConfig || {};
+  if (!h.harvestingEnabled) return;
+  if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(location.href) !== 'target') return;
+  const path = location.pathname + location.search;
+  const isProduct = /^\/p\//.test(location.pathname);
+  const isLogin = /sign-?in|login|\/account\//i.test(path);
+  if (!isProduct && !isLogin) return;
+  const url = location.href;
+  const now = Date.now();
+  if (harvestBurstUrl === url) {
+    if (!h.dontStopHarvesting) return;
+    if (now - harvestBurstAt < 60000) return;
+  }
+  if (harvestBurstInProgress) return;
+  harvestBurstInProgress = true;
+  try {
+    await sleep(2000);
+    if (location.href !== url) return;
+    const count = Math.max(1, Math.min(5, Number(h.harvestsPerPageLoad) || 1));
+    const retailer =
+      typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer
+        ? TCH_HOSTS.detectRetailer(location.href) || 'target'
+        : 'target';
+    const res = await chrome.runtime.sendMessage({
+      type: 'HARVEST_CAPTURE_BURST',
+      data: { count, kind: isLogin ? 'login' : 'product', url, retailer },
+    });
+    harvestBurstUrl = url;
+    harvestBurstAt = Date.now();
+    if (res?.ok) console.log('[TCH] cookie harvest snapshots stored:', res.total);
+  } catch (e) {
+    console.warn('[TCH] harvest burst failed', e);
+  } finally {
+    harvestBurstInProgress = false;
+  }
+}
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
@@ -174,6 +230,8 @@ const CHECKOUT_START_KEY = 'tch:checkoutStart';
 const CHECKOUT_MODE_KEY  = 'tch:checkoutMode';
 const CHECKOUT_SPEEDS_STORAGE_KEY = 'checkoutSpeeds';
 const CART_READY_KEY = 'tch:cartReady'; // set after ATC succeeds; cleared on checkout success
+const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
+const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
 let stockWatchTimer = null;
@@ -579,6 +637,19 @@ function waitForEnabled(getFn, timeout = 6000) {
   });
 }
 
+/** Throttled hint when RedSky returns 401/403 — same idea as clearing cookies on auth failures in retail bots. */
+function showSessionStaleHintIfNeeded() {
+  try {
+    const last = parseInt(sessionStorage.getItem(SESSION_STALE_HINT_KEY) || '0', 10);
+    if (Date.now() - last < 5 * 60 * 1000) return;
+    sessionStorage.setItem(SESSION_STALE_HINT_KEY, String(Date.now()));
+  } catch {}
+  showToast(
+    'Target may have rejected the session (inventory API). Clear site data for target.com, reload, and sign in again.',
+    'persistent'
+  );
+}
+
 function showToast(message, type = 'info') {
   const existing = document.getElementById('tch-toast');
   if (existing) existing.remove();
@@ -703,6 +774,18 @@ function getCheckoutStep(useSavedPayment = false) {
 async function handleProductPage(settings) {
   console.log('[TCH] handleProductPage');
   prefetchCheckout();
+  try {
+    const { monitor: monDrop } = await chrome.storage.local.get('monitor');
+    if (monDrop?.active && isInDropTensionWindow(monDrop)) {
+      if (sessionStorage.getItem(DROP_WINDOW_TIP_KEY) !== '1') {
+        sessionStorage.setItem(DROP_WINDOW_TIP_KEY, '1');
+        showToast(
+          'Drop window: clear Target cart first, use one Target tab, avoid toggling the extension in the last minute.',
+          'persistent'
+        );
+      }
+    }
+  } catch {}
   const fromRetryNavigation = consumeRetryNavigationMark();
   if (!fromRetryNavigation) clearCheckoutRetryState();
   rememberProductUrl(location.href);
@@ -719,6 +802,7 @@ async function handleProductPage(settings) {
     markCartReady();
     showToast('Item in cart → checkout…');
     setNavigationMark('product_to_checkout');
+    await maybeApplyHarvestedSession(settings);
     window.location.href = 'https://www.target.com/checkout';
     return;
   }
@@ -758,6 +842,7 @@ async function handleProductPage(settings) {
       markCartReady();
       showToast('Item in cart → checkout…');
       setNavigationMark('product_to_checkout');
+      await maybeApplyHarvestedSession(settings);
       window.location.href = 'https://www.target.com/checkout';
       return;
     }
@@ -796,6 +881,7 @@ async function handleProductPage(settings) {
     } catch {
       console.log('[TCH] viewCart modal not found; navigating to checkout directly');
       setNavigationMark('product_to_checkout');
+      await maybeApplyHarvestedSession(settings);
       window.location.href = 'https://www.target.com/checkout';
       return;
     }
@@ -806,6 +892,7 @@ async function handleProductPage(settings) {
   markCheckoutStart('formfill');
   showToast('ATC → checkout…');
   setNavigationMark('product_to_checkout');
+  await maybeApplyHarvestedSession(settings);
   window.location.href = 'https://www.target.com/checkout';
 }
 
@@ -822,6 +909,7 @@ async function handleCartPage(settings) {
   } catch {
     stopCartCheckout('fallback_redirect');
     setNavigationMark('cart_to_checkout');
+    await maybeApplyHarvestedSession(settings);
     window.location.href = 'https://www.target.com/checkout';
   }
 }
@@ -1256,7 +1344,7 @@ function parseFulfillmentStockStatus(payload) {
     || FULFILLMENT_BLOCKED_RE.test(status)
     || (oosAllStores && qty <= 0 && !sellable);
 
-  if (sellable) {
+  if (sellable && !soldOut) {
     return { result: true, status, qty, soldOut, oosAllStores };
   }
   if (blocked) {
@@ -1278,6 +1366,10 @@ async function checkStockFromFulfillmentApi(url, timeoutMs = 3000) {
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       signal: controller.signal,
     });
+    if (res.status === 401 || res.status === 403) {
+      showSessionStaleHintIfNeeded();
+      return null;
+    }
     if (!res.ok) return null;
 
     const payload = await res.json();
@@ -1426,6 +1518,7 @@ async function handleMonitoredATC(monitor, product) {
       } catch {
         // Modal didn't appear; navigate to checkout directly.
         setNavigationMark('product_to_checkout');
+        await maybeApplyHarvestedSession(settings);
         window.location.href = 'https://www.target.com/checkout';
         cartConfirmed = true;
       }
@@ -1485,6 +1578,25 @@ async function init() {
   const stopInit = startTiming('init_total', location.pathname);
   const data = await getSettings();
   runtimeEnabled = !!data.enabled;
+  const detected =
+    typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer
+      ? TCH_HOSTS.detectRetailer(location.href)
+      : null;
+  if (detected === 'walmart') {
+    try {
+      if (!sessionStorage.getItem('tch:walmartTodoOnce')) {
+        sessionStorage.setItem('tch:walmartTodoOnce', '1');
+        console.info('[TCH] Walmart automation is not implemented yet (see tasks/todo.md).');
+      }
+    } catch (_) {}
+    stopInit('walmart_todo');
+    return;
+  }
+  if (detected !== 'target') {
+    stopInit('unsupported_host');
+    return;
+  }
+
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
@@ -1497,6 +1609,10 @@ async function init() {
   } else {
     flushNavigationTiming('product_to_checkout', 'nav_product_to_checkout');
     flushNavigationTiming('cart_to_checkout', 'nav_cart_to_checkout');
+  }
+
+  if (data.harvestConfig?.harvestingEnabled) {
+    await maybeAutoHarvestBurst(data);
   }
 
   if (data.monitor?.active && page === 'product') {
@@ -1526,6 +1642,7 @@ async function init() {
     retryPolicy: data.retryPolicy || {},
     useSavedPayment: !!data.useSavedPayment,
     autoPlaceOrder: !!data.autoPlaceOrder,
+    harvestConfig: data.harvestConfig || {},
   };
 
   if (page === 'product' || page === 'cart') prefetchCheckout();
@@ -1544,12 +1661,16 @@ async function init() {
 
 let lastUrl = location.href;
 new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    invalidateCache();
-    document.getElementById('tch-toast')?.remove();
-    requestAnimationFrame(init);
-  }
+  if (location.href === lastUrl) return;
+  lastUrl = location.href;
+  invalidateCache();
+  document.getElementById('tch-toast')?.remove();
+  const r =
+    typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer
+      ? TCH_HOSTS.detectRetailer(location.href)
+      : null;
+  if (r !== 'target' && r !== 'walmart') return;
+  requestAnimationFrame(init);
 }).observe(document, { subtree: true, childList: true });
 
 // ─── MESSAGE LISTENER ────────────────────────────────────────────────────────
@@ -1564,6 +1685,11 @@ chrome.runtime.onMessage.addListener((message) => {
         chrome.runtime.sendMessage({ type: 'CACHE_API_KEY', apiKey, redskyBase }).catch(() => {});
       }
     } catch {}
+    return;
+  }
+
+  if (message.type === 'TCH_SESSION_HINT') {
+    showSessionStaleHintIfNeeded();
     return;
   }
 

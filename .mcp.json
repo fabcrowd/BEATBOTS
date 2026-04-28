@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--browser", "chrome",
+        "--load-extension", "C:\\Users\\daroo\\Desktop\\BEATBOTS\\target-checkout-helper",
+        "--disable-extensions-except", "C:\\Users\\daroo\\Desktop\\BEATBOTS\\target-checkout-helper"
+      ]
+    }
+  }
+}

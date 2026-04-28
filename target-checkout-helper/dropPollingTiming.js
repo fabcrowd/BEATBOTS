@@ -19,6 +19,20 @@ function computeBackgroundPollSleepMs(monitor) {
   return base;
 }
 
+/** Same 10m pre-drop / 3m post-drop band as aggressive polling — for UX hints only. */
+function isInDropTensionWindow(monitor) {
+  const raw = monitor?.dropExpectedAt;
+  if (!raw || typeof raw !== 'string') return false;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return false;
+  const now = Date.now();
+  const until = t - now;
+  const afterDrop = now - t;
+  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
+  return inPrewindow || inGrace;
+}
+
 function getDropAwarePollSeconds(monitor, baseSec) {
   const b = Math.max(0.25, Number(baseSec) || 1);
   const raw = monitor?.dropExpectedAt;

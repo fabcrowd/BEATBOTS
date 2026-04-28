@@ -1,3 +1,4 @@
 .claude/
 *.pem
 .tools/
+scripts/browser-smoke/node_modules/
