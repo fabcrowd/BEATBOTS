@@ -53,6 +53,45 @@ function updateHarvestOrderLabels() {
   }
 }
 
+const ACCT_LABELS = {
+  login:   { ok: 'Yes',  fail: 'Not logged in', unknown: 'Open a Target tab' },
+  address: { ok: 'Saved', fail: 'None',          unknown: '—' },
+  payment: { ok: 'Saved', fail: 'None',          unknown: '—' },
+};
+
+function setAcctItem(dotId, valId, state, labelKey) {
+  const dot = $(dotId);
+  const val = $(valId);
+  if (dot) dot.className = `acct-dot acct-dot-${state}`;
+  if (val) {
+    val.textContent = ACCT_LABELS[labelKey]?.[state] ?? (state === 'checking' ? '…' : '—');
+    val.className = `acct-item-val acct-val-${state}`;
+  }
+}
+
+async function checkAccountStatus() {
+  if (!hasChromeStorage()) return;
+  setAcctItem('acctLoginDot', 'acctLoginVal', 'checking', 'login');
+  setAcctItem('acctAddrDot',  'acctAddrVal',  'checking', 'address');
+  setAcctItem('acctPayDot',   'acctPayVal',   'checking', 'payment');
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'CHECK_ACCOUNT_STATUS' });
+    if (r.noTab) {
+      setAcctItem('acctLoginDot', 'acctLoginVal', 'unknown', 'login');
+      setAcctItem('acctAddrDot',  'acctAddrVal',  'unknown', 'address');
+      setAcctItem('acctPayDot',   'acctPayVal',   'unknown', 'payment');
+      return;
+    }
+    setAcctItem('acctLoginDot', 'acctLoginVal', r.loggedIn === true ? 'ok' : r.loggedIn === false ? 'fail' : 'unknown', 'login');
+    setAcctItem('acctAddrDot',  'acctAddrVal',  r.hasAddress === true ? 'ok' : r.hasAddress === false ? 'fail' : 'unknown', 'address');
+    setAcctItem('acctPayDot',   'acctPayVal',   r.hasPayment === true ? 'ok' : r.hasPayment === false ? 'fail' : 'unknown', 'payment');
+  } catch (_) {
+    setAcctItem('acctLoginDot', 'acctLoginVal', 'unknown', 'login');
+    setAcctItem('acctAddrDot',  'acctAddrVal',  'unknown', 'address');
+    setAcctItem('acctPayDot',   'acctPayVal',   'unknown', 'payment');
+  }
+}
+
 async function refreshDebuggerStatus() {
   if (!hasChromeStorage()) return;
   try {
@@ -241,6 +280,7 @@ function populateFields(data) {
 
   renderSpeedComparison(data.checkoutSpeeds);
   void refreshHarvestStatus();
+  void checkAccountStatus();
 
   const adv = data.advancedSettings || {};
   const dbgAny = $('debuggerAllowAnyTab');
@@ -363,6 +403,22 @@ function wireHarvestControls() {
 
 wireHarvestControls();
 
+// Auto-save these toggles immediately on change so they survive popup close/reopen.
+async function autoSaveToggle() {
+  if (!hasChromeStorage()) return;
+  try {
+    const prev = await chrome.storage.local.get('advancedSettings');
+    const settings = gatherSettings();
+    await chrome.storage.local.set({
+      ...settings,
+      advancedSettings: { ...(prev.advancedSettings || {}), allowDebuggerAnyTab: !!$('debuggerAllowAnyTab')?.checked },
+    });
+    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: settings.enabled });
+  } catch (_) {}
+}
+$('useSavedPayment')?.addEventListener('change', autoSaveToggle);
+$('autoPlaceOrder')?.addEventListener('change', autoSaveToggle);
+
 function wireAdvancedDebuggerControls() {
   $('debuggerAllowAnyTab')?.addEventListener('change', async () => {
     if (!hasChromeStorage()) return;
@@ -409,6 +465,8 @@ function wireAdvancedDebuggerControls() {
 
 wireAdvancedDebuggerControls();
 
+$('acctCheckBtn')?.addEventListener('click', () => { void checkAccountStatus(); });
+
 try {
   const ver = hasChromeStorage() ? chrome.runtime.getManifest?.()?.version : '';
   const el = $('extVersion');
@@ -417,31 +475,44 @@ try {
 
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 
+const tabGuide   = $('tabGuide');
+const panelGuide = $('panelGuide');
+
 function setActiveTab(panel) {
-  const isMain = panel === 'main';
+  const isMain  = panel === 'main';
+  const isForms = panel === 'forms';
+  const isGuide = panel === 'guide';
   tabMain.classList.toggle('tab-btn-active', isMain);
   tabMain.setAttribute('aria-selected', isMain);
-  tabForms.classList.toggle('tab-btn-active', !isMain);
-  tabForms.setAttribute('aria-selected', !isMain);
-  panelMain.hidden = !isMain;
-  panelForms.hidden = isMain;
+  tabForms.classList.toggle('tab-btn-active', isForms);
+  tabForms.setAttribute('aria-selected', isForms);
+  tabGuide.classList.toggle('tab-btn-active', isGuide);
+  tabGuide.setAttribute('aria-selected', isGuide);
+  panelMain.hidden  = !isMain;
+  panelForms.hidden = !isForms;
+  panelGuide.hidden = !isGuide;
 }
 
-tabMain.addEventListener('click', () => setActiveTab('main'));
+tabMain.addEventListener('click',  () => setActiveTab('main'));
 tabForms.addEventListener('click', () => setActiveTab('forms'));
+tabGuide.addEventListener('click', () => setActiveTab('guide'));
 
 tabMain.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-    e.preventDefault();
-    tabForms.focus();
-    setActiveTab('forms');
+    e.preventDefault(); tabForms.focus(); setActiveTab('forms');
   }
 });
 tabForms.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    tabMain.focus();
-    setActiveTab('main');
+    e.preventDefault(); tabMain.focus(); setActiveTab('main');
+  }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault(); tabGuide.focus(); setActiveTab('guide');
+  }
+});
+tabGuide.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault(); tabForms.focus(); setActiveTab('forms');
   }
 });
 
@@ -493,10 +564,18 @@ function renderProducts() {
     const li = document.createElement('li');
     li.className = 'product-item';
 
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'product-name';
-    nameSpan.title = p.url;
-    nameSpan.textContent = extractProductName(p.url);
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'product-name-edit';
+    nameInput.value = p.name || extractProductName(p.url);
+    nameInput.title = p.url;
+    nameInput.placeholder = 'Name';
+    nameInput.disabled = monitorActive;
+    nameInput.setAttribute('aria-label', 'Product name');
+    nameInput.addEventListener('change', () => {
+      products[i].name = nameInput.value.trim() || extractProductName(p.url);
+      saveProducts();
+    });
 
     const qtySelect = document.createElement('select');
     qtySelect.className = 'qty-select';
@@ -526,9 +605,19 @@ function renderProducts() {
       renderProducts();
     });
 
-    li.appendChild(nameSpan);
-    li.appendChild(qtySelect);
-    li.appendChild(removeBtn);
+    const topRow = document.createElement('div');
+    topRow.className = 'product-item-top';
+    topRow.appendChild(nameInput);
+    topRow.appendChild(qtySelect);
+    topRow.appendChild(removeBtn);
+
+    const urlRow = document.createElement('div');
+    urlRow.className = 'product-item-url';
+    urlRow.textContent = p.url;
+    urlRow.title = p.url;
+
+    li.appendChild(topRow);
+    li.appendChild(urlRow);
     productListEl.appendChild(li);
   });
 }
@@ -600,8 +689,11 @@ function addProduct() {
     return;
   }
 
-  products.push({ url, qty: 1 });
+  const nameInputEl = $('productName');
+  const customName = nameInputEl?.value.trim() || '';
+  products.push({ url, qty: 1, name: customName || extractProductName(url) });
   productUrlInput.value = '';
+  if (nameInputEl) nameInputEl.value = '';
   saveProducts();
   renderProducts();
   showToast('Added to list');
@@ -627,6 +719,8 @@ async function toggleMonitor() {
     showToast('Monitoring stopped');
   } else {
     if (!products.length) return;
+    // Persist current UI state before starting so settings survive popup close/reopen.
+    await autoSaveToggle().catch(() => {});
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
       products,

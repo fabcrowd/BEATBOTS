@@ -29,9 +29,8 @@ export function getChromiumExecutable() {
  * @param {{
  *   timeout?: number,
  *   profilePrefix?: string,
- *   /** If set, reuse this Chrome user-data-dir (login + extension state persist). */
  *   userDataDir?: string,
- * }} [options]
+ * }} [options] If userDataDir is set, reuse that Chrome user-data-dir (login + extension state persist).
  */
 export async function launchWithExtension(options = {}) {
   const TIMEOUT = options.timeout ?? 60000;

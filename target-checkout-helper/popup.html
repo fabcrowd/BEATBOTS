@@ -26,6 +26,7 @@
   <nav class="tab-nav" role="tablist" aria-label="Popup sections">
     <button type="button" role="tab" id="tabMain" class="tab-btn tab-btn-active" aria-selected="true" aria-controls="panelMain" data-panel="main">Monitor &amp; options</button>
     <button type="button" role="tab" id="tabForms" class="tab-btn" aria-selected="false" aria-controls="panelForms" data-panel="forms">Shipping &amp; payment</button>
+    <button type="button" role="tab" id="tabGuide" class="tab-btn" aria-selected="false" aria-controls="panelGuide" data-panel="guide">How to use</button>
   </nav>
 
   <main id="popupMain">
@@ -84,6 +85,7 @@
         <p class="section-lead">Opens a background tab per URL and polls inventory. When stock appears, that tab reloads and runs add-to-cart → checkout.</p>
         <div class="product-input-row">
           <input type="url" id="productUrl" placeholder="https://www.target.com/p/…" autocomplete="off" aria-label="Target product URL">
+          <input type="text" id="productName" placeholder="Name (e.g. Feraligatr)" autocomplete="off" aria-label="Product name" class="product-name-input">
           <button type="button" id="addProductBtn" class="btn-icon" aria-label="Add product to list">+</button>
         </div>
         <p id="productListEmpty" class="empty-hint" hidden>No products yet — paste a product link and tap +</p>
@@ -115,14 +117,35 @@
         <div id="monitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
       </section>
 
-      <section class="card" aria-labelledby="optionsHeading">
-        <h2 id="optionsHeading">Checkout options</h2>
-        <p class="option-hint option-hint-safe">Orders are only placed if <strong>you</strong> tap Place order on Target (or you turn on Auto place order — risky). Logged-in Target may still <em>show</em> your saved card on their checkout until you change it there.</p>
-        <label class="option-row">
-          <input type="checkbox" id="useSavedPayment">
-          <span class="option-label">Use saved payment &amp; address</span>
+      <section class=”card” aria-labelledby=”optionsHeading”>
+        <h2 id=”optionsHeading”>Checkout options</h2>
+
+        <div class=”acct-status” id=”acctStatus”>
+          <div class=”acct-status-header”>
+            <span class=”acct-status-title”>Target account</span>
+            <button type=”button” id=”acctCheckBtn” class=”acct-check-btn”>↻ Check</button>
+          </div>
+          <div class=”acct-indicators”>
+            <div class=”acct-item”>
+              <span class=”acct-dot” id=”acctLoginDot”></span>
+              <span class=”acct-item-text”><span class=”acct-item-label”>Logged in</span><span class=”acct-item-val” id=”acctLoginVal”>—</span></span>
+            </div>
+            <div class=”acct-item”>
+              <span class=”acct-dot” id=”acctAddrDot”></span>
+              <span class=”acct-item-text”><span class=”acct-item-label”>Address</span><span class=”acct-item-val” id=”acctAddrVal”>—</span></span>
+            </div>
+            <div class=”acct-item”>
+              <span class=”acct-dot” id=”acctPayDot”></span>
+              <span class=”acct-item-text”><span class=”acct-item-label”>Payment</span><span class=”acct-item-val” id=”acctPayVal”>—</span></span>
+            </div>
+          </div>
+        </div>
+
+        <label class=”option-row”>
+          <input type=”checkbox” id=”useSavedPayment”>
+          <span class=”option-label”>Use saved payment &amp; address</span>
         </label>
-        <p class="option-hint">Uses Buy It Now or “View cart &amp; check out” after add-to-cart when you are logged in with saved address and card.</p>
+        <p class=”option-hint”>Uses Buy It Now or “View cart &amp; check out” after add-to-cart when you are logged in with saved address and card.</p>
         <label class="option-row">
           <input type="checkbox" id="autoPlaceOrder">
           <span class="option-label">Auto place order <span class="option-badge">TEST</span></span>
@@ -194,6 +217,95 @@
         </div>
         <input type="text" id="billingZip" placeholder="Billing ZIP (if different)" maxlength="10">
       </section>
+    </div>
+    <div id="panelGuide" class="tab-panel" role="tabpanel" aria-labelledby="tabGuide" hidden>
+
+      <section class="card guide-section">
+        <h2>1 — Load the extension</h2>
+        <ol class="guide-steps">
+          <li>Go to <code>chrome://extensions</code></li>
+          <li>Enable <strong>Developer mode</strong> (top-right toggle)</li>
+          <li>Click <strong>Load unpacked</strong> → select the <code>target-checkout-helper</code> folder</li>
+          <li>Pin it to your toolbar via the puzzle icon</li>
+        </ol>
+      </section>
+
+      <section class="card guide-section">
+        <h2>2 — One-time setup</h2>
+        <ol class="guide-steps">
+          <li>Sign in to Target in Chrome and make sure your <strong>shipping address</strong> and <strong>credit card</strong> are saved on your account — the bot uses those directly</li>
+          <li>Open this popup → turn <strong>Enable</strong> ON</li>
+          <li>Turn <strong>Use saved payment &amp; address</strong> ON — this is the fast path, skips all form filling</li>
+          <li>Turn <strong>Auto place order</strong> ON if you want fully automatic checkout</li>
+          <li>Set Retry max → <strong>0</strong> (unlimited) and Retry delay → <strong>1s</strong></li>
+        </ol>
+      </section>
+
+      <section class="card guide-section">
+        <h2>3 — Cookie harvesting</h2>
+        <p class="guide-note">Keeps your session fresh so Target doesn't reject checkout mid-run.</p>
+        <ol class="guide-steps">
+          <li>In the <strong>Monitor &amp; options</strong> tab find <em>Cookie harvest</em></li>
+          <li>Turn <strong>Harvesting on</strong> → ON</li>
+          <li>Set <strong>Snapshots per page load</strong> → 2</li>
+          <li>Turn <strong>Don't stop harvesting</strong> → ON</li>
+          <li>Turn <strong>Apply before checkout</strong> → ON</li>
+          <li>Leave expiration at 3 min, order at LIFO</li>
+          <li>Browse Target normally while you wait — each visit auto-snapshots. Watch <em>Snapshots ready: N</em> stay above 0</li>
+        </ol>
+      </section>
+
+      <section class="card guide-section">
+        <h2>4 — Set up the monitor</h2>
+        <ol class="guide-steps">
+          <li>In <strong>Monitor &amp; options</strong> paste each product URL and hit <strong>+</strong></li>
+          <li>Set qty to <strong>5</strong> per product</li>
+          <li>If you know the drop time set it in <strong>Expected drop / restock</strong> — polling jumps to 250ms in the 10-minute window</li>
+          <li>Hit <strong>Start monitoring</strong> — the extension opens one background tab per product automatically</li>
+          <li>Keep Chrome open with at least one Target tab visible</li>
+        </ol>
+        <div class="guide-urls">
+          <p class="guide-urls-label">Pokemon card drop URLs:</p>
+          <code>target.com/p/-/A-95163306</code> — Feraligatr<br>
+          <code>target.com/p/-/A-95163305</code> — Meganium<br>
+          <code>target.com/p/-/A-1008581387</code> — Emboar<br>
+          <code>target.com/p/-/A-95120834</code> — Booster Bundle
+        </div>
+      </section>
+
+      <section class="card guide-section">
+        <h2>5 — While you wait</h2>
+        <ol class="guide-steps">
+          <li>Don't close Chrome — minimized is fine</li>
+          <li>Every 10–15 min reload a Target tab to keep cookies fresh</li>
+          <li>Watch the popup status line — it shows the poll is running</li>
+          <li>Don't flip extension settings in the last minute before drop time</li>
+          <li>Make sure your Target cart is <strong>empty</strong> before the drop</li>
+        </ol>
+      </section>
+
+      <section class="card guide-section">
+        <h2>6 — What happens on restock</h2>
+        <ol class="guide-steps">
+          <li>Background poll detects stock via RedSky API</li>
+          <li>Navigates the background tab to the product page</li>
+          <li>Clicks ATC using the debugger (human mouse movement)</li>
+          <li>Drives through checkout using your saved address &amp; card</li>
+          <li>Clicks <strong>Place Order</strong> automatically</li>
+          <li>Toast appears bottom-right tracking each step</li>
+        </ol>
+      </section>
+
+      <section class="card guide-section">
+        <h2>Watch for</h2>
+        <ul class="guide-steps guide-warnings">
+          <li><strong>"Sign in if you see a prompt"</strong> — Target hit an auth gate. Sign in manually in that tab, bot continues automatically</li>
+          <li><strong>"Snapshots ready: 0"</strong> — harvest pool empty, browse a Target page to refill</li>
+          <li><strong>Chrome banner "controlled by automated software"</strong> — normal, means debugger clicks are working</li>
+          <li><strong>Cart not empty</strong> — clear your Target cart before the drop or old items may block checkout</li>
+        </ul>
+      </section>
+
     </div>
   </main>
 

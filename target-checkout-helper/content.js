@@ -128,6 +128,20 @@ function fillSelect(select, value) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
+// Click via the debugger (human-like mouse movement + press/release).
+// Falls back to .click() if the background rejects (e.g. debugger not attached).
+async function debuggerClick(el) {
+  if (!el) return;
+  try {
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.left + r.width / 2);
+    const y = Math.round(r.top  + r.height / 2);
+    const res = await chrome.runtime.sendMessage({ type: 'DEBUGGER_CLICK', x, y });
+    if (res?.ok) return;
+  } catch (_) {}
+  el.click();
+}
+
 function isVisible(el) {
   if (!el || !(el instanceof Element)) return false;
   const r = el.getBoundingClientRect();
@@ -681,17 +695,17 @@ function findContinueButton(enabledOnly = false) {
   }) || null;
 }
 
-function clickContinue() {
+async function clickContinue() {
   const btn = findContinueButton(true);
-  if (btn) { btn.click(); return true; }
+  if (btn) { await debuggerClick(btn); return true; }
   return false;
 }
 
 async function waitAndClickContinue(timeout = 5000) {
-  if (clickContinue()) return true;
+  if (await clickContinue()) return true;
   try {
     const btn = await waitForEnabled(() => findContinueButton(true), timeout);
-    btn.click();
+    await debuggerClick(btn);
     return true;
   } catch {
     return false;
@@ -813,7 +827,7 @@ async function handleProductPage(settings) {
     if (buyNowBtn && !buyNowBtn.disabled) {
       console.log('[TCH] clicking Buy It Now (saved payment mode)');
       markCheckoutStart('saved');
-      buyNowBtn.click();
+      await debuggerClick(buyNowBtn);
       showToast('Buy It Now → checkout…');
       setNavigationMark('product_to_checkout');
       return;
@@ -862,7 +876,7 @@ async function handleProductPage(settings) {
   }
 
   console.log('[TCH] clicking ATC');
-  addBtn.click();
+  await debuggerClick(addBtn);
 
   markCartReady(); // ATC was clicked — cart should now have this item
 
@@ -876,7 +890,7 @@ async function handleProductPage(settings) {
     try {
       const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
       setNavigationMark('product_to_checkout');
-      viewCartBtn.click();
+      await debuggerClick(viewCartBtn);
       return;
     } catch {
       console.log('[TCH] viewCart modal not found; navigating to checkout directly');
@@ -905,7 +919,7 @@ async function handleCartPage(settings) {
     ], 6000);
     stopCartCheckout('clicked');
     setNavigationMark('cart_to_checkout');
-    btn.click();
+    await debuggerClick(btn);
   } catch {
     stopCartCheckout('fallback_redirect');
     setNavigationMark('cart_to_checkout');
@@ -1235,7 +1249,7 @@ async function handleReviewStep(settings) {
     if (btn && !btn.disabled) {
       console.log('[TCH] autoPlaceOrder: clicking Place Order');
       showToast('Placing order…', 'persistent');
-      btn.click();
+      await debuggerClick(btn);
       return;
     }
     console.warn('[TCH] autoPlaceOrder: Place Order button not clickable');
@@ -1464,7 +1478,7 @@ async function handleMonitoredATC(monitor, product) {
     if (buyNowBtn && !buyNowBtn.disabled) {
       console.log('[TCH] monitor: clicking Buy It Now (saved payment mode)');
       markCheckoutStart('saved');
-      buyNowBtn.click();
+      await debuggerClick(buyNowBtn);
       showToast('Monitor: Buy It Now → checkout…');
       setNavigationMark('product_to_checkout');
       // Buy It Now routes directly to checkout; ATC_SUCCESS will be implied
@@ -1502,7 +1516,7 @@ async function handleMonitoredATC(monitor, product) {
 
   if (addBtn && !addBtn.disabled && !pageOOS) {
     showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
-    addBtn.click();
+    await debuggerClick(addBtn);
 
     // Decline any protection/coverage upsell modal immediately.
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
@@ -1513,7 +1527,7 @@ async function handleMonitoredATC(monitor, product) {
       try {
         const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
         setNavigationMark('product_to_checkout');
-        viewCartBtn.click();
+        await debuggerClick(viewCartBtn);
         cartConfirmed = true;
       } catch {
         // Modal didn't appear; navigate to checkout directly.
@@ -1675,7 +1689,55 @@ new MutationObserver(() => {
 
 // ─── MESSAGE LISTENER ────────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'TCH_CHECK_ACCOUNT') {
+    (async () => {
+      try {
+        // Login via DOM — more reliable than cookies (cookies can linger after logout).
+        const domLoggedIn = !!(
+          document.querySelector('[data-test="accountNav-greeting"]') ||
+          document.querySelector('[data-test="account-greeting"]') ||
+          document.querySelector('[data-test="signOut"]') ||
+          document.querySelector('a[data-test*="signout"], a[data-test*="sign-out"]') ||
+          document.querySelector('a[href*="/account/logout"], a[href*="/account/signout"]')
+        );
+
+        const apiKey = window.__CONFIG__?.services?.auth?.apiKey
+                    || window.__CONFIG__?.services?.apiPlatform?.apiKey || '';
+        const qs = apiKey ? `?key=${encodeURIComponent(apiKey)}&per_page=1` : '?per_page=1';
+        const hdrs = apiKey ? { 'x-api-key': apiKey } : {};
+
+        const [addrResp, payResp] = await Promise.all([
+          fetch(`https://api.target.com/guest_accounts/v3/addresses${qs}`,     { credentials: 'include', headers: hdrs }),
+          fetch(`https://api.target.com/guest_accounts/v3/payment_cards${qs}`, { credentials: 'include', headers: hdrs }),
+        ]);
+
+        // 401 = definitely not logged in; anything else = treat as logged in.
+        const apiLoggedIn = addrResp.status !== 401 && payResp.status !== 401;
+        const loggedIn = domLoggedIn || apiLoggedIn;
+
+        let hasAddress = null, hasPayment = null;
+        if (addrResp.ok) {
+          const d = await addrResp.json();
+          hasAddress = (d?.addresses?.length ?? d?.count ?? 0) > 0;
+        } else if (addrResp.status === 401) {
+          hasAddress = false;
+        }
+        if (payResp.ok) {
+          const d = await payResp.json();
+          hasPayment = (d?.payment_cards?.length ?? d?.count ?? 0) > 0;
+        } else if (payResp.status === 401) {
+          hasPayment = false;
+        }
+
+        sendResponse({ loggedIn, hasAddress, hasPayment });
+      } catch (e) {
+        sendResponse({ loggedIn: null, hasAddress: null, hasPayment: null });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'REQUEST_API_KEY') {
     try {
       const apiKey = window.__CONFIG__?.services?.auth?.apiKey

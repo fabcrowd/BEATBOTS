@@ -3,7 +3,12 @@
   "name": "Target Checkout Helper",
   "version": "1.4.0",
   "description": "Automates Target.com checkout steps — Add to Cart through Order Review. You place the final order.",
-  "permissions": ["storage", "tabs", "alarms", "cookies", "debugger"],
+  "permissions": ["storage", "tabs", "alarms", "cookies", "debugger", "declarativeNetRequest"],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "blocking", "enabled": true, "path": "rules/blocking.json" }
+    ]
+  },
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

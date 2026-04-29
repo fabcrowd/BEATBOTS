@@ -372,6 +372,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false, total: 0 }));
       return true;
 
+    case 'DEBUGGER_CLICK': {
+      const tabId = Number(sender?.tab?.id);
+      const x = Number(message.x);
+      const y = Number(message.y);
+      if (!tabId || isNaN(x) || isNaN(y)) { sendResponse({ ok: false }); return true; }
+      tchDebuggerAutoAttach(tabId)
+        .then(() => tchDebuggerClick(tabId, x, y))
+        .then(() => sendResponse({ ok: true }))
+        .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+      return true;
+    }
+
     case 'DEBUGGER_ATTACH': {
       const tabId = Number(message.tabId);
       const tabUrl = String(message.tabUrl || '');
@@ -424,6 +436,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, ...(await tchHarvestStatus()) });
         } catch {
           sendResponse({ ok: false });
+        }
+      })();
+      return true;
+    }
+
+    case 'CHECK_ACCOUNT_STATUS': {
+      (async () => {
+        try {
+          const tabs = await new Promise(r => chrome.tabs.query({ url: '*://*.target.com/*' }, r));
+          if (!tabs.length) {
+            sendResponse({ loggedIn: null, hasAddress: null, hasPayment: null, noTab: true });
+            return;
+          }
+          const result = await chrome.tabs.sendMessage(tabs[0].id, { type: 'TCH_CHECK_ACCOUNT' })
+            .catch(() => ({ loggedIn: null, hasAddress: null, hasPayment: null }));
+          sendResponse(result);
+        } catch (e) {
+          sendResponse({ loggedIn: null, hasAddress: null, hasPayment: null });
         }
       })();
       return true;
@@ -509,6 +539,11 @@ async function startMonitor(products, refreshInterval, dropExpectedAt) {
   }
 
   await chrome.storage.local.set({ monitor });
+
+  // Auto-attach debugger to the first monitor tab so click simulation is ready immediately.
+  if (monitor.tabIds.length > 0) {
+    tchDebuggerAutoAttach(monitor.tabIds[0]).catch(() => {});
+  }
 
   // Start background TCIN polling immediately if we already have the API key.
   // Otherwise it will start as soon as CACHE_API_KEY is received.
