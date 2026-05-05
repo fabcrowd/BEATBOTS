@@ -1,0 +1,473 @@
+{
+   "action_default_title": {
+      "message": "Discord 對話備份"
+   },
+   "archive_manager_back_btn": {
+      "message": "返回工作室"
+   },
+   "archive_manager_browse_btn": {
+      "message": "或瀏覽檔案…"
+   },
+   "archive_manager_drop_desc": {
+      "message": "合併的片段會依訊息 ID 去重。支援：Discord 匯出的 HTML、舊版 .chatlog 封包。"
+   },
+   "archive_manager_drop_title": {
+      "message": "將 HTML 檔拖放到此處"
+   },
+   "archive_manager_subtitle": {
+      "message": "將多個 HTML 匯出合併為單一封存。"
+   },
+   "archive_manager_title": {
+      "message": "封存管理員"
+   },
+   "chrome_extension_description": {
+      "message": "安全封存 Discord 歷史訊息為 HTML 或試算表。透過資料夾整理與日期區間選擇，實現精準同步。"
+   },
+   "chrome_extension_name": {
+      "message": "Discord 對話備份：匯出為 HTML／試算表"
+   },
+   "common_cancel": {
+      "message": "取消"
+   },
+   "common_click_here": {
+      "message": "點此"
+   },
+   "common_close": {
+      "message": "關閉"
+   },
+   "common_dash": {
+      "message": "—"
+   },
+   "common_dismiss": {
+      "message": "關閉提示"
+   },
+   "common_please_wait": {
+      "message": "請稍候…"
+   },
+   "common_retry": {
+      "message": "重試"
+   },
+   "common_support": {
+      "message": "支援"
+   },
+   "common_verify": {
+      "message": "驗證"
+   },
+   "copy_path": {
+      "message": "複製路徑"
+   },
+   "dash_auto_refresh_exhausted": {
+      "message": "自動重新整理多次仍失敗。請確認頻道頁面已置於前景，或從工具列重新開啟本擴充功能。"
+   },
+   "dash_backup_channel_title": {
+      "message": "備份此頻道"
+   },
+   "dash_backup_dm_title": {
+      "message": "備份此對話"
+   },
+   "dash_channels_heading": {
+      "message": "頻道"
+   },
+   "dash_connecting_discord_tab": {
+      "message": "正在連線至 Discord 分頁…"
+   },
+   "dash_connecting_discord_waiting": {
+      "message": "正在連線至 Discord 分頁，請稍候…"
+   },
+   "dash_date_end": {
+      "message": "結束"
+   },
+   "dash_date_start": {
+      "message": "開始"
+   },
+   "dash_download_path": {
+      "message": "下載 / $1 / $2"
+   },
+   "dash_export_format": {
+      "message": "匯出格式"
+   },
+   "dash_export_format_html": {
+      "message": "HTML"
+   },
+   "dash_export_format_xlsx": {
+      "message": "試算表"
+   },
+   "dash_export_locating": {
+      "message": "正在抓取訊息…"
+   },
+   "dash_export_locating_date": {
+      "message": "目前掃描至：$1"
+   },
+   "dash_first_export_hint": {
+      "message": "在下方選擇日期範圍，然後按「開始同步」以建立首次匯出與時間軸。"
+   },
+   "dash_folder_exports_checkbox_label": {
+      "message": "依伺服器與頻道將匯出存入資料夾"
+   },
+   "dash_folder_path_hint": {
+      "message": "檔案會位於：下載 → 伺服器 → 頻道 → 檔名"
+   },
+   "dash_format_html_split": {
+      "message": "大型匯出會分割成多個 HTML 檔。"
+   },
+   "dash_free_plan_quota": {
+      "message": "免費方案：已匯出 $1 / $2 則訊息"
+   },
+   "dash_last_backup_completed_at": {
+      "message": "上次備份完成於 $1。"
+   },
+   "dash_last_download": {
+      "message": "上次下載"
+   },
+   "dash_last_synced_prefix": {
+      "message": "上次同步 · "
+   },
+   "dash_legend_backed_up": {
+      "message": "已備份"
+   },
+   "dash_legend_capped": {
+      "message": "已達上限（額度用盡）"
+   },
+   "dash_legend_missing_gaps": {
+      "message": "缺少片段"
+   },
+   "dash_mode_continuous": {
+      "message": "連續"
+   },
+   "dash_mode_label": {
+      "message": "模式"
+   },
+   "dash_mode_manual": {
+      "message": "手動"
+   },
+   "dash_no_backup_in_range": {
+      "message": "此區間沒有備份"
+   },
+   "dash_open_extension_from_toolbar": {
+      "message": "請從工具列在 Discord 頻道或私訊頁面開啟本擴充功能以連線。"
+   },
+   "dash_preset_last_days": {
+      "message": "最近 $1 天"
+   },
+   "dash_ready_to_backup": {
+      "message": "一切就緒，可以開始備份。"
+   },
+   "dash_remove_server_aria": {
+      "message": "從備份清單移除伺服器"
+   },
+   "dash_remove_server_title": {
+      "message": "從備份清單移除伺服器"
+   },
+   "dash_segment_n_messages_backed": {
+      "message": "已備份 $1 則訊息"
+   },
+   "dash_segment_one_message_backed": {
+      "message": "已備份 1 則訊息"
+   },
+   "dash_sync_loading": {
+      "message": "載入中"
+   },
+   "dash_sync_packaging": {
+      "message": "打包中"
+   },
+   "dash_sync_queued": {
+      "message": "排隊中"
+   },
+   "dash_sync_staging": {
+      "message": "準備中…"
+   },
+   "dash_sync_start": {
+      "message": "開始同步"
+   },
+   "dash_sync_syncing_pct": {
+      "message": "同步中 $1%"
+   },
+   "dash_sync_up_to_date": {
+      "message": "已是最新"
+   },
+   "dash_syncing_from_to_now": {
+      "message": "自 $1 同步至目前"
+   },
+   "dash_time_h_ago": {
+      "message": "$1 小時前"
+   },
+   "dash_time_just_now": {
+      "message": "剛剛"
+   },
+   "dash_time_min_ago": {
+      "message": "$1 分鐘前"
+   },
+   "dash_timeline_backed_aria": {
+      "message": "已備份"
+   },
+   "dash_timeline_backfill_aria": {
+      "message": "回填較舊區間"
+   },
+   "dash_timeline_backfill_title": {
+      "message": "回填較舊區間（30 天）"
+   },
+   "dash_timeline_gap_aria": {
+      "message": "缺少片段"
+   },
+   "dash_title_extension_icon": {
+      "message": "Discord 對話備份"
+   },
+   "dash_tooltip_backed_range": {
+      "message": "已備份：$1 - $2"
+   },
+   "dash_tooltip_capped_segment": {
+      "message": "已達免費額度（$1 則訊息）；較新訊息未同步。"
+   },
+   "dash_tooltip_leading_range": {
+      "message": "待同步：$1 - $2（點擊設定範圍）"
+   },
+   "dash_tooltip_pending_continue": {
+      "message": "待同步：$1 - $2（點擊以同步剩餘資料）"
+   },
+   "dash_tooltip_pending_set_range": {
+      "message": "待同步：$1 - $2（點擊設定範圍）"
+   },
+   "dashboard_page_title": {
+      "message": "Discord 對話備份 — 控制台"
+   },
+   "empty_range_notice_text": {
+      "message": "所選日期區間內沒有訊息。"
+   },
+   "export_bot_no": {
+      "message": "否"
+   },
+   "export_bot_yes": {
+      "message": "是"
+   },
+   "export_col_attachments": {
+      "message": "附件"
+   },
+   "export_col_author_avatar": {
+      "message": "作者頭像"
+   },
+   "export_col_author_tag": {
+      "message": "作者標籤"
+   },
+   "export_col_author_username": {
+      "message": "使用者名稱"
+   },
+   "export_col_content": {
+      "message": "內容"
+   },
+   "export_col_date": {
+      "message": "日期"
+   },
+   "export_col_is_bot": {
+      "message": "是否為機器人"
+   },
+   "export_col_mentions": {
+      "message": "提及"
+   },
+   "export_embed_n": {
+      "message": "嵌入 $1"
+   },
+   "export_embed_n_image": {
+      "message": "嵌入 $1 圖片"
+   },
+   "export_embed_n_thumbnail": {
+      "message": "嵌入 $1 縮圖"
+   },
+   "export_embed_n_url": {
+      "message": "嵌入 $1 連結"
+   },
+   "export_embed_n_video": {
+      "message": "嵌入 $1 影片"
+   },
+   "export_free_xlsx_cap_row": {
+      "message": "免費版最多可匯出 $1 則訊息。升級專業版可解除限制。"
+   },
+   "export_workbook_creator": {
+      "message": "Discord 對話備份"
+   },
+   "export_xlsx_sheet_chatlog": {
+      "message": "對話紀錄"
+   },
+   "folder_exports_pro_feature_cta": {
+      "message": "專業版功能。升級以解鎖階層式匯出。"
+   },
+   "folder_exports_pro_tooltip": {
+      "message": "僅專業版：以階層資料夾整理封存。"
+   },
+   "free_export_cap_note": {
+      "message": "免費匯出：最多 $1 則訊息。升級專業版可解除限制。"
+   },
+   "license_token_format_invalid": {
+      "message": "授權序號格式不正確。請僅使用小寫英數字，格式如：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   },
+   "license_token_label": {
+      "message": "授權序號"
+   },
+   "license_token_placeholder": {
+      "message": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   },
+   "pop_loading_checking_tab": {
+      "message": "正在檢查目前分頁…"
+   },
+   "pop_need_channel_subtitle": {
+      "message": "你已在 Discord，但尚未進入可備份的對話。"
+   },
+   "pop_need_channel_title": {
+      "message": "請先進入頻道或私訊"
+   },
+   "pop_not_discord_title": {
+      "message": "未偵測到 Discord 工作階段"
+   },
+   "pop_open_discord_button": {
+      "message": "在瀏覽器中開啟 Discord"
+   },
+   "pop_step_discord_web": {
+      "message": "Discord 網頁版"
+   },
+   "pop_step_keep_tab": {
+      "message": "請留在該 Discord 分頁，然後再次點擊本擴充功能圖示。"
+   },
+   "pop_step_open_channel_part1": {
+      "message": "在目標伺服器進入文字頻道或私訊，讓網址列顯示"
+   },
+   "pop_step_open_channel_part2": {
+      "message": "路徑。"
+   },
+   "pop_step_open_channel_path": {
+      "message": "/channels/..."
+   },
+   "pop_step_open_discord_prefix": {
+      "message": "請在瀏覽器中開啟"
+   },
+   "pop_step_open_discord_suffix": {
+      "message": "，並確認已登入。"
+   },
+   "pro_modal_already_have_token": {
+      "message": "已有序號？"
+   },
+   "pro_modal_check_loading": {
+      "message": "正在向伺服器驗證授權…"
+   },
+   "pro_modal_feature_archive_depth_desc": {
+      "message": "突破 $1 則訊息限制。一鍵同步整個伺服器歷程。"
+   },
+   "pro_modal_feature_archive_depth_title": {
+      "message": "無限封存深度"
+   },
+   "pro_modal_feature_smart_folder_desc_prefix": {
+      "message": "自動將匯出整理為階層式"
+   },
+   "pro_modal_feature_smart_folder_desc_suffix": {
+      "message": "資料夾。"
+   },
+   "pro_modal_feature_smart_folder_title": {
+      "message": "智慧資料夾整理"
+   },
+   "pro_modal_free_cap_note": {
+      "message": "免費版最多 $1 則訊息。升級專業版可解除限制。"
+   },
+   "pro_modal_header_subtitle_free": {
+      "message": "比較方案並啟用授權。"
+   },
+   "pro_modal_header_subtitle_pro": {
+      "message": "管理授權與訂閱。"
+   },
+   "pro_modal_header_subtitle_trial": {
+      "message": "在試用期間管理授權。"
+   },
+   "pro_modal_hierarchy_tail": {
+      "message": "階層。"
+   },
+   "pro_modal_manage_billing": {
+      "message": "管理你的帳單。"
+   },
+   "pro_modal_member_title": {
+      "message": "你是專業版會員"
+   },
+   "pro_modal_plan_free": {
+      "message": "免費"
+   },
+   "pro_modal_plan_free_limit": {
+      "message": "每次同步最多 $1 則訊息。"
+   },
+   "pro_modal_plan_free_manual": {
+      "message": "手動管理檔案。"
+   },
+   "pro_modal_plan_get_started": {
+      "message": "開始使用"
+   },
+   "pro_modal_plan_pro": {
+      "message": "專業版"
+   },
+   "pro_modal_plan_pro_headline": {
+      "message": "無上限＋智慧資料夾"
+   },
+   "pro_modal_plan_pro_unlimited_tail": {
+      "message": "則訊息／每次同步。"
+   },
+   "pro_modal_smart_folder_org": {
+      "message": "智慧資料夾整理"
+   },
+   "pro_modal_subscription_canceled": {
+      "message": "你的訂閱已取消。"
+   },
+   "pro_modal_title": {
+      "message": "專業版與授權"
+   },
+   "pro_modal_trial_active": {
+      "message": "專業版試用中"
+   },
+   "pro_modal_trial_ends_on": {
+      "message": "試用將於 $1 結束。"
+   },
+   "pro_modal_unlimited_word": {
+      "message": "無上限"
+   },
+   "pro_modal_unsubscribe": {
+      "message": "取消訂閱"
+   },
+   "pro_modal_why_choose_pro": {
+      "message": "為何選擇專業版"
+   },
+   "pro_settings_title": {
+      "message": "專業版設定"
+   },
+   "show_in_folder": {
+      "message": "在資料夾中顯示"
+   },
+   "status_free": {
+      "message": "免費"
+   },
+   "status_pro": {
+      "message": "專業版"
+   },
+   "status_trial": {
+      "message": "試用"
+   },
+   "token_check_error_generic": {
+      "message": "無法驗證授權序號。請再試一次。"
+   },
+   "token_check_error_http": {
+      "message": "授權伺服器發生錯誤。請稍後再試。"
+   },
+   "token_check_error_network": {
+      "message": "無法連線至授權伺服器。請檢查網路後按「重試」。"
+   },
+   "token_check_error_timeout": {
+      "message": "授權伺服器逾時未回應。請檢查連線後按「重試」。"
+   },
+   "token_save_error": {
+      "message": "無法在本機儲存序號。請再試一次。"
+   },
+   "trial_waiting_desc": {
+      "message": "評價頁面已在新分頁開啟。請在該處完成流程；本頁會在背景計時，之後可按下「驗證」（擴充功能無法確認你是否真的送出評價）。"
+   },
+   "trial_waiting_title": {
+      "message": "等待完成評價"
+   },
+   "upgrade_to_pro_btn": {
+      "message": "升級專業版"
+   },
+   "view_pro_link": {
+      "message": "查看專業版"
+   }
+}

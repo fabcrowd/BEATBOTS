@@ -1,6 +1,5 @@
 // core/hosts.js — Retailer detection + cookie domain lists (shared: content + service worker).
 // Loaded before content.js in manifest; importScripts from background.js.
-// Walmart: reserved for future work (see tasks/todo.md).
 
 (function (root) {
   'use strict';
@@ -14,8 +13,13 @@
     cookieDomains: ['target.com'],
   };
 
-  /** @type {typeof TARGET | null} */
-  var WALMART = null; // TODO: set to { id: 'walmart', label: 'Walmart', hostSuffixes: [...], cookieDomains: [...] }
+  /** @type {typeof TARGET} */
+  var WALMART = {
+    id: 'walmart',
+    label: 'Walmart',
+    hostSuffixes: ['walmart.com'],
+    cookieDomains: ['walmart.com'],
+  };
 
   function hostnameFromUrl(url) {
     try {
@@ -43,8 +47,6 @@
     if (!host) return null;
     if (matchesRetailer(host, TARGET)) return 'target';
     if (WALMART && matchesRetailer(host, WALMART)) return 'walmart';
-    // Stub: recognize host for early-exit / TODO messaging (automation not shipped).
-    if (host === 'walmart.com' || host.endsWith('.walmart.com')) return 'walmart';
     return null;
   }
 
@@ -61,9 +63,8 @@
 
   root.TCH_HOSTS = {
     TARGET: TARGET,
+    WALMART: WALMART,
     detectRetailer: detectRetailer,
     cookieDomainsFor: cookieDomainsFor,
-    /** Reserved — flip on when Walmart module lands */
-    WALMART_ENABLED: false,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

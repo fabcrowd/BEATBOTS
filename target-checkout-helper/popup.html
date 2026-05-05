@@ -9,31 +9,35 @@
   <header class="app-header">
     <div class="header-row">
       <div class="header-title-block">
-        <h1 id="appTitle">Target Checkout Helper</h1>
+        <h1 id="appTitle">Checkout Helper</h1>
         <div class="header-status-row">
           <span id="statusDot" class="status-dot" aria-hidden="true"></span>
           <p class="subtitle" id="statusText" role="status">Extension disabled</p>
         </div>
       </div>
-      <label class="toggle" title="Turn automation on or off">
-        <span class="sr-only">Extension enabled</span>
-        <input type="checkbox" id="enableToggle" aria-describedby="statusText">
-        <span class="slider" aria-hidden="true"></span>
-      </label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button type="button" id="popoutBtn" class="harvest-btn" title="Open in a window that stays open" style="font-size:11px;padding:4px 8px">&#x2197; Pop out</button>
+        <label class="toggle" title="Turn automation on or off">
+          <span class="sr-only">Extension enabled</span>
+          <input type="checkbox" id="enableToggle" aria-describedby="statusText">
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </div>
     </div>
   </header>
 
   <nav class="tab-nav" role="tablist" aria-label="Popup sections">
-    <button type="button" role="tab" id="tabMain" class="tab-btn tab-btn-active" aria-selected="true" aria-controls="panelMain" data-panel="main">Monitor &amp; options</button>
-    <button type="button" role="tab" id="tabForms" class="tab-btn" aria-selected="false" aria-controls="panelForms" data-panel="forms">Shipping &amp; payment</button>
-    <button type="button" role="tab" id="tabGuide" class="tab-btn" aria-selected="false" aria-controls="panelGuide" data-panel="guide">How to use</button>
+    <button type="button" role="tab" id="tabMain" class="tab-btn tab-btn-active" aria-selected="true" aria-controls="panelMain" data-panel="main">Monitor</button>
+    <button type="button" role="tab" id="tabWalmart" class="tab-btn tab-btn-walmart" aria-selected="false" aria-controls="panelWalmart" data-panel="walmart">Walmart</button>
+    <button type="button" role="tab" id="tabForms" class="tab-btn" aria-selected="false" aria-controls="panelForms" data-panel="forms">Shipping &amp; pay</button>
+    <button type="button" role="tab" id="tabGuide" class="tab-btn" aria-selected="false" aria-controls="panelGuide" data-panel="guide">Guide</button>
   </nav>
 
   <main id="popupMain">
     <div id="panelMain" class="tab-panel" role="tabpanel" aria-labelledby="tabMain">
-      <details class="card card-tips">
-        <summary class="tips-summary">Quick tips for the fastest checkout</summary>
-        <ol class="quick-path">
+      <details class=”card card-tips”>
+        <summary class=”tips-summary”>Quick tips for the fastest checkout</summary>
+        <ol class=”quick-path”>
           <li>Stay <strong>logged in</strong> on Target in a dedicated window.</li>
           <li>On the <strong>Shipping &amp; payment</strong> tab, turn on <strong>Use saved payment &amp; address</strong> when your card and address are saved on Target.</li>
           <li>Enable the extension, open a <strong>product</strong> page (<code>/p/…</code>), then let it add to cart and continue to checkout.</li>
@@ -44,7 +48,76 @@
         </ol>
       </details>
 
-      <section class="card" aria-labelledby="harvestHeading">
+      <details class=”card card-tips”>
+        <summary class=”tips-summary”>Step-by-step: full Target bot walkthrough</summary>
+
+        <p class=”walkthrough-section-label”>One-time setup</p>
+        <ol class=”quick-path”>
+          <li>Go to <code>chrome://extensions</code> → enable <strong>Developer mode</strong> → <strong>Load unpacked</strong> → select the <code>target-checkout-helper</code> folder → pin to toolbar</li>
+          <li>Sign in to Target in Chrome — make sure your <strong>shipping address</strong> and <strong>credit card</strong> are saved on your account</li>
+          <li>Open this popup → <strong>Enable</strong> toggle → ON</li>
+          <li>Go to the <strong>Shipping &amp; pay</strong> tab → fill in your address and card as a backup</li>
+          <li>Back on the <strong>Monitor</strong> tab → <strong>Checkout options</strong>: turn <strong>Use saved payment &amp; address</strong> → ON and <strong>Auto place order</strong> → ON</li>
+          <li>Set <strong>Checkout retries</strong> → <code>0</code> (unlimited) and <strong>Retry delay</strong> → <code>1s</code> → <strong>Save settings</strong></li>
+        </ol>
+
+        <p class=”walkthrough-section-label”>Every session: configure harvesting</p>
+        <ol class=”quick-path”>
+          <li>In the <strong>Cookie harvest</strong> section set: <strong>Harvesting on</strong> → ON, <strong>Harvests per page load</strong> → <code>3</code>, <strong>Data expiration</strong> → <code>8 min</code> (use <code>60 min</code> for overnight sessions), <strong>Apply before checkout</strong> → ON, order → LIFO</li>
+          <li><strong>Save settings</strong></li>
+        </ol>
+
+        <p class=”walkthrough-section-label”>Phase 1 — Build your cookie pool (30+ min before drop)</p>
+        <ol class=”quick-path”>
+          <li>Turn <strong>Don't stop harvesting</strong> → ON → <strong>Save settings</strong></li>
+          <li>Open <code>target.com</code>, sign in, and browse to the product page(s) you are monitoring — harvesting fires automatically on every product or login page load</li>
+          <li>Hit <strong>Harvest now</strong> in the popup for an immediate burst</li>
+          <li>Watch <strong>Snapshots ready: N</strong> — keep browsing until it reaches <strong>30 or more</strong></li>
+          <li>Hit <strong>↻ Check</strong> in Checkout options — confirm <strong>Logged in: Yes</strong>, <strong>Address: Saved</strong>, <strong>Payment: Saved</strong> before continuing</li>
+          <li>Make sure your Target cart is <strong>empty</strong></li>
+        </ol>
+
+        <p class=”walkthrough-section-label”>Phase 2 — Arm the monitor</p>
+        <ol class=”quick-path”>
+          <li>Turn <strong>Don't stop harvesting</strong> → <strong>OFF</strong> → <strong>Save settings</strong> — this is the only setting that changes between phases</li>
+          <li>In the <strong>Product monitor</strong> section, paste each product URL, add a name, hit <strong>+</strong></li>
+          <li><strong>Known drop time:</strong> enter it in <strong>Expected drop / restock</strong> — the poll tightens to 250ms automatically in the 10-minute window before drop</li>
+          <li><strong>Unknown drop time:</strong> leave <strong>Expected drop / restock</strong> blank — the poll runs flat at 500ms until stock appears</li>
+          <li>Hit <strong>Start monitoring</strong> — the extension opens one background tab per product and begins polling</li>
+        </ol>
+
+        <p class=”walkthrough-section-label”>While you wait</p>
+        <ol class=”quick-path”>
+          <li>Leave Chrome open — minimized is fine, do not close it</li>
+          <li>Do <strong>not</strong> manually reload the monitor tab — the extension manages it</li>
+          <li>Do <strong>not</strong> change any settings until the drop is over</li>
+          <li>The background keepalive pings Target silently every 5 min (every 2 min near drop) — you do not need to browse or reload anything</li>
+          <li>Glance at <strong>Snapshots ready: N</strong> occasionally — if it hits 0, hit <strong>Harvest now</strong> or open a Target product page briefly to refill</li>
+        </ol>
+
+        <p class=”walkthrough-section-label”>What happens on restock (automatic)</p>
+        <ol class=”quick-path”>
+          <li>Background poll detects in-stock via the RedSky API</li>
+          <li>Navigates the background tab to the product page and applies the freshest cookie snapshot</li>
+          <li>Clicks Add to Cart using human-like mouse movement — the Chrome “debugging” banner appears briefly at this moment only</li>
+          <li>Captures a post-ATC snapshot (highest-quality session state) then drives through checkout using your saved address and card</li>
+          <li>Stops at review with a toast — or clicks <strong>Place Order</strong> automatically if Auto place order is ON</li>
+          <li>Toast messages bottom-right track every step in real time</li>
+        </ol>
+
+        <p class=”walkthrough-section-label”>If something goes wrong</p>
+        <table class=”walkthrough-table”>
+          <tbody>
+            <tr><td class=”walkthrough-toast”>”Target flagged the session — stay on this page. Do NOT reload mid-checkout.”</td><td>Stay put — complete checkout manually in that tab. Do not reload.</td></tr>
+            <tr><td class=”walkthrough-toast”>”Target may have rejected the session. Clear site data...”</td><td>You are not in checkout. Clear Target site data in Chrome settings, reload, sign back in, rebuild pool.</td></tr>
+            <tr><td class=”walkthrough-toast”>”Snapshots ready: 0”</td><td>Hit <strong>Harvest now</strong> or open a Target product page to refill the pool.</td></tr>
+            <tr><td class=”walkthrough-toast”>”Sign in if you see a prompt”</td><td>Sign in manually in the monitor tab — bot resumes automatically.</td></tr>
+            <tr><td class=”walkthrough-toast”>ATC button stays disabled</td><td>Item is OOS — bot is in stock-watch mode, polling silently until it appears.</td></tr>
+          </tbody>
+        </table>
+      </details>
+
+      <section class=”card” aria-labelledby=”harvestHeading”>
         <h2 id="harvestHeading">Cookie harvest (Target)</h2>
         <p class="section-lead harvest-lead">Snapshots of <code>target.com</code> cookies while you browse (login or product pages). Stored only in <strong>session storage</strong> — cleared when you quit Chrome. Matches the workflow used by pro checkout companions (harvest → pool → apply before checkout).</p>
         <label class="option-row">
@@ -54,8 +127,8 @@
         <div class="monitor-grid harvest-grid">
           <div class="monitor-field">
             <label class="field-label" for="harvestPerLoad">Harvests per page load</label>
-            <input type="number" id="harvestPerLoad" value="1" min="1" max="5" aria-describedby="harvestPerHint">
-            <span id="harvestPerHint" class="inline-hint">Usually 1; more on login if needed</span>
+            <input type="number" id="harvestPerLoad" value="3" min="1" max="5" aria-describedby="harvestPerHint">
+            <span id="harvestPerHint" class="inline-hint">3 is the standard; increase on login pages</span>
           </div>
           <div class="monitor-field">
             <label class="field-label" for="harvestExpireMin">Data expiration (min)</label>
@@ -78,6 +151,7 @@
         </div>
         <p id="harvestCountText" class="harvest-count" role="status">Snapshots ready: —</p>
         <p id="harvestSessionWarn" class="field-hint" hidden>Session storage unavailable in this Chrome — snapshots will not persist across extension restarts.</p>
+        <p id="harvestHiddenWarn" class="harvest-hidden-warn" hidden>Tab hidden — harvest keepalives may be throttled. Keep the browser window visible for best results near drop time.</p>
       </section>
 
       <section class="card" aria-labelledby="monitorHeading">
@@ -87,6 +161,9 @@
           <input type="url" id="productUrl" placeholder="https://www.target.com/p/…" autocomplete="off" aria-label="Target product URL">
           <input type="text" id="productName" placeholder="Name (e.g. Feraligatr)" autocomplete="off" aria-label="Product name" class="product-name-input">
           <button type="button" id="addProductBtn" class="btn-icon" aria-label="Add product to list">+</button>
+        </div>
+        <div class="product-input-row product-oid-row">
+          <input type="text" id="productOid" placeholder="Walmart OID (optional — faster queue entry)" autocomplete="off" aria-label="Walmart Offer ID" class="product-oid-input">
         </div>
         <p id="productListEmpty" class="empty-hint" hidden>No products yet — paste a product link and tap +</p>
         <ul id="productList" class="product-list" aria-label="Monitored products"></ul>
@@ -112,45 +189,97 @@
               <input type="number" id="checkoutRetryDelay" value="1" min="1" max="60">
             </div>
           </div>
+          <label class="option-row" style="margin-top:8px">
+            <input type="checkbox" id="highStockOnly">
+            <span class="option-label">High stock only (Target)</span>
+          </label>
+          <p class="option-hint">Only navigate on restock when RedSky reports at least this many units — reduces false triggers from 1-unit flickers.</p>
+          <div id="highStockThresholdRow" class="monitor-field" style="display:none;margin-top:4px">
+            <label class="field-label" for="highStockThreshold">Minimum units</label>
+            <input type="number" id="highStockThreshold" value="10" min="1" max="999">
+          </div>
           <button type="button" id="monitorBtn" class="btn-monitor">Start monitoring</button>
         </div>
         <div id="monitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
       </section>
 
-      <section class=”card” aria-labelledby=”optionsHeading”>
-        <h2 id=”optionsHeading”>Checkout options</h2>
+      <section class="card" aria-labelledby="optionsHeading">
+        <h2 id="optionsHeading">Checkout options</h2>
 
-        <div class=”acct-status” id=”acctStatus”>
-          <div class=”acct-status-header”>
-            <span class=”acct-status-title”>Target account</span>
-            <button type=”button” id=”acctCheckBtn” class=”acct-check-btn”>↻ Check</button>
+        <div class="acct-status" id="acctStatus">
+          <div class="acct-status-header">
+            <span class="acct-status-title">Target account</span>
+            <button type="button" id="acctCheckBtn" class="acct-check-btn">↻ Check</button>
           </div>
-          <div class=”acct-indicators”>
-            <div class=”acct-item”>
-              <span class=”acct-dot” id=”acctLoginDot”></span>
-              <span class=”acct-item-text”><span class=”acct-item-label”>Logged in</span><span class=”acct-item-val” id=”acctLoginVal”>—</span></span>
+          <div class="acct-indicators">
+            <div class="acct-item">
+              <span class="acct-dot" id="acctLoginDot"></span>
+              <span class="acct-item-text"><span class="acct-item-label">Logged in</span><span class="acct-item-val" id="acctLoginVal">—</span></span>
             </div>
-            <div class=”acct-item”>
-              <span class=”acct-dot” id=”acctAddrDot”></span>
-              <span class=”acct-item-text”><span class=”acct-item-label”>Address</span><span class=”acct-item-val” id=”acctAddrVal”>—</span></span>
+            <div class="acct-item">
+              <span class="acct-dot" id="acctAddrDot"></span>
+              <span class="acct-item-text"><span class="acct-item-label">Address</span><span class="acct-item-val" id="acctAddrVal">—</span></span>
             </div>
-            <div class=”acct-item”>
-              <span class=”acct-dot” id=”acctPayDot”></span>
-              <span class=”acct-item-text”><span class=”acct-item-label”>Payment</span><span class=”acct-item-val” id=”acctPayVal”>—</span></span>
+            <div class="acct-item">
+              <span class="acct-dot" id="acctPayDot"></span>
+              <span class="acct-item-text"><span class="acct-item-label">Payment</span><span class="acct-item-val" id="acctPayVal">—</span></span>
             </div>
           </div>
         </div>
 
-        <label class=”option-row”>
-          <input type=”checkbox” id=”useSavedPayment”>
-          <span class=”option-label”>Use saved payment &amp; address</span>
+        <label class="option-row">
+          <input type="checkbox" id="useSavedPayment">
+          <span class="option-label">Use saved payment &amp; address</span>
         </label>
-        <p class=”option-hint”>Uses Buy It Now or “View cart &amp; check out” after add-to-cart when you are logged in with saved address and card.</p>
+        <p class="option-hint">Uses Buy It Now or &quot;View cart &amp; check out&quot; after add-to-cart when you are logged in with saved address and card.</p>
         <label class="option-row">
           <input type="checkbox" id="autoPlaceOrder">
           <span class="option-label">Auto place order <span class="option-badge">TEST</span></span>
         </label>
         <p class="option-hint option-hint-warn">Clicks Place Order — can charge a real card. <strong>Never turn on</strong> with your real card; use only with Target’s test flow or a disposable test card. Leave off for normal use.</p>
+
+        <label class="option-row">
+          <input type="checkbox" id="preferPickup">
+          <span class="option-label">Prefer in-store pickup over ship</span>
+        </label>
+        <p class="option-hint">Clicks the Pickup button before Ship when both are available on Target product pages.</p>
+
+        <label class="option-row">
+          <input type="checkbox" id="checkoutSound" checked>
+          <span class="option-label">Beep when review page reached</span>
+        </label>
+        <p class="option-hint">Plays a short audio alert when the order review page is ready.</p>
+
+        <label class="field-label" for="discordWebhook" style="margin-top:8px">Discord webhook URL</label>
+        <div class="product-input-row" style="margin-top:4px">
+          <input type="url" id="discordWebhook" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" class="product-oid-input" style="flex:1">
+          <button type="button" id="webhookTestBtn" class="harvest-btn" style="flex-shrink:0">Test</button>
+        </div>
+        <label class="option-row">
+          <input type="checkbox" id="webhookSendFailures">
+          <span class="option-label">Send webhook on checkout failure / retries exhausted</span>
+        </label>
+
+        <label class="option-row" style="margin-top:8px">
+          <input type="checkbox" id="endlessMode">
+          <span class="option-label">Endless mode — restart monitoring after each successful checkout</span>
+        </label>
+        <p class="option-hint">After you reach review or place an order, starts a new monitor pass (same product list). Use max checkouts to cap runs.</p>
+        <div id="endlessLimitRow" class="monitor-field" style="display:none;margin-top:4px">
+          <label class="field-label" for="endlessLimit">Max successful checkouts (0 = unlimited)</label>
+          <input type="number" id="endlessLimit" value="0" min="0" max="99">
+        </div>
+
+        <label class="option-row">
+          <input type="checkbox" id="addExtraProduct">
+          <span class="option-label">Add extra item (anti-cancel trick)</span>
+        </label>
+        <p class="option-hint">Adds a cheap always-in-stock item alongside the main item before checkout. Helps avoid Item Demand cancels. Enter a Target TCIN (e.g. <code>13274215</code> for Dixon pencils).</p>
+        <div id="extraProductRow" style="display:none;margin-bottom:8px">
+          <label class="field-label" for="extraProductTcin">Extra item TCIN</label>
+          <input type="text" id="extraProductTcin" placeholder="e.g. 13274215" autocomplete="off">
+        </div>
+
         <div id="speedCompare" class="speed-compare" hidden></div>
       </section>
 
@@ -166,7 +295,159 @@
           <button type="button" id="debuggerDetachBtn" class="harvest-btn">Detach</button>
         </div>
         <p id="debuggerStatusText" class="harvest-count" role="status">Debugger: —</p>
+
+        <hr class="card-divider">
+        <p class="section-lead" style="margin-top:6px"><strong>Auto sign-in</strong> — fills your Target credentials automatically when signed out mid-session or after a session recovery reload. Saves credentials in local storage (not encrypted). Only enable on a device you fully control.</p>
+        <label class="option-row">
+          <input type="checkbox" id="autoSignIn">
+          <span class="option-label">Auto sign-in when signed out</span>
+        </label>
+        <div id="autoSignInFields" class="auto-signin-fields">
+          <div class="monitor-field" style="margin-top:6px">
+            <label class="field-label" for="targetEmail">Target email</label>
+            <input type="email" id="targetEmail" placeholder="you@example.com" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="monitor-field" style="margin-top:4px">
+            <label class="field-label" for="targetPassword">Target password</label>
+            <input type="password" id="targetPassword" placeholder="••••••••" autocomplete="new-password">
+          </div>
+          <p class="option-hint option-hint-warn" style="margin-top:4px">Stored as plain text in Chrome local storage — visible in DevTools. Use only on a personal, trusted device.</p>
+        </div>
       </details>
+    </div>
+
+    <div id="panelWalmart" class="tab-panel" role="tabpanel" aria-labelledby="tabWalmart" hidden>
+
+      <section class="card" aria-labelledby="wmSettingsHeading">
+        <h2 id="wmSettingsHeading">Walmart drop setup</h2>
+
+        <!-- Saved products list -->
+        <ul id="wmProductList" class="product-list" aria-label="Monitored Walmart products"></ul>
+        <p id="wmProductListEmpty" class="empty-hint">No products yet — add one below</p>
+
+        <!-- Add / edit form -->
+        <div class="wm-form-label" id="wmFormLabel">Add product</div>
+
+        <div class="product-input-row">
+          <input type="url" id="wmProductUrl" placeholder="walmart.com/ip/… (paste or use tab)" autocomplete="off" aria-label="Walmart product URL">
+          <button type="button" id="wmGrabTabBtn" class="harvest-btn" style="flex-shrink:0;white-space:nowrap">Use tab</button>
+        </div>
+        <div class="product-input-row" style="margin-top:4px">
+          <input type="text" id="wmProductOid" placeholder="OID (optional — faster queue)" autocomplete="off" aria-label="Offer ID" class="product-oid-input">
+        </div>
+        <div class="product-input-row" style="margin-top:4px">
+          <input type="text" id="wmProductName" placeholder="Name (optional)" autocomplete="off" aria-label="Product name" class="product-name-input">
+          <select id="wmProductQty" aria-label="Max buys" class="qty-select" title="Max buys">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option>
+          </select>
+        </div>
+        <div class="product-input-row" style="margin-top:6px">
+          <button type="button" id="wmAddProductBtn" class="btn-monitor" style="flex:1">Save product</button>
+          <button type="button" id="wmCancelEditBtn" class="harvest-btn" style="display:none">Cancel</button>
+        </div>
+
+        <!-- Drop settings -->
+        <div style="margin-top:12px">
+          <div class="drop-block">
+            <label class="field-label" for="wmDropExpectedAt">Expected drop time (local)</label>
+            <input type="datetime-local" id="wmDropExpectedAt" class="input-datetime">
+            <p id="wmDropCountdown" class="drop-countdown" aria-live="polite"></p>
+          </div>
+          <div class="monitor-grid" style="margin-top:8px">
+            <div class="monitor-field">
+              <label class="field-label" for="walmartMaxPrice">Max price ($)</label>
+              <input type="number" id="walmartMaxPrice" value="0" min="0" step="0.01">
+              <span class="inline-hint">Drop price, e.g. 29.99. 0 = no limit.</span>
+            </div>
+          </div>
+        </div>
+
+        <label class="option-row" style="margin-top:10px">
+          <input type="checkbox" id="walmartUseSavedSession" checked>
+          <span class="option-label">Use saved Walmart session</span>
+        </label>
+        <p class="option-hint">When off, bot redirects to Walmart login if you are not already signed in.</p>
+
+        <label class="option-row">
+          <input type="checkbox" id="walmartSkipMonitoring">
+          <span class="option-label">Skip stock monitoring — ATC at drop time</span>
+        </label>
+        <p class="option-hint">Forces ATC immediately when monitoring starts without waiting for in-stock API confirmation. Use only when the item goes live at the exact drop time.</p>
+
+        <button type="button" id="wmMonitorBtn" class="btn-monitor" style="margin-top:12px;background:#0071ce;border-color:#0071ce">Start monitoring</button>
+        <div id="wmMonitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="card guide-section" aria-labelledby="wmQueueHeading">
+        <h2 id="wmQueueHeading">How Walmart drops work</h2>
+
+        <section class="card guide-section">
+          <h2>The queue</h2>
+          <p class="guide-note">Walmart Wednesday drops use a <strong>server-side virtual waiting room</strong>. You cannot skip or bypass it — everyone waits.</p>
+          <ul class="guide-steps">
+            <li>At drop time Walmart opens a checkout endpoint. First to hit it gets the best queue position.</li>
+            <li>Typical wait: <strong>14–31 minutes</strong> regardless of how fast you entered.</li>
+            <li>Queue position determines how long you wait — but if the item sells out before you clear the queue, checkout fails.</li>
+            <li>This bot <strong>cannot bypass the queue</strong>. It gets you in as fast as possible, then waits with you.</li>
+          </ul>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Does getting in fast matter?</h2>
+          <ul class="guide-steps">
+            <li><strong>Yes</strong> — queue is first-come-first-served. Earlier position = shorter wait = better chance the item isn't sold out when you reach checkout.</li>
+            <li>Walmart allocates a fixed quantity. Only the first N positions in queue actually check out successfully.</li>
+            <li>A few seconds at drop time can be the difference between position 400 (success) and position 600 (too late).</li>
+          </ul>
+        </section>
+
+        <section class="card guide-section">
+          <h2>OID (Offer ID) — the fast path</h2>
+          <p class="guide-note">The OID lets the bot add to cart via a <strong>direct API call</strong> instead of clicking the button on the page. Skips page rendering entirely — faster queue entry.</p>
+          <ol class="guide-steps">
+            <li>Get the OID from a bot monitor service or the drop announcement</li>
+            <li>In <strong>Monitor</strong> tab: paste product URL, paste OID in the field below it, hit <strong>+</strong></li>
+            <li>At drop time the bot tries the OID path first. If it fails it falls back to the normal ATC click automatically.</li>
+            <li>OID is optional — without it the bot still works, just enters queue a few seconds later</li>
+          </ol>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Pre-drop high price trap</h2>
+          <p class="guide-note">Walmart often lists drop items at a high MSRP before go-time. The real drop price appears at exactly drop time.</p>
+          <ol class="guide-steps">
+            <li>Set <strong>Max price</strong> above to the expected drop price</li>
+            <li>Extension blocks ATC while the price is above that number</li>
+            <li>The moment the price updates at drop time, ATC fires automatically</li>
+          </ol>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Walmart drop setup checklist</h2>
+          <ol class="guide-steps">
+            <li>Log in to Walmart in Chrome <strong>at least 1 hour before drop</strong> — saved session is critical</li>
+            <li>Make sure shipping address and credit card are saved on your Walmart account</li>
+            <li>Add the product URL + OID on this tab</li>
+            <li>Set <strong>Max price</strong> to the expected drop price</li>
+            <li>Set <strong>Expected drop time</strong> — polling tightens to 250ms in the 10-minute window</li>
+            <li>Hit <strong>Start monitoring</strong></li>
+            <li>Empty your Walmart cart before drop time</li>
+            <li>Stay near your PC — queue takes 14–31 min, then checkout fires automatically</li>
+          </ol>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Watch for</h2>
+          <ul class="guide-steps guide-warnings">
+            <li><strong>"Price too high — waiting for drop price"</strong> — working correctly, max price guard is active</li>
+            <li><strong>"In queue — waiting…"</strong> — normal, bot is holding your place. Wait it out.</li>
+            <li><strong>"Queue wait exceeded 45 min"</strong> — unusual; take over manually</li>
+            <li><strong>Item unavailable after queue clears</strong> — sold out before your position reached checkout. Nothing the bot can do.</li>
+          </ul>
+        </section>
+
+      </section>
     </div>
 
     <div id="panelForms" class="tab-panel" role="tabpanel" aria-labelledby="tabForms" hidden>
@@ -178,6 +459,7 @@
         </div>
         <input type="text" id="address1" placeholder="Address line 1" autocomplete="address-line1">
         <input type="text" id="address2" placeholder="Address line 2 (optional)" autocomplete="address-line2">
+        <input type="text" id="shippingJig" placeholder="Address jig prefix (optional — e.g. APT 2B)" autocomplete="off" title="Prepended to address line 1 at checkout. Helps avoid Item Demand cancels.">
         <div class="field-row">
           <input type="text" id="city" placeholder="City" autocomplete="address-level2">
           <select id="state" autocomplete="address-level1">
@@ -221,6 +503,16 @@
     <div id="panelGuide" class="tab-panel" role="tabpanel" aria-labelledby="tabGuide" hidden>
 
       <section class="card guide-section">
+        <h2>Settings backup</h2>
+        <p class="guide-note">Export all settings to a JSON file for backup or cross-device restore. Import to apply a saved file.</p>
+        <div class="harvest-actions">
+          <button type="button" id="exportSettingsBtn" class="harvest-btn">Export settings</button>
+          <button type="button" id="importSettingsBtn" class="harvest-btn">Import settings</button>
+        </div>
+        <input type="file" id="importFileInput" accept=".json" style="display:none">
+      </section>
+
+      <section class="card guide-section">
         <h2>1 — Load the extension</h2>
         <ol class="guide-steps">
           <li>Go to <code>chrome://extensions</code></li>
@@ -242,27 +534,63 @@
       </section>
 
       <section class="card guide-section">
-        <h2>3 — Cookie harvesting</h2>
-        <p class="guide-note">Keeps your session fresh so Target doesn't reject checkout mid-run.</p>
+        <h2>3 — Cookie harvesting: build the pool first</h2>
+        <p class="guide-note">Target ties every checkout request to your session cookies. When those go stale, RedSky (Target's inventory API) returns 401 and checkout fails silently. Harvesting builds a pool of known-good cookie snapshots while you browse. Right before checkout the extension swaps in the freshest one, giving checkout a clean session.</p>
+
+        <details class="guide-explainer">
+          <summary>How the three harvest paths work</summary>
+          <p>There are three separate things that can add snapshots to the pool — and they behave differently depending on whether the monitor is running:</p>
+          <ol>
+            <li><strong>Page-load burst</strong> — fires automatically when you load any Target product page or the login page while <em>Harvesting on</em> is enabled. Captures up to N snapshots (set by <em>Harvests per page load</em>). This is your primary pool-building tool before the monitor starts.</li>
+            <li><strong>Background keepalive</strong> — fires from the extension's background worker while monitoring is active. Pings <code>target.com</code> silently and captures one snapshot. Interval: every <strong>5 min</strong> normally, every <strong>8 min</strong> within 45 min of drop, every <strong>2 min</strong> inside the 10-min pre-drop window and 3-min post-drop grace period. This runs automatically — you do not need to browse or reload anything.</li>
+            <li><strong>Re-harvest same page</strong> (<em>Don't stop harvesting</em>) — when this is ON, the content script re-harvests the same product page every <strong>60 seconds</strong>. Use this during the build phase only. Turn it OFF before arming the monitor — the background keepalive handles session freshness during the wait.</li>
+          </ol>
+          <p><strong>Snapshots are stored in session storage only</strong> — cleared when Chrome closes, max 48 entries. LIFO order means the newest snapshot is always applied first.</p>
+        </details>
+
+        <h3 class="guide-subhead">Phase 1 — Build the pool (before arming monitor)</h3>
+        <p class="guide-note">Do this at least 30 minutes before the drop, or whenever you start your session.</p>
         <ol class="guide-steps">
-          <li>In the <strong>Monitor &amp; options</strong> tab find <em>Cookie harvest</em></li>
-          <li>Turn <strong>Harvesting on</strong> → ON</li>
-          <li>Set <strong>Snapshots per page load</strong> → 2</li>
-          <li>Turn <strong>Don't stop harvesting</strong> → ON</li>
-          <li>Turn <strong>Apply before checkout</strong> → ON</li>
-          <li>Leave expiration at 3 min, order at LIFO</li>
-          <li>Browse Target normally while you wait — each visit auto-snapshots. Watch <em>Snapshots ready: N</em> stay above 0</li>
+          <li>In the <strong>Monitor</strong> tab, find the <em>Cookie harvest</em> section</li>
+          <li>Turn <strong>Harvesting on</strong> → <strong>ON</strong></li>
+          <li>Set <strong>Harvests per page load</strong> → <strong>3</strong> (community standard; default is 1)</li>
+          <li>Set <strong>Data expiration</strong> → <strong>8 min</strong> (default 3 min drains the pool too fast — snapshots expire before you arm the monitor)</li>
+          <li>Turn <strong>Don't stop harvesting</strong> → <strong>ON</strong> (re-captures every 60s on the same page during this phase)</li>
+          <li>Turn <strong>Apply before checkout</strong> → <strong>ON</strong></li>
+          <li>Leave order at <strong>LIFO</strong> (newest first — default)</li>
+          <li>Hit <strong>Save settings</strong></li>
+          <li>Open <code>target.com</code>, sign in, then browse to the product page you are monitoring — harvesting fires automatically on every Target product or login page</li>
+          <li>Hit <strong>Harvest now</strong> in the popup for an immediate burst without waiting for a page load</li>
+          <li>Watch <strong>Snapshots ready: N</strong> in the popup — target <strong>30 or more</strong> before arming</li>
+          <li>Stay on product or login pages only — harvesting does not fire on other Target pages</li>
         </ol>
+
+        <h3 class="guide-subhead">Phase 2 — Arm the monitor (one setting change)</h3>
+        <p class="guide-note">Once your pool is built, make this single change before clicking Start monitoring:</p>
+        <ol class="guide-steps">
+          <li>Turn <strong>Don't stop harvesting</strong> → <strong>OFF</strong></li>
+          <li>Leave <strong>Harvesting on</strong> → ON (the background keepalive requires this)</li>
+          <li>Hit <strong>Save settings</strong></li>
+          <li>Then click <strong>Start monitoring</strong></li>
+        </ol>
+        <p class="guide-note">With <em>Don't stop</em> OFF during monitoring: the content script harvests once when the monitor tab first loads (on restock detection), then stops. The background keepalive takes over — it silently pings <code>target.com</code> on its own schedule and adds one fresh snapshot each time. No constant page-level re-harvesting, no unnecessary API noise.</p>
+
+        <h3 class="guide-subhead">Unknown drop time</h3>
+        <p class="guide-note">If you don't know when the item restocks, leave <em>Expected drop / restock</em> empty. The background poll runs every <strong>500ms</strong> and the keepalive runs every <strong>5 min</strong> — both at flat rates until stock is detected. The pool you built in Phase 1 is what carries you through the wait. For sessions longer than 2 hours, set expiration to <strong>60 min</strong> so snapshots don't expire mid-wait.</p>
       </section>
 
       <section class="card guide-section">
         <h2>4 — Set up the monitor</h2>
         <ol class="guide-steps">
-          <li>In <strong>Monitor &amp; options</strong> paste each product URL and hit <strong>+</strong></li>
-          <li>Set qty to <strong>5</strong> per product</li>
-          <li>If you know the drop time set it in <strong>Expected drop / restock</strong> — polling jumps to 250ms in the 10-minute window</li>
-          <li>Hit <strong>Start monitoring</strong> — the extension opens one background tab per product automatically</li>
-          <li>Keep Chrome open with at least one Target tab visible</li>
+          <li>Complete Phase 1 and Phase 2 of cookie harvesting above first</li>
+          <li>In the <strong>Monitor</strong> tab, paste each product URL and hit <strong>+</strong></li>
+          <li>Set qty per product to the number of units you want</li>
+          <li><strong>If you know the drop time:</strong> enter it in <em>Expected drop / restock</em> — the background poll tightens to <strong>250ms</strong> in the 10-minute window before drop and holds that rate for 3 minutes after. Leave blank if unknown.</li>
+          <li><strong>If you do not know the drop time:</strong> leave <em>Expected drop / restock</em> blank — the poll runs at a flat 500ms and the keepalive runs every 5 min until stock appears</li>
+          <li>Leave <em>Poll every</em> at <strong>1 sec</strong> — the extension overrides this automatically near drop time</li>
+          <li>Set <em>Checkout retries</em> → <strong>0</strong> (unlimited) and <em>Retry delay</em> → <strong>1s</strong></li>
+          <li>Hit <strong>Start monitoring</strong> — the extension opens one background tab per product automatically and begins polling</li>
+          <li>Keep Chrome open — minimized is fine, but do not close it</li>
         </ol>
         <div class="guide-urls">
           <p class="guide-urls-label">Pokemon card drop URLs:</p>
@@ -276,33 +604,39 @@
       <section class="card guide-section">
         <h2>5 — While you wait</h2>
         <ol class="guide-steps">
-          <li>Don't close Chrome — minimized is fine</li>
-          <li>Every 10–15 min reload a Target tab to keep cookies fresh</li>
-          <li>Watch the popup status line — it shows the poll is running</li>
-          <li>Don't flip extension settings in the last minute before drop time</li>
-          <li>Make sure your Target cart is <strong>empty</strong> before the drop</li>
+          <li>Do not close Chrome — minimized is fine. The background worker keeps polling even with Chrome minimized</li>
+          <li>Do not manually reload the monitor tab — the extension manages that tab. Reloading it yourself can interrupt the flow</li>
+          <li>The background keepalive handles session freshness automatically — you do not need to browse or reload Target tabs during the wait</li>
+          <li>Watch <strong>Snapshots ready: N</strong> in the popup — if it hits 0, open a Target product page and browse briefly to refill, or hit <strong>Harvest now</strong></li>
+          <li>Make sure your Target cart is <strong>empty</strong> before the drop — old items can block or confuse checkout</li>
+          <li>Do not change extension settings in the last 60 seconds before the drop time</li>
+          <li>Stay signed in to Target — if Target shows a sign-in prompt in the monitor tab, sign in manually and the bot will continue automatically from where it left off</li>
         </ol>
       </section>
 
       <section class="card guide-section">
         <h2>6 — What happens on restock</h2>
         <ol class="guide-steps">
-          <li>Background poll detects stock via RedSky API</li>
+          <li>Background poll detects in-stock via RedSky API</li>
           <li>Navigates the background tab to the product page</li>
-          <li>Clicks ATC using the debugger (human mouse movement)</li>
+          <li>If <em>Apply before checkout</em> is on: swaps in the freshest cookie snapshot from the pool</li>
+          <li>Clicks ATC using human-like mouse movement — the Chrome "debugging" banner appears briefly at this moment only</li>
+          <li>Captures a post-ATC cookie snapshot (highest-quality session state)</li>
           <li>Drives through checkout using your saved address &amp; card</li>
-          <li>Clicks <strong>Place Order</strong> automatically</li>
-          <li>Toast appears bottom-right tracking each step</li>
+          <li>Stops at the review page with a toast — or clicks <strong>Place Order</strong> automatically if <em>Auto place order</em> is on</li>
+          <li>Toast messages bottom-right track every step in real time</li>
         </ol>
       </section>
 
       <section class="card guide-section">
         <h2>Watch for</h2>
         <ul class="guide-steps guide-warnings">
-          <li><strong>"Sign in if you see a prompt"</strong> — Target hit an auth gate. Sign in manually in that tab, bot continues automatically</li>
-          <li><strong>"Snapshots ready: 0"</strong> — harvest pool empty, browse a Target page to refill</li>
-          <li><strong>Chrome banner "controlled by automated software"</strong> — normal, means debugger clicks are working</li>
-          <li><strong>Cart not empty</strong> — clear your Target cart before the drop or old items may block checkout</li>
+          <li><strong>"Sign in if you see a prompt"</strong> — Target showed an auth gate. Sign in manually in that tab; the bot resumes automatically once the session is established</li>
+          <li><strong>"Target flagged the session — stay on this page. Do NOT reload or clear site data mid-checkout."</strong> — Target's anti-bot layer flagged the session during checkout. Stay put and complete manually; do not reload</li>
+          <li><strong>"Target may have rejected the session. Clear site data for target.com, reload, and sign in again."</strong> — session was flagged outside of checkout. Clear site data for <code>target.com</code> in Chrome settings, reload, sign in, and let the pool rebuild before retrying</li>
+          <li><strong>"Snapshots ready: 0"</strong> — harvest pool is empty or all snapshots have expired. Open a Target product page and browse, or hit <strong>Harvest now</strong> to refill</li>
+          <li><strong>Chrome banner "Target Checkout Helper has started debugging this browser"</strong> — appears only at the moment the ATC click fires, not during the full session. This is expected and clears once the click completes</li>
+          <li><strong>Cart not empty at go-time</strong> — clear your Target cart before the drop or stale items can block checkout</li>
         </ul>
       </section>
 

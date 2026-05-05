@@ -37,6 +37,7 @@ body {
   flex-shrink: 0;
   background: linear-gradient(180deg, #d6001c 0%, #cc0000 100%);
   color: white;
+  transition: background 0.2s;
   padding: 12px 14px 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
@@ -78,6 +79,10 @@ h1 {
 .app-header.is-active .status-dot {
   background: #7dffb3;
   box-shadow: 0 0 0 2px rgba(125, 255, 179, 0.35);
+}
+
+.app-header.header-walmart {
+  background: linear-gradient(180deg, #0080eb 0%, #0071ce 100%);
 }
 
 .subtitle {
@@ -179,6 +184,23 @@ h1 {
   background: rgba(204, 0, 0, 0.04);
 }
 
+.tab-btn-walmart.tab-btn-active {
+  color: #0071ce;
+  border-bottom-color: #0071ce;
+  background: rgba(0, 113, 206, 0.06);
+}
+
+.wm-form-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0071ce;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  margin-top: 4px;
+}
+.wm-form-label.editing { color: #f59e0b; }
+
 /* Scrollable main */
 #popupMain {
   flex: 1;
@@ -255,6 +277,49 @@ details[open] > .tips-summary::after {
   padding: 1px 5px;
   border-radius: 4px;
   color: #555;
+}
+
+.walkthrough-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #cc0000;
+  margin: 14px 0 4px;
+  padding: 0 14px;
+}
+
+.card-tips .walkthrough-section-label:first-of-type {
+  margin-top: 4px;
+}
+
+.card-tips .quick-path + .walkthrough-section-label {
+  margin-top: 12px;
+}
+
+.walkthrough-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.walkthrough-table td {
+  padding: 5px 14px;
+  vertical-align: top;
+  border-top: 1px solid #f0f0f0;
+  line-height: 1.45;
+}
+
+.walkthrough-table tr:first-child td {
+  border-top: none;
+}
+
+.walkthrough-toast {
+  font-family: monospace;
+  font-size: 10.5px;
+  color: #555;
+  width: 48%;
 }
 
 .section-lead {
@@ -570,6 +635,38 @@ select:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.retailer-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.retailer-badge-tgt { background: #cc0000; }
+.retailer-badge-wmt { background: #0071ce; }
+
+.product-oid-row { margin-top: -4px; }
+.product-oid-input { flex: 1; font-size: 11px; }
+
+.product-item-oid { margin-top: 4px; }
+.product-oid-edit {
+  width: 100%;
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #1a1a1a;
+  color: #aaa;
+  box-sizing: border-box;
 }
 
 .product-name {
@@ -718,6 +815,21 @@ select:focus {
   font-weight: 600;
   margin-top: 10px;
   color: #333;
+}
+
+.harvest-count-low { color: #dc2626; }
+.harvest-count-mid { color: #d97706; }
+.harvest-count-ok  { color: #16a34a; }
+
+.harvest-hidden-warn {
+  font-size: 11px;
+  color: #7c3f00;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #fff8f0;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  line-height: 1.4;
 }
 
 .monitor-status-panel {
@@ -994,6 +1106,39 @@ input.error {
 
 .guide-warnings li:last-child {
   margin-bottom: 0;
+}
+
+.guide-explainer {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  background: #f4f4f6;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.guide-explainer summary {
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.guide-explainer p {
+  margin: 8px 0 0;
+}
+
+.guide-explainer-subhead {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 10px 0 0;
+}
+
+.guide-subhead {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 14px 0 4px;
+  color: var(--text);
 }
 
 .guide-urls {

@@ -1,0 +1,473 @@
+{
+   "action_default_title": {
+      "message": "Discord Chat Exporter"
+   },
+   "archive_manager_back_btn": {
+      "message": "스튜디오로 돌아가기"
+   },
+   "archive_manager_browse_btn": {
+      "message": "또는 파일 찾아보기…"
+   },
+   "archive_manager_drop_desc": {
+      "message": "병합된 조각은 메시지 ID로 중복 제거됩니다. 지원: Discord HTML 내보내기, 기존 .chatlog 번들."
+   },
+   "archive_manager_drop_title": {
+      "message": "HTML 파일을 여기에 놓기"
+   },
+   "archive_manager_subtitle": {
+      "message": "여러 HTML 내보내기를 하나의 아카이브로 합칩니다."
+   },
+   "archive_manager_title": {
+      "message": "아카이브 관리자"
+   },
+   "chrome_extension_description": {
+      "message": "Discord 기록을 HTML 또는 스프레드시트로 안전하게 보관합니다. 폴더 정리와 날짜 범위로 정확하게 동기화."
+   },
+   "chrome_extension_name": {
+      "message": "Discord Chat Exporter: HTML/스프레드시트로 내보내기"
+   },
+   "common_cancel": {
+      "message": "취소"
+   },
+   "common_click_here": {
+      "message": "여기를 클릭"
+   },
+   "common_close": {
+      "message": "닫기"
+   },
+   "common_dash": {
+      "message": "—"
+   },
+   "common_dismiss": {
+      "message": "닫기"
+   },
+   "common_please_wait": {
+      "message": "잠시만 기다려 주세요…"
+   },
+   "common_retry": {
+      "message": "다시 시도"
+   },
+   "common_support": {
+      "message": "지원"
+   },
+   "common_verify": {
+      "message": "확인"
+   },
+   "copy_path": {
+      "message": "경로 복사"
+   },
+   "dash_auto_refresh_exhausted": {
+      "message": "자동 새로 고침이 반복적으로 실패했습니다. 채널 페이지가 앞에 있는지 확인하거나 도구 모음에서 확장 프로그램을 다시 여세요."
+   },
+   "dash_backup_channel_title": {
+      "message": "이 채널 백업"
+   },
+   "dash_backup_dm_title": {
+      "message": "이 대화 백업"
+   },
+   "dash_channels_heading": {
+      "message": "채널"
+   },
+   "dash_connecting_discord_tab": {
+      "message": "Discord 탭에 연결 중…"
+   },
+   "dash_connecting_discord_waiting": {
+      "message": "Discord 탭에 연결 중입니다. 잠시만 기다려 주세요…"
+   },
+   "dash_date_end": {
+      "message": "종료"
+   },
+   "dash_date_start": {
+      "message": "시작"
+   },
+   "dash_download_path": {
+      "message": "다운로드 / $1 / $2"
+   },
+   "dash_export_format": {
+      "message": "내보내기 형식"
+   },
+   "dash_export_format_html": {
+      "message": "HTML"
+   },
+   "dash_export_format_xlsx": {
+      "message": "스프레드시트"
+   },
+   "dash_export_locating": {
+      "message": "메시지를 가져오는 중…"
+   },
+   "dash_export_locating_date": {
+      "message": "현재 위치: $1"
+   },
+   "dash_first_export_hint": {
+      "message": "아래에서 날짜 범위를 선택한 뒤 ‘동기화 시작’으로 첫 내보내기와 타임라인을 만듭니다."
+   },
+   "dash_folder_exports_checkbox_label": {
+      "message": "서버·채널별 폴더에 저장"
+   },
+   "dash_folder_path_hint": {
+      "message": "경로: 다운로드 → 서버 → 채널 → 파일 이름"
+   },
+   "dash_format_html_split": {
+      "message": "큰 내보내기는 여러 HTML 파일로 나뉩니다."
+   },
+   "dash_free_plan_quota": {
+      "message": "무료 플랜: 내보낸 메시지 $1 / $2"
+   },
+   "dash_last_backup_completed_at": {
+      "message": "마지막 백업 완료: $1"
+   },
+   "dash_last_download": {
+      "message": "마지막 다운로드"
+   },
+   "dash_last_synced_prefix": {
+      "message": "마지막 동기화 · "
+   },
+   "dash_legend_backed_up": {
+      "message": "백업됨"
+   },
+   "dash_legend_capped": {
+      "message": "한도 도달 (제한)"
+   },
+   "dash_legend_missing_gaps": {
+      "message": "누락된 구간"
+   },
+   "dash_mode_continuous": {
+      "message": "연속"
+   },
+   "dash_mode_label": {
+      "message": "모드"
+   },
+   "dash_mode_manual": {
+      "message": "수동"
+   },
+   "dash_no_backup_in_range": {
+      "message": "이 범위에 백업 없음"
+   },
+   "dash_open_extension_from_toolbar": {
+      "message": "Discord 채널 또는 DM 페이지에서 도구 모음으로 이 확장 프로그램을 열어 연결하세요."
+   },
+   "dash_preset_last_days": {
+      "message": "최근 $1일"
+   },
+   "dash_ready_to_backup": {
+      "message": "준비되었습니다. 백업을 시작할 수 있습니다."
+   },
+   "dash_remove_server_aria": {
+      "message": "백업 목록에서 서버 제거"
+   },
+   "dash_remove_server_title": {
+      "message": "백업 목록에서 서버 제거"
+   },
+   "dash_segment_n_messages_backed": {
+      "message": "메시지 $1개 백업됨"
+   },
+   "dash_segment_one_message_backed": {
+      "message": "메시지 1개 백업됨"
+   },
+   "dash_sync_loading": {
+      "message": "로딩 중"
+   },
+   "dash_sync_packaging": {
+      "message": "패키징 중"
+   },
+   "dash_sync_queued": {
+      "message": "대기 중"
+   },
+   "dash_sync_staging": {
+      "message": "준비 중…"
+   },
+   "dash_sync_start": {
+      "message": "동기화 시작"
+   },
+   "dash_sync_syncing_pct": {
+      "message": "동기화 중 $1%"
+   },
+   "dash_sync_up_to_date": {
+      "message": "최신 상태"
+   },
+   "dash_syncing_from_to_now": {
+      "message": "$1부터 지금까지 동기화"
+   },
+   "dash_time_h_ago": {
+      "message": "$1시간 전"
+   },
+   "dash_time_just_now": {
+      "message": "방금"
+   },
+   "dash_time_min_ago": {
+      "message": "$1분 전"
+   },
+   "dash_timeline_backed_aria": {
+      "message": "백업됨"
+   },
+   "dash_timeline_backfill_aria": {
+      "message": "이전 구간 채우기"
+   },
+   "dash_timeline_backfill_title": {
+      "message": "이전 구간 채우기(30일)"
+   },
+   "dash_timeline_gap_aria": {
+      "message": "누락"
+   },
+   "dash_title_extension_icon": {
+      "message": "Discord Chat Exporter"
+   },
+   "dash_tooltip_backed_range": {
+      "message": "백업됨: $1 - $2"
+   },
+   "dash_tooltip_capped_segment": {
+      "message": "무료 한도($1개 메시지)에 도달했습니다. 더 새 메시지는 동기화되지 않았습니다."
+   },
+   "dash_tooltip_leading_range": {
+      "message": "대기 중: $1 - $2 (클릭하여 범위 설정)"
+   },
+   "dash_tooltip_pending_continue": {
+      "message": "대기 중: $1 - $2 (클릭하여 나머지 동기화)"
+   },
+   "dash_tooltip_pending_set_range": {
+      "message": "대기 중: $1 - $2 (클릭하여 범위 설정)"
+   },
+   "dashboard_page_title": {
+      "message": "Discord Chat Exporter — 대시보드"
+   },
+   "empty_range_notice_text": {
+      "message": "선택한 날짜 범위에 메시지가 없습니다."
+   },
+   "export_bot_no": {
+      "message": "아니요"
+   },
+   "export_bot_yes": {
+      "message": "예"
+   },
+   "export_col_attachments": {
+      "message": "첨부"
+   },
+   "export_col_author_avatar": {
+      "message": "작성자 아바타"
+   },
+   "export_col_author_tag": {
+      "message": "작성자 태그"
+   },
+   "export_col_author_username": {
+      "message": "사용자 이름"
+   },
+   "export_col_content": {
+      "message": "내용"
+   },
+   "export_col_date": {
+      "message": "날짜"
+   },
+   "export_col_is_bot": {
+      "message": "봇 여부"
+   },
+   "export_col_mentions": {
+      "message": "멘션"
+   },
+   "export_embed_n": {
+      "message": "임베드 $1"
+   },
+   "export_embed_n_image": {
+      "message": "임베드 $1 이미지"
+   },
+   "export_embed_n_thumbnail": {
+      "message": "임베드 $1 썸네일"
+   },
+   "export_embed_n_url": {
+      "message": "임베드 $1 URL"
+   },
+   "export_embed_n_video": {
+      "message": "임베드 $1 동영상"
+   },
+   "export_free_xlsx_cap_row": {
+      "message": "무료 버전은 최대 $1개 메시지까지 내보낼 수 있습니다. 프로로 업그레이드하면 제한이 해제됩니다."
+   },
+   "export_workbook_creator": {
+      "message": "Discord Chat Exporter"
+   },
+   "export_xlsx_sheet_chatlog": {
+      "message": "채팅로그"
+   },
+   "folder_exports_pro_feature_cta": {
+      "message": "프로 기능입니다. 계층 내보내기를 쓰려면 업그레이드하세요."
+   },
+   "folder_exports_pro_tooltip": {
+      "message": "프로 전용: 계층 폴더로 아카이브를 정리합니다."
+   },
+   "free_export_cap_note": {
+      "message": "무료 내보내기: 최대 $1개 메시지. 프로로 제한 해제."
+   },
+   "license_token_format_invalid": {
+      "message": "라이선스 키 형식이 올바르지 않습니다. 소문자와 숫자만 사용하세요: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   },
+   "license_token_label": {
+      "message": "라이선스 키"
+   },
+   "license_token_placeholder": {
+      "message": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   },
+   "pop_loading_checking_tab": {
+      "message": "현재 탭 확인 중…"
+   },
+   "pop_need_channel_subtitle": {
+      "message": "Discord에는 있지만 아직 백업 가능한 대화에 들어가지 않았습니다."
+   },
+   "pop_need_channel_title": {
+      "message": "먼저 채널 또는 DM을 여세요"
+   },
+   "pop_not_discord_title": {
+      "message": "Discord 세션을 찾을 수 없음"
+   },
+   "pop_open_discord_button": {
+      "message": "브라우저에서 Discord 열기"
+   },
+   "pop_step_discord_web": {
+      "message": "Discord 웹"
+   },
+   "pop_step_keep_tab": {
+      "message": "해당 Discord 탭에 머문 뒤 확장 프로그램 아이콘을 다시 클릭하세요."
+   },
+   "pop_step_open_channel_part1": {
+      "message": "대상 서버에서 텍스트 채널 또는 DM에 들어가 주소 표시줄에"
+   },
+   "pop_step_open_channel_part2": {
+      "message": "경로가 보이게 하세요."
+   },
+   "pop_step_open_channel_path": {
+      "message": "/channels/..."
+   },
+   "pop_step_open_discord_prefix": {
+      "message": "열기"
+   },
+   "pop_step_open_discord_suffix": {
+      "message": "브라우저에서 Discord를 열고 로그인했는지 확인하세요."
+   },
+   "pro_modal_already_have_token": {
+      "message": "이미 키가 있나요?"
+   },
+   "pro_modal_check_loading": {
+      "message": "서버에서 라이선스 확인 중…"
+   },
+   "pro_modal_feature_archive_depth_desc": {
+      "message": "$1개 메시지 제한을 넘어 서버 전체 기록을 한 번에 동기화하세요."
+   },
+   "pro_modal_feature_archive_depth_title": {
+      "message": "무한 아카이브 깊이"
+   },
+   "pro_modal_feature_smart_folder_desc_prefix": {
+      "message": "내보내기를 계층형"
+   },
+   "pro_modal_feature_smart_folder_desc_suffix": {
+      "message": "폴더로 자동 정리합니다."
+   },
+   "pro_modal_feature_smart_folder_title": {
+      "message": "스마트 폴더 정리"
+   },
+   "pro_modal_free_cap_note": {
+      "message": "무료는 최대 $1개 메시지. 프로로 제한 해제."
+   },
+   "pro_modal_header_subtitle_free": {
+      "message": "요금제를 비교하고 라이선스를 활성화하세요."
+   },
+   "pro_modal_header_subtitle_pro": {
+      "message": "라이선스와 구독을 관리하세요."
+   },
+   "pro_modal_header_subtitle_trial": {
+      "message": "체험 기간 동안 라이선스를 관리하세요."
+   },
+   "pro_modal_hierarchy_tail": {
+      "message": "계층입니다."
+   },
+   "pro_modal_manage_billing": {
+      "message": "결제를 관리하세요."
+   },
+   "pro_modal_member_title": {
+      "message": "프로 회원입니다"
+   },
+   "pro_modal_plan_free": {
+      "message": "무료"
+   },
+   "pro_modal_plan_free_limit": {
+      "message": "동기화당 최대 $1개 메시지."
+   },
+   "pro_modal_plan_free_manual": {
+      "message": "파일을 수동으로 관리합니다."
+   },
+   "pro_modal_plan_get_started": {
+      "message": "시작하기"
+   },
+   "pro_modal_plan_pro": {
+      "message": "프로"
+   },
+   "pro_modal_plan_pro_headline": {
+      "message": "무제한 + 스마트 폴더"
+   },
+   "pro_modal_plan_pro_unlimited_tail": {
+      "message": "개 메시지/동기화."
+   },
+   "pro_modal_smart_folder_org": {
+      "message": "스마트 폴더 정리"
+   },
+   "pro_modal_subscription_canceled": {
+      "message": "구독이 취소되었습니다."
+   },
+   "pro_modal_title": {
+      "message": "프로 및 라이선스"
+   },
+   "pro_modal_trial_active": {
+      "message": "프로 체험 중"
+   },
+   "pro_modal_trial_ends_on": {
+      "message": "체험 종료일: $1"
+   },
+   "pro_modal_unlimited_word": {
+      "message": "무제한"
+   },
+   "pro_modal_unsubscribe": {
+      "message": "구독 취소"
+   },
+   "pro_modal_why_choose_pro": {
+      "message": "프로를 선택하는 이유"
+   },
+   "pro_settings_title": {
+      "message": "프로 설정"
+   },
+   "show_in_folder": {
+      "message": "폴더에서 표시"
+   },
+   "status_free": {
+      "message": "무료"
+   },
+   "status_pro": {
+      "message": "프로"
+   },
+   "status_trial": {
+      "message": "체험"
+   },
+   "token_check_error_generic": {
+      "message": "라이선스 키를 확인할 수 없습니다. 다시 시도하세요."
+   },
+   "token_check_error_http": {
+      "message": "라이선스 서버 오류입니다. 나중에 다시 시도하세요."
+   },
+   "token_check_error_network": {
+      "message": "라이선스 서버에 연결할 수 없습니다. 네트워크를 확인하고 다시 시도하세요."
+   },
+   "token_check_error_timeout": {
+      "message": "라이선스 서버 응답 시간이 초과되었습니다. 연결을 확인하고 다시 시도하세요."
+   },
+   "token_save_error": {
+      "message": "키를 로컬에 저장할 수 없습니다. 다시 시도하세요."
+   },
+   "trial_waiting_desc": {
+      "message": "리뷰 페이지가 새 탭에서 열렸습니다. 해당 페이지에서 완료하세요. 이 페이지는 백그라운드에서 시간을 추적한 뒤 확인을 활성화합니다(확장 프로그램은 실제 리뷰 제출 여부를 확인할 수 없습니다)."
+   },
+   "trial_waiting_title": {
+      "message": "리뷰 완료 대기 중"
+   },
+   "upgrade_to_pro_btn": {
+      "message": "프로로 업그레이드"
+   },
+   "view_pro_link": {
+      "message": "프로 보기"
+   }
+}

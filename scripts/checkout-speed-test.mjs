@@ -101,6 +101,40 @@ section('Drop polling logic (mocked clock)');
 }
 
 {
+  const mon = { dropExpectedAt: dropIso };
+  const now = DROP_MS - 7 * 60 * 1000;
+  const { getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 2 * 60 * 1000, 'harvest keepalive 2m in tension');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 12 * 1000, 'harvest burst dedup 12s in tension');
+}
+{
+  const mon = { dropExpectedAt: dropIso };
+  const now = DROP_MS - 20 * 60 * 1000;
+  const { getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 8 * 60 * 1000, 'harvest keepalive 8m within 45m pre-drop');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 30 * 1000, 'harvest burst dedup 30s within 45m pre-drop');
+}
+{
+  const mon = { dropExpectedAt: dropIso };
+  const now = DROP_MS - 50 * 60 * 1000;
+  const { getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 5 * 60 * 1000, 'harvest keepalive 5m far from drop');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 60 * 1000, 'harvest burst dedup 60s far from drop');
+}
+{
+  const mon = {};
+  const { getHarvestKeepaliveMinIntervalMs } = loadHelpers(DROP_MS);
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 5 * 60 * 1000, 'harvest keepalive default without drop');
+}
+
+{
+  const mon = { dropExpectedAt: dropIso };
+  const now = DROP_MS + 4 * 60 * 1000;
+  const { getHarvestKeepaliveMinIntervalMs } = loadHelpers(now);
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 15 * 60 * 1000, 'harvest keepalive 15m after post-drop grace');
+}
+
+{
   const now = DROP_MS - 20 * 60 * 1000; // 20m before: between 10m and 45m rules
   const { computeBackgroundPollSleepMs, getDropAwarePollSeconds } = loadHelpers(now);
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: dropIso }) === 500, 'bg base 500 in mid window');

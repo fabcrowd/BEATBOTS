@@ -1,0 +1,87 @@
+﻿
+=== max_per_file @ 1107541 ===
+ ng(e.id)),t>a&&(a=t,c=String(e.id))},d=[],f=e.server_value("max_per_file",4e3),p=[],m=[];let b=1,g=!1,v=!1;const y=()=>{e.onProgress&&e.onProgress(i,s)};for(;t;){const o=await M.a.get(t,{headers:{Auth
+
+=== server_value @ 1107527 ===
+ o&&(o=t,l=String(e.id)),t>a&&(a=t,c=String(e.id))},d=[],f=e.server_value("max_per_file",4e3),p=[],m=[];let b=1,g=!1,v=!1;const y=()=>{e.onProgress&&e.onProgress(i,s)};for(;t;){const o=await M.a.get(t,
+
+=== server_value @ 1119540 ===
+ ation&&e.stopPropagation(),this.onFolderExportsRowTease())},server_value(e,t){const r=this.server_response[e];return null==r?t:r},parseDiscordOpenerFromUrl(){const e=new URLSearchParams(window.locatio
+
+=== server_value @ 1134083 ===
+ effectivePro&&this.organizeExportByFolder,anchorMessageId:n,server_value:this.server_value.bind(this),onProgress:(e,t)=>{this.channelProgress=Math.min(99,Math.floor(e/2)),this.exportProgressDate=t||""
+
+=== server_value @ 1134101 ===
+ .organizeExportByFolder,anchorMessageId:n,server_value:this.server_value.bind(this),onProgress:(e,t)=>{this.channelProgress=Math.min(99,Math.floor(e/2)),this.exportProgressDate=t||""},onEmptyRange:()=
+
+=== d.length>= @ 1108004 ===
+ ta[t]),y(),d.push(o.data[t]),0){u=!0,g=!0;break}}if(g)break;d.length>=f&&(await U(e,d,b++,!1,R,p,m,u),d.length=0,v=!0,e.onMultiHtml&&e.onMultiHtml(!0));const a=o.data.length;if(0===a){g=!0;break}const
+
+=== onMultiHtml @ 1108064 ===
+ d.length>=f&&(await U(e,d,b++,!1,R,p,m,u),d.length=0,v=!0,e.onMultiHtml&&e.onMultiHtml(!0));const a=o.data.length;if(0===a){g=!0;break}const l=o.data[a-1].id;if(!(a>=50)){g=!0;break}t=`https://discord
+
+=== onMultiHtml @ 1108079 ===
+ wait U(e,d,b++,!1,R,p,m,u),d.length=0,v=!0,e.onMultiHtml&&e.onMultiHtml(!0));const a=o.data.length;if(0===a){g=!0;break}const l=o.data[a-1].id;if(!(a>=50)){g=!0;break}t=`https://discord.com/api/v9/cha
+
+=== onMultiHtml @ 1134276 ===
+ e=t||""},onEmptyRange:()=>{this.emptyRangeNoticeVisible=!0},onMultiHtml:e=>{this.multi_html=e}};return await z(i)},canOpenDownload(e){return!(!e||!e.downloadId)&&!1!==this.downloadExistsMap[e.download
+
+=== limit=50 @ 1102971 ===
+ {e.discord_channel_id}/messages?before=${e.anchorMessageId}&limit=50`:`https://discord.com/api/v9/channels/${e.discord_channel_id}/messages?limit=50`,r=0;const n=new Date(e.start_date).getTime(),i=new
+
+=== limit=50 @ 1103051 ===
+ iscord.com/api/v9/channels/${e.discord_channel_id}/messages?limit=50`,r=0;const n=new Date(e.start_date).getTime(),i=new Date(e.end_date).getTime()+864e5;let s=0,o="",a=1/0,l=-1/0,c="",u="",h=!1;const
+
+=== limit=50 @ 1106293 ===
+ pi/v9/channels/${e.discord_channel_id}/messages?before=${c}&limit=50`,await N(1051)}var y,w;if(0===s)return e.onEmptyRange&&e.onEmptyRange(),{ok:!1,reason:"empty"};const _=await f.xlsx.writeBuffer(),x
+
+=== limit=50 @ 1107202 ===
+ {e.discord_channel_id}/messages?before=${e.anchorMessageId}&limit=50`:`https://discord.com/api/v9/channels/${e.discord_channel_id}/messages?limit=50`;const r=new Date(e.start_date).getTime(),n=new Dat
+
+=== limit=50 @ 1107282 ===
+ iscord.com/api/v9/channels/${e.discord_channel_id}/messages?limit=50`;const r=new Date(e.start_date).getTime(),n=new Date(e.end_date).getTime()+864e5;let i=0,s="",o=1/0,a=-1/0,l="",c="",u=!1;const h=e
+
+=== file_type @ 1102745 ===
+ ByFolder:!(!e.is_pro||!e.organizeExportByFolder)});return t.file_type,t.discord_channel_id,t.organizeExportByFolder,t.is_pro,"xlsx"===t.file_type?async function(e){let t=e.anchorMessageId?`https://dis
+
+=== file_type @ 1102821 ===
+ ord_channel_id,t.organizeExportByFolder,t.is_pro,"xlsx"===t.file_type?async function(e){let t=e.anchorMessageId?`https://discord.com/api/v9/channels/${e.discord_channel_id}/messages?before=${e.anchorM
+
+=== file_type @ 1111041 ===
+ dyHint:!1,_discordReadyHintTimer:null,_reloadWaitTimer:null,file_type:"html",multi_html:!1,exportBusy:!1,exportProgressDate:"",emptyRangeNoticeVisible:!1,lastExportDownloads:[],lastExportOrganized:!1,
+
+=== file_type @ 1133970 ===
+ annel,server_icon:this.server_icon,is_pro:this.effectivePro,file_type:this.file_type,organizeExportByFolder:this.effectivePro&&this.organizeExportByFolder,anchorMessageId:n,server_value:this.server_va
+
+=== file_type @ 1133985 ===
+ on:this.server_icon,is_pro:this.effectivePro,file_type:this.file_type,organizeExportByFolder:this.effectivePro&&this.organizeExportByFolder,anchorMessageId:n,server_value:this.server_value.bind(this),
+
+=== html @ 49027 ===
+ /2000/svg",math:"http://www.w3.org/1998/Math/MathML"},pn=v("html,body,base,head,link,meta,style,title,address,article,aside,footer,header,h1,h2,h3,h4,h5,h6,hgroup,nav,section,div,dd,dl,dt,figcaption,f
+
+=== html @ 92594 ===
+ mment=new a(e)}get text(){return this._value.toString()}get html(){return i.escapeHtml(this.text)}toString(){return this.text}_upgradeToHyperlink(e){this.type===l.Types.String&&(this._value=c.create(l
+
+=== html @ 557015 ===
+ ug-keys"),a=e("../internals/hidden-keys"),l=e("../internals/html"),c=e("../internals/document-create-element"),u=e("../internals/shared-key")("IE_PROTO"),h=function(){},d=function(e){return"<script>"+
+
+=== html @ 557293 ===
+ ject;return e=null,t},p=function(){try{n=new ActiveXObject("htmlfile")}catch(e){}var e,t;p="undefined"!=typeof document?document.domain&&n?f(n):((t=c("iframe")).style.display="none",l.appendChild(t),t
+
+=== html @ 557910 ===
+ -bug-keys":258,"../internals/hidden-keys":276,"../internals/html":278,"../internals/object-define-properties":307,"../internals/shared-key":332}],307:[function(e,t,r){"use strict";var n=e("../internal
+
+=== xlsx @ 124254 ===
+ ct";const n=e("./worksheet"),i=e("./defined-names"),s=e("../xlsx/xlsx"),o=e("../csv/csv");t.exports=class{constructor(){this.category="",this.company="",this.created=new Date,this.description="",this.
+
+=== xlsx @ 124259 ===
+ onst n=e("./worksheet"),i=e("./defined-names"),s=e("../xlsx/xlsx"),o=e("../csv/csv");t.exports=class{constructor(){this.category="",this.company="",this.created=new Date,this.description="",this.keywo
+
+=== xlsx @ 124598 ===
+ "",this.views=[],this.media=[],this._definedNames=new i}get xlsx(){return this._xlsx||(this._xlsx=new s(this)),this._xlsx}get csv(){return this._csv||(this._csv=new o(this)),this._csv}get nextId(){for
+
+=== xlsx @ 124618 ===
+ s.media=[],this._definedNames=new i}get xlsx(){return this._xlsx||(this._xlsx=new s(this)),this._xlsx}get csv(){return this._csv||(this._csv=new o(this)),this._csv}get nextId(){for(let e=1;e<this._wor
+
+=== xlsx @ 124631 ===
+ is._definedNames=new i}get xlsx(){return this._xlsx||(this._xlsx=new s(this)),this._xlsx}get csv(){return this._csv||(this._csv=new o(this)),this._csv}get nextId(){for(let e=1;e<this._worksheets.lengt

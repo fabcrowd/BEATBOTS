@@ -1,0 +1,8 @@
+Copied from the user's Chrome profile (Default) on 2026-04-29:
+  Extension ID: lljknccjfgeihgdboidlkoofdknieffm
+  Version folder: 2.0.0_0
+
+manifest.json was edited for local unpacked load: removed "key" and "update_url".
+Chrome Web Store _metadata was omitted.
+
+This is third-party software; use only in compliance with its license and Chrome Web Store terms.

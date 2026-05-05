@@ -4,7 +4,7 @@
 
 ### Project overview
 
-This is **Target Checkout Helper**, a Chrome extension (Manifest V3) that automates the checkout flow on Target.com. It is a pure client-side extension with no backend, no build step, no package manager, and no external dependencies. All files are vanilla HTML/CSS/JS. Declares **`cookies`**, **`debugger`**, and **`host_permissions`: `<all_urls>`** so the content script can load on any tab while **automation runs only on Target** (Walmart is detected but not automated — see `tasks/todo.md`). **`cookies`** is used for optional snapshot/replay of **Target** cookies; **`debugger`** is optional CDP attach from the popup (Target-only by default, or any tab if you enable Advanced).
+This is **Target + Walmart Checkout Helper**, a Chrome extension (Manifest V3) that automates the checkout flow on Target.com and Walmart.com. It is a pure client-side extension with no backend, no build step, no package manager, and no external dependencies. All files are vanilla HTML/CSS/JS. Declares **`cookies`**, **`browsingData`**, **`debugger`**, and **`host_permissions`: `<all_urls>`**. **`cookies`** is used for optional snapshot/replay of **Target** cookies; **`browsingData`** clears Target origins when RedSky inventory APIs return 401/403 (auto session recovery); **`debugger`** is optional CDP attach from the popup (Target-only by default, or any tab if you enable Advanced).
 
 ### Extension files
 
@@ -15,7 +15,8 @@ All extension source lives in `target-checkout-helper/`:
 - `core/debuggerBridge.js` — `chrome.debugger` attach/detach (service worker only)
 - `cookieHarvest.js` — Target cookie snapshot pool (imported by `background.js`; see Cookie harvest below)
 - `dropPollingTiming.js` — shared drop-window poll intervals (loaded by background + content)
-- `content.js` — Content script (injected on `<all_urls>`; **init exits immediately** unless the page is Target, except a one-time Walmart TODO log)
+- `content.js` — Content script (injected on `<all_urls>`; **init exits immediately** unless the page is Target; Walmart pages are handled by `walmart-content.js`)
+- `walmart-content.js` — Content script injected on `*.walmart.com`; handles product ATC → cart → queue wait → shipping → payment → review
 - `main_world.js` — Injected in **MAIN** world on `*.target.com` only (not on every site)
 - `popup.html`, `popup.js`, `popup.css` — Extension popup UI
 - `icons/` — Extension icons
@@ -66,7 +67,7 @@ Run `node scripts/checkout-speed-test.mjs` for drop-polling logic checks.
 
 - There is no build step, no `package.json`, and no dependency installation needed.
 - `content.js` uses `chrome.storage.local` and Chrome Extension APIs that only work in a Chrome extension context (not in Node.js or a regular browser page).
-- The extension intentionally never clicks the "Place Order" button — it stops at the review step.
+- By default the extension stops at **review** and does not click **Place Order**. If **Auto place order** is enabled in the popup, it can click Place Order (see **Charges** above).
 - After editing any file, reload the extension from `chrome://extensions` (click the circular refresh icon on the extension card) for changes to take effect.
 
 ### Drop discipline & session hygiene (industry-aligned, no cookie farming)
@@ -75,5 +76,5 @@ Retail bots often **warm sessions early**, **avoid hot config changes seconds be
 
 - **Expected drop time** tightens polling only inside the pre-window (see `dropPollingTiming.js`). Far from drop, background polling stays slower to avoid needless API pressure.
 - **Popup tips** and the drop field hint: one Target tab, clear cart, fresh cookies / network when checkout acts “sticky,” and avoid toggling the extension in the last minute before a drop (same spirit as “live edit tasks only right before go-time” elsewhere).
-- **401/403 from RedSky** (inventory fetches in `content.js` / `background.js`): a throttled on-page toast tells you to clear **site data for target.com**, reload, and sign in again — parallel to “clear cookies on 401” playbooks.
+- **401/403 from RedSky** (inventory fetches in `content.js` / `background.js`): throttled **auto session recovery** clears Target site data for common `target.com` origins via `chrome.browsingData.removeDataFromOrigins`, drops the cached RedSky API key, reloads open Target tabs, and shows a short toast — **sign in again** if Target prompts (the extension cannot submit your password).
 - On a **monitored** product page inside the drop tension window, a **one-time** toast reminds you to clear cart and use one tab.

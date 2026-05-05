@@ -46,6 +46,16 @@ async function getSettings() {
       'useSavedPayment',
       'autoPlaceOrder',
       'harvestConfig',
+      'autoSignIn',
+      'targetEmail',
+      'targetPassword',
+      'shippingJig',
+      'preferPickup',
+      'checkoutSound',
+      'addExtraProduct',
+      'extraProductTcin',
+      'highStockOnly',
+      'highStockThreshold',
     ]);
   }
   return settingsCache;
@@ -69,8 +79,12 @@ async function maybeApplyHarvestedSession(settings) {
   }
 }
 
-/** Refract-style: on product/login while harvesting is on, snapshot after page settles. */
-async function maybeAutoHarvestBurst(data) {
+/** Refract-style: on product/login while harvesting is on, snapshot after page settles.
+ *  @param {object} data - settings object with harvestConfig
+ *  @param {object} [opts]
+ *  @param {boolean} [opts.force=false] - bypass dontStopHarvesting check (emergency low-pool refill)
+ */
+async function maybeAutoHarvestBurst(data, { force = false } = {}) {
   const h = data.harvestConfig || {};
   if (!h.harvestingEnabled) return;
   if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(location.href) !== 'target') return;
@@ -80,9 +94,15 @@ async function maybeAutoHarvestBurst(data) {
   if (!isProduct && !isLogin) return;
   const url = location.href;
   const now = Date.now();
+  const burstDedupMs =
+    typeof getHarvestBurstSameUrlDedupMs === 'function'
+      ? getHarvestBurstSameUrlDedupMs(data.monitor || {})
+      : 60 * 1000;
   if (harvestBurstUrl === url) {
-    if (!h.dontStopHarvesting) return;
-    if (now - harvestBurstAt < 60000) return;
+    // Same URL: only re-harvest if "Don't stop harvesting" is on, OR if forced
+    // (pool is critically low — background poll triggered an emergency top-up).
+    if (!force && !h.dontStopHarvesting) return;
+    if (now - harvestBurstAt < burstDedupMs) return;
   }
   if (harvestBurstInProgress) return;
   harvestBurstInProgress = true;
@@ -106,6 +126,111 @@ async function maybeAutoHarvestBurst(data) {
   } finally {
     harvestBurstInProgress = false;
   }
+}
+
+/**
+ * Auto sign-in: fills the Target login form and submits if credentials are stored.
+ * Called on page load when page type is 'signin', during checkout pending step, and
+ * after session recovery reloads a tab that lands on the login page.
+ * No-ops silently when autoSignIn is false or credentials are missing.
+ */
+async function handleSignInPage(settings) {
+  if (!settings.autoSignIn || !settings.targetEmail || !settings.targetPassword) return;
+
+  // Detect Target's login inputs (standalone page or checkout auth gate modal).
+  const emailInput = (
+    document.querySelector('input[id="username"]') ||
+    document.querySelector('input[autocomplete="username"]') ||
+    document.querySelector('input[type="email"]')
+  );
+  const passInput = (
+    document.querySelector('input[id="password"]') ||
+    document.querySelector('input[type="password"]')
+  );
+  const submitBtn = (
+    document.querySelector('[data-test="account-signin-button"]') ||
+    document.querySelector('button[type="submit"]')
+  );
+
+  if (!emailInput || !passInput || !submitBtn) {
+    console.log('[TCH] auto sign-in: login form not found — will wait for DOM');
+    return;
+  }
+
+  console.log('[TCH] auto sign-in: filling credentials');
+  showToast('Auto sign-in: filling credentials…', 'persistent');
+
+  await sleep(300);
+
+  // Fill email using native input value setter so React state picks it up.
+  const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  if (nativeInputSetter) nativeInputSetter.call(emailInput, settings.targetEmail);
+  else emailInput.value = settings.targetEmail;
+  emailInput.dispatchEvent(new Event('input',  { bubbles: true }));
+  emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+  await sleep(Math.floor(Math.random() * 200) + 200);
+
+  // Fill password.
+  if (nativeInputSetter) nativeInputSetter.call(passInput, settings.targetPassword);
+  else passInput.value = settings.targetPassword;
+  passInput.dispatchEvent(new Event('input',  { bubbles: true }));
+  passInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+  await sleep(Math.floor(Math.random() * 200) + 200);
+
+  showToast('Auto sign-in: submitting…');
+  submitBtn.click();
+}
+
+/** Snapshot cookies immediately after ATC — the highest-value harvest moment. Fire-and-forget. */
+async function captureAtcSnapshot() {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'HARVEST_CAPTURE_BURST',
+      data: { count: 1, kind: 'atc', url: location.href, retailer: 'target' },
+    });
+  } catch { /* non-fatal — never block checkout */ }
+}
+
+function playCheckoutBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.9);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.9);
+  } catch (_) {}
+}
+
+async function handleExtraProductAtc(settings) {
+  showToast('Adding extra item…', 'persistent');
+  let addBtn;
+  try {
+    addBtn = await waitForAny([
+      { sel: SEL.shipIt }, { sel: SEL.pickup }, { sel: SEL.preorder },
+      { sel: SEL.stickyATC }, { text: 'add to cart' },
+    ], 5000);
+  } catch {
+    console.warn('[TCH] Extra product ATC button not found — proceeding to checkout');
+  }
+  try { sessionStorage.setItem(EXTRA_ATC_STATE_KEY, 'done'); } catch {}
+  if (addBtn && !addBtn.disabled) {
+    await debuggerClick(addBtn);
+    await sleep(600);
+    const c = document.querySelector(SEL.declineCoverage);
+    if (c) c.click();
+  }
+  await sleep(300);
+  await maybeApplyHarvestedSession(settings);
+  window.location.href = 'https://www.target.com/checkout';
 }
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
@@ -232,9 +357,59 @@ function findByText(text) {
   ) || null;
 }
 
+/**
+ * First *enabled* ATC-style control. Target often disables Ship while Pickup is still
+ * available; waitForAny returns document-order first match which may stay disabled.
+ */
+function findFirstEnabledAtcButton() {
+  const selectors = preferPickupMode
+    ? [
+        '[data-test="orderPickupButton"]',
+        '[data-test="shipItButton"]',
+        '[data-test="shippingButton"]',
+        '[data-test="preorderButton"]',
+      ]
+    : [
+        '[data-test="shipItButton"]',
+        '[data-test="shippingButton"]',
+        '[data-test="orderPickupButton"]',
+        '[data-test="preorderButton"]',
+      ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && !el.disabled && isVisible(el)) return el;
+  }
+  const sticky = document.querySelector(SEL.stickyATC);
+  if (sticky && !sticky.disabled && isVisible(sticky)) return sticky;
+  for (const needle of ['add to cart', 'preorder']) {
+    const el = findByText(needle);
+    if (el && !el.disabled && isVisible(el)) return el;
+  }
+  return null;
+}
+
 function normalizeProductUrl(url) {
   try { const u = new URL(url); return u.origin + u.pathname.replace(/\/$/, ''); }
   catch { return url; }
+}
+
+/** Monitor tab stays on one /p/ URL for a long time — harvest dedup must not block forever. */
+function isMonitoredTargetProductPage(monitor, href) {
+  if (!monitor?.active || !monitor.products?.length) return false;
+  let path = '';
+  try {
+    path = new URL(href).pathname;
+  } catch {
+    return false;
+  }
+  if (!/^\/p\//.test(path)) return false;
+  const normUrl = normalizeProductUrl(href);
+  const currentTcin = extractTcinFromUrl(href);
+  return monitor.products.some(
+    (p) =>
+      normalizeProductUrl(p.url) === normUrl
+      || (currentTcin && extractTcinFromUrl(p.url) === currentTcin)
+  );
 }
 
 const RETRY_STATE_KEY = 'tch:checkoutRetryState';
@@ -246,6 +421,8 @@ const CHECKOUT_SPEEDS_STORAGE_KEY = 'checkoutSpeeds';
 const CART_READY_KEY = 'tch:cartReady'; // set after ATC succeeds; cleared on checkout success
 const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
 const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
+const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
+let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
 let stockWatchTimer = null;
@@ -310,6 +487,7 @@ function clearCheckoutRetryState() {
   try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
   try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
   try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+  try { sessionStorage.removeItem(EXTRA_ATC_STATE_KEY); } catch {}
 }
 
 function markCartReady() {
@@ -651,17 +829,25 @@ function waitForEnabled(getFn, timeout = 6000) {
   });
 }
 
-/** Throttled hint when RedSky returns 401/403 — same idea as clearing cookies on auth failures in retail bots. */
+/** Throttled: notify background of a RedSky 401/403 so it can decide whether to recover. */
 function showSessionStaleHintIfNeeded() {
   try {
     const last = parseInt(sessionStorage.getItem(SESSION_STALE_HINT_KEY) || '0', 10);
     if (Date.now() - last < 5 * 60 * 1000) return;
     sessionStorage.setItem(SESSION_STALE_HINT_KEY, String(Date.now()));
   } catch {}
-  showToast(
-    'Target may have rejected the session (inventory API). Clear site data for target.com, reload, and sign in again.',
-    'persistent'
-  );
+  chrome.runtime.sendMessage({ type: 'TARGET_API_SESSION_STALE' }, () => {
+    if (chrome.runtime.lastError) {
+      // Background SW is unreachable — show a local fallback toast.
+      const onCheckout = getPageType() === 'checkout';
+      showToast(
+        onCheckout
+          ? 'Target flagged the session — stay on this page. Do NOT reload or clear site data mid-checkout.'
+          : 'Target may have rejected the session (inventory API). Clear site data for target.com, reload, and sign in again.',
+        'persistent'
+      );
+    }
+  });
 }
 
 function showToast(message, type = 'info') {
@@ -687,10 +873,13 @@ function showToast(message, type = 'info') {
 
 function findContinueButton(enabledOnly = false) {
   const patterns = ['save & continue', 'save and continue', 'continue', 'next'];
+  // Exclude navigation/commerce links that start with the same words.
+  const blockedRe = /shopping|browsing|browse|exploring|reading/i;
   const buttons = Array.from(document.querySelectorAll('button'));
   return buttons.find((button) => {
     if (enabledOnly && button.disabled) return false;
     const text = button.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (blockedRe.test(text)) return false;
     return patterns.some((pattern) => text === pattern || text.startsWith(pattern));
   }) || null;
 }
@@ -765,10 +954,11 @@ async function recordCheckoutSpeed(mode, durationMs) {
 
 function getPageType() {
   const path = window.location.pathname;
-  if (/^\/p\//.test(path))             return 'product';
-  if (/^\/cart/.test(path))            return 'cart';
-  if (/^\/checkout/.test(path))        return 'checkout';
-  if (/^\/co-thankyou/.test(path))     return 'confirmation';
+  if (/^\/p\//.test(path))                            return 'product';
+  if (/^\/cart/.test(path))                           return 'cart';
+  if (/^\/checkout/.test(path))                       return 'checkout';
+  if (/^\/co-thankyou/.test(path))                    return 'confirmation';
+  if (/^\/account\/(login|signin)/i.test(path))       return 'signin';
   return 'other';
 }
 
@@ -860,18 +1050,30 @@ async function handleProductPage(settings) {
       window.location.href = 'https://www.target.com/checkout';
       return;
     }
-    const stopEnableAtc = startTiming('product_wait_for_enabled_atc');
-    try {
-      addBtn = await waitForEnabled(
-        () => findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
-              || findByText('add to cart') || findByText('preorder'),
-        5000
-      );
-      stopEnableAtc('enabled');
-    } catch {
-      showToast('Button still disabled', 'error');
-      await scheduleCheckoutRetry(settings, 'ATC button stayed disabled');
-      return;
+    const altEnabled = findFirstEnabledAtcButton();
+    if (altEnabled) {
+      addBtn = altEnabled;
+      console.log('[TCH] using alternate enabled ATC (e.g. pickup vs ship)');
+    } else {
+      try {
+        addBtn.scrollIntoView({ block: 'center', behavior: 'instant' });
+      } catch (_) {}
+    }
+    if (addBtn.disabled) {
+      const stopEnableAtc = startTiming('product_wait_for_enabled_atc');
+      try {
+        addBtn = await waitForEnabled(
+          () => findFirstEnabledAtcButton()
+            || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC)
+            || findByText('add to cart') || findByText('preorder'),
+          8000
+        );
+        stopEnableAtc('enabled');
+      } catch {
+        showToast('Add to cart still unavailable — check stock, variant, or store pickup on Target', 'error');
+        await scheduleCheckoutRetry(settings, 'ATC button stayed disabled');
+        return;
+      }
     }
   }
 
@@ -879,6 +1081,7 @@ async function handleProductPage(settings) {
   await debuggerClick(addBtn);
 
   markCartReady(); // ATC was clicked — cart should now have this item
+  await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
 
   if (settings.useSavedPayment) {
     // For preorder/ATC: wait for the "View Cart & Check Out" modal button, which routes
@@ -904,6 +1107,19 @@ async function handleProductPage(settings) {
   // Non-saved-payment: decline coverage modal if it appears, then navigate to checkout.
   setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
   markCheckoutStart('formfill');
+
+  // Extra product trick: navigate to the extra item page before checkout.
+  if (settings.addExtraProduct && settings.extraProductTcin) {
+    const extraTcin = settings.extraProductTcin;
+    const currentTcin = extractTcinFromUrl(location.href);
+    if (currentTcin !== extraTcin) {
+      try { sessionStorage.setItem(EXTRA_ATC_STATE_KEY, 'needed'); } catch {}
+      showToast('ATC → adding extra item…', 'persistent');
+      window.location.href = `https://www.target.com/p/-/A-${extraTcin}`;
+      return;
+    }
+  }
+
   showToast('ATC → checkout…');
   setNavigationMark('product_to_checkout');
   await maybeApplyHarvestedSession(settings);
@@ -934,6 +1150,9 @@ let checkoutStepPollId = null;
 let checkoutStepPollTimer = null;
 let lastReviewKey = null;
 let lastReviewAt = 0;
+/** Prevents concurrent handleReviewStep runs for the same URL (e.g. payment .then + watcher). */
+let reviewStepInFlight = false;
+let reviewStepInFlightKey = '';
 
 function markCheckoutFlow(step) {
   if (checkoutFlowStart === null) {
@@ -964,7 +1183,13 @@ async function handleCheckoutPendingStep(settings, step) {
     showToast('Guest checkout…');
     await sleep(600);
   }
-  showToast('Sign in if you see a prompt — this tab will not auto-refresh. We continue when forms load.', 'persistent');
+  if (step === 'signin' && settings.autoSignIn && settings.targetEmail && settings.targetPassword) {
+    // Auto sign-in: give the checkout auth gate time to render its form then fill it.
+    await sleep(800);
+    await handleSignInPage(settings);
+  } else {
+    showToast('Sign in if you see a prompt — this tab will not auto-refresh. We continue when forms load.', 'persistent');
+  }
   watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });
 }
 
@@ -1072,10 +1297,12 @@ async function handleShippingStep(settings) {
   }
 
   const stopFill = startTiming('shipping_fill_fields');
+  const jig = (settings.shippingJig || '').trim();
+  const effectiveAddress1 = jig && s.address1 ? `${jig} ${s.address1}` : s.address1;
   const fieldMap = [
     [['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'], s.firstName],
     [['input[id*="lastName"]', 'input[name="lastName"]', 'input[autocomplete="family-name"]'], s.lastName],
-    [['input[id*="addressLine1"]', 'input[name="addressLine1"]', 'input[id*="address1"]', 'input[autocomplete="address-line1"]'], s.address1],
+    [['input[id*="addressLine1"]', 'input[name="addressLine1"]', 'input[id*="address1"]', 'input[autocomplete="address-line1"]'], effectiveAddress1],
     [['input[id*="addressLine2"]', 'input[name="addressLine2"]', 'input[id*="address2"]', 'input[autocomplete="address-line2"]'], s.address2],
     [['input[id*="city"]', 'input[name="city"]', 'input[autocomplete="address-level2"]'], s.city],
     [['input[id*="zipCode"]', 'input[name="zipCode"]', 'input[id*="zip"]', 'input[autocomplete="postal-code"]'], s.zip],
@@ -1202,60 +1429,74 @@ async function handleSavedStep(settings) {
 async function handleReviewStep(settings) {
   const reviewKey = `${location.pathname}${location.search}`;
   const now = Date.now();
+  // Dedupe only after a successful review completion (see bottom) — not after a failed
+  // Place Order probe, so we can retry quickly when the DOM is slow or a modal blocks.
   if (lastReviewKey === reviewKey && now - lastReviewAt < T.reviewDedupWindowMs) return;
-  lastReviewKey = reviewKey;
-  lastReviewAt = now;
 
-  const stopReviewWait = startTiming('review_wait_for_place_order');
-  markCheckoutFlow('review_start');
-  let placeOrderBtn = null;
+  if (reviewStepInFlight && reviewStepInFlightKey === reviewKey) return;
+  reviewStepInFlight = true;
+  reviewStepInFlightKey = reviewKey;
+
   try {
-    placeOrderBtn = await waitForAny([
-      { sel: SEL.placeOrder }, { text: 'place order' },
-    ], 4000);
-    stopReviewWait('found');
-  } catch {
-    stopReviewWait('not_found');
-    await scheduleCheckoutRetry(settings, 'Review step missing Place Order button');
-    return;
-  }
-
-  console.log('[TCH] review reached');
-  if (checkoutFlowStart !== null) {
-    const totalMs = Math.round(performance.now() - checkoutFlowStart);
-    console.log(`[TCH] timing checkout_total_to_review: ${totalMs}ms`);
-  }
-
-  // Record end-to-end checkout speed for comparison between saved-payment and form-fill modes.
-  try {
-    const startMs = parseInt(sessionStorage.getItem(CHECKOUT_START_KEY) || '0', 10);
-    const mode = sessionStorage.getItem(CHECKOUT_MODE_KEY) || 'formfill';
-    if (startMs > 0) {
-      const durationMs = Date.now() - startMs;
-      console.log(`[TCH] checkout speed (${mode}): ${durationMs}ms`);
-      sessionStorage.removeItem(CHECKOUT_START_KEY);
-      sessionStorage.removeItem(CHECKOUT_MODE_KEY);
-      await recordCheckoutSpeed(mode, durationMs);
-    }
-  } catch {}
-
-  await markCheckoutSuccess();
-
-  if (settings.autoPlaceOrder) {
-    // Auto Place Order: resolve the button reference freshly in case the DOM
-    // was re-rendered while we were processing, then click.
-    console.warn('[TCH] autoPlaceOrder is ON — this will submit the order if the button is enabled');
-    const btn = document.querySelector(SEL.placeOrder) || findByText('place order') || placeOrderBtn;
-    if (btn && !btn.disabled) {
-      console.log('[TCH] autoPlaceOrder: clicking Place Order');
-      showToast('Placing order…', 'persistent');
-      await debuggerClick(btn);
+    const stopReviewWait = startTiming('review_wait_for_place_order');
+    markCheckoutFlow('review_start');
+    let placeOrderBtn = null;
+    try {
+      placeOrderBtn = await waitForAny([
+        { sel: SEL.placeOrder }, { text: 'place order' },
+      ], 4000);
+      stopReviewWait('found');
+    } catch {
+      stopReviewWait('not_found');
+      await scheduleCheckoutRetry(settings, 'Review step missing Place Order button');
       return;
     }
-    console.warn('[TCH] autoPlaceOrder: Place Order button not clickable');
-  }
 
-  showToast('Reached review — Place Order remains manual.', 'persistent');
+    console.log('[TCH] review reached');
+    if (settings.checkoutSound !== false) playCheckoutBeep();
+    if (checkoutFlowStart !== null) {
+      const totalMs = Math.round(performance.now() - checkoutFlowStart);
+      console.log(`[TCH] timing checkout_total_to_review: ${totalMs}ms`);
+    }
+
+    // Record end-to-end checkout speed for comparison between saved-payment and form-fill modes.
+    try {
+      const startMs = parseInt(sessionStorage.getItem(CHECKOUT_START_KEY) || '0', 10);
+      const mode = sessionStorage.getItem(CHECKOUT_MODE_KEY) || 'formfill';
+      if (startMs > 0) {
+        const durationMs = Date.now() - startMs;
+        console.log(`[TCH] checkout speed (${mode}): ${durationMs}ms`);
+        sessionStorage.removeItem(CHECKOUT_START_KEY);
+        sessionStorage.removeItem(CHECKOUT_MODE_KEY);
+        await recordCheckoutSpeed(mode, durationMs);
+      }
+    } catch {}
+
+    await markCheckoutSuccess();
+
+    if (settings.autoPlaceOrder) {
+      // Auto Place Order: resolve the button reference freshly in case the DOM
+      // was re-rendered while we were processing, then click.
+      console.warn('[TCH] autoPlaceOrder is ON — this will submit the order if the button is enabled');
+      const btn = document.querySelector(SEL.placeOrder) || findByText('place order') || placeOrderBtn;
+      if (btn && !btn.disabled) {
+        console.log('[TCH] autoPlaceOrder: clicking Place Order');
+        showToast('Placing order…', 'persistent');
+        await debuggerClick(btn);
+        lastReviewKey = reviewKey;
+        lastReviewAt = Date.now();
+        return;
+      }
+      console.warn('[TCH] autoPlaceOrder: Place Order button not clickable');
+    }
+
+    showToast('Reached review — Place Order remains manual.', 'persistent');
+    lastReviewKey = reviewKey;
+    lastReviewAt = Date.now();
+  } finally {
+    reviewStepInFlight = false;
+    reviewStepInFlightKey = '';
+  }
 }
 
 // ─── MONITOR MODE ────────────────────────────────────────────────────────────
@@ -1367,7 +1608,7 @@ function parseFulfillmentStockStatus(payload) {
   return { result: null, status, qty, soldOut, oosAllStores };
 }
 
-async function checkStockFromFulfillmentApi(url, timeoutMs = 3000) {
+async function checkStockFromFulfillmentApi(url, timeoutMs = 3000, stockOpts = null) {
   const fulfillmentUrl = buildFulfillmentApiUrl(url);
   if (!fulfillmentUrl) return null;
 
@@ -1388,6 +1629,11 @@ async function checkStockFromFulfillmentApi(url, timeoutMs = 3000) {
 
     const payload = await res.json();
     const parsed = parseFulfillmentStockStatus(payload);
+    if (parsed.result === true && stockOpts?.highStockOnly) {
+      const th = Number(stockOpts.highStockThreshold) || 10;
+      const q = parsed.qty || 0;
+      if (q > 0 && q < th) return 'low_stock';
+    }
     return parsed.result;
   } catch {
     return null;
@@ -1409,7 +1655,13 @@ function checkStockFromHTML(html) {
 // If unavailable, it falls back to streaming page HTML with conservative parsing.
 async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
   const requireFullParse = options?.requireFullParse === true;
-  const fulfillmentResult = await checkStockFromFulfillmentApi(url, Math.min(timeoutMs, 3000));
+  const stockOpts = options?.stockOpts || null;
+  const fulfillmentResult = await checkStockFromFulfillmentApi(
+    url,
+    Math.min(timeoutMs, 3000),
+    stockOpts
+  );
+  if (fulfillmentResult === 'low_stock') return 'low_stock';
   if (fulfillmentResult !== null) {
     return fulfillmentResult;
   }
@@ -1423,9 +1675,12 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       signal: controller.signal,
     });
-    clearTimeout(timer);
-    if (!res.ok) return null;
+    if (!res.ok) { clearTimeout(timer); return null; }
 
+    // Keep the AbortController timer alive through the streaming read — only the
+    // initial fetch timeout (headers) was previously cleared here, leaving the body
+    // read with no deadline. If the stream stalls mid-response, controller.abort()
+    // fires and the catch returns null.
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
@@ -1439,14 +1694,14 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       const signals = analyzeStockSignals(buf);
       // A disabled button is unambiguous — item is OOS; no need to read further.
       if (signals.disabledATCMatch) {
-        reader.cancel();
+        clearTimeout(timer); reader.cancel();
         return false;
       }
       // An enabled button takes priority over any OOS text that may appear earlier in
       // the HTML stream (e.g. "Preorders have sold out" above the button on restock).
       if (signals.enabledATCMatch) {
         if (!requireFullParse) {
-          reader.cancel();
+          clearTimeout(timer); reader.cancel();
           return true;
         }
       } else if (signals.weakInStockMatch && !loggedWeakCandidate) {
@@ -1455,6 +1710,7 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       // OOS text alone does NOT cancel the read — button state is authoritative.
       // checkStockFromHTML at end checks enabledATCMatch first.
     }
+    clearTimeout(timer);
     return checkStockFromHTML(buf);
   } catch {
     clearTimeout(timer);
@@ -1517,6 +1773,7 @@ async function handleMonitoredATC(monitor, product) {
   if (addBtn && !addBtn.disabled && !pageOOS) {
     showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
     await debuggerClick(addBtn);
+    await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
 
     // Decline any protection/coverage upsell modal immediately.
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
@@ -1554,34 +1811,69 @@ async function handleMonitoredATC(monitor, product) {
     } catch { /* modal didn't appear — item may still have been added */ }
 
     markCartReady();
+    chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+
+    // Extra product trick: visit extra item page before checkout.
+    if (settings.addExtraProduct && settings.extraProductTcin) {
+      const extraTcin = settings.extraProductTcin;
+      const currentTcin = extractTcinFromUrl(location.href);
+      if (currentTcin !== extraTcin) {
+        try { sessionStorage.setItem(EXTRA_ATC_STATE_KEY, 'needed'); } catch {}
+        showToast(`Monitor: Added! → extra item…`, 'persistent');
+        console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}, redirecting to extra TCIN`);
+        window.location.href = `https://www.target.com/p/-/A-${extraTcin}`;
+        return;
+      }
+    }
+
     showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
     console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}`);
-    chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
     return;
   }
 
   // Streaming fetch polling — reads chunks, terminates early on match
   let pollCount = 0;
+  let pollInProgress = false;
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
 
   const pollId = setInterval(async () => {
-    if (!runtimeEnabled) {
-      clearInterval(pollId);
-      return;
-    }
-    pollCount++;
-    const result = await streamingStockCheck(normUrl);
-    if (result === true) {
-      // Act immediately on first positive for maximum speed.
-      clearInterval(pollId);
-      console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
-      showToast('STOCK DETECTED — reloading!', 'success');
-      location.reload();
-    } else if (result === null) {
-      // network error — skip this poll
-    } else if (pollCount % 10 === 0) {
-      showToast(`Polling… (${pollCount} checks)`, 'persistent');
+    if (!runtimeEnabled) { clearInterval(pollId); return; }
+    // Prevent overlapping async callbacks — critical at 250ms drop-window intervals
+    // where each network fetch takes 3-8s. Without this lock, dozens of fetches
+    // queue up and hammer Target simultaneously.
+    if (pollInProgress) return;
+    pollInProgress = true;
+    try {
+      pollCount++;
+      // Passive watch keeps the same URL for a long time; init() only runs once, so re-try
+      // harvest here on the drop-aware same-URL dedup interval (see maybeAutoHarvestBurst).
+      const pollSettings = await getSettings();
+      if (pollSettings.harvestConfig?.harvestingEnabled) void maybeAutoHarvestBurst(pollSettings);
+
+      const stockOpts = {
+        highStockOnly: !!pollSettings.highStockOnly,
+        highStockThreshold: Number(pollSettings.highStockThreshold) || 10,
+      };
+      const result = await streamingStockCheck(normUrl, 8000, { stockOpts });
+      if (result === true) {
+        // Act immediately on first positive for maximum speed.
+        clearInterval(pollId);
+        console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
+        showToast('STOCK DETECTED — reloading!', 'success');
+        location.reload();
+      } else if (result === 'low_stock') {
+        if (pollCount % 15 === 0) {
+          const th = stockOpts.highStockThreshold;
+          showToast(`In stock but below ${th} units (high-stock filter) — waiting…`, 'persistent');
+        }
+      } else if (result === null) {
+        // network error — skip this poll
+      } else if (pollCount % 10 === 0) {
+        showToast(`Polling… (${pollCount} checks)`, 'persistent');
+      }
+    } finally {
+      pollInProgress = false;
     }
   }, Math.round(interval * 1000));
 }
@@ -1597,13 +1889,8 @@ async function init() {
       ? TCH_HOSTS.detectRetailer(location.href)
       : null;
   if (detected === 'walmart') {
-    try {
-      if (!sessionStorage.getItem('tch:walmartTodoOnce')) {
-        sessionStorage.setItem('tch:walmartTodoOnce', '1');
-        console.info('[TCH] Walmart automation is not implemented yet (see tasks/todo.md).');
-      }
-    } catch (_) {}
-    stopInit('walmart_todo');
+    // Walmart is handled by walmart-content.js — this script is Target-only.
+    stopInit('walmart_handled');
     return;
   }
   if (detected !== 'target') {
@@ -1650,6 +1937,8 @@ async function init() {
     || (data.payment && Object.values(data.payment).some(Boolean));
   if (!hasData) { showToast('Open popup to add your info', 'error'); stopInit('missing_settings'); return; }
 
+  preferPickupMode = !!data.preferPickup;
+
   const settings = {
     shipping: data.shipping || {},
     payment: data.payment || {},
@@ -1657,14 +1946,41 @@ async function init() {
     useSavedPayment: !!data.useSavedPayment,
     autoPlaceOrder: !!data.autoPlaceOrder,
     harvestConfig: data.harvestConfig || {},
+    autoSignIn: !!data.autoSignIn,
+    targetEmail: data.targetEmail || '',
+    targetPassword: data.targetPassword || '',
+    shippingJig: data.shippingJig || '',
+    preferPickup: !!data.preferPickup,
+    checkoutSound: data.checkoutSound !== false,
+    addExtraProduct: !!data.addExtraProduct,
+    extraProductTcin: data.extraProductTcin || '',
   };
+
+  // Extra product intercept: if we navigated here specifically to ATC the extra item, do that now.
+  if (settings.addExtraProduct && settings.extraProductTcin && page === 'product') {
+    const extraAtcState = (() => { try { return sessionStorage.getItem(EXTRA_ATC_STATE_KEY); } catch { return null; } })();
+    if (extraAtcState === 'needed') {
+      const extraTcin = settings.extraProductTcin;
+      const currentTcin = extractTcinFromUrl(location.href);
+      if (currentTcin && currentTcin === extraTcin) {
+        await handleExtraProductAtc(settings);
+        stopInit('extra_product_atc');
+        return;
+      }
+    }
+  }
 
   if (page === 'product' || page === 'cart') prefetchCheckout();
 
   if (page === 'product')      await handleProductPage(settings);
   else if (page === 'cart')    await handleCartPage(settings);
   else if (page === 'checkout') await handleCheckoutPage(settings);
-  else if (page === 'confirmation') {
+  else if (page === 'signin') {
+    // Standalone Target login page — attempt auto sign-in if credentials stored.
+    showToast('Signing in…');
+    await sleep(500);
+    await handleSignInPage(settings);
+  } else if (page === 'confirmation') {
     await markCheckoutSuccess();
     showToast('Order placed!', 'success');
   }
@@ -1750,8 +2066,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  if (message.type === 'TCH_HARVEST_NOW') {
+    // Background poll detected the cookie pool is critically low. Do an
+    // emergency harvest burst regardless of the "Don't stop harvesting" toggle.
+    (async () => {
+      const d = await getSettings();
+      if (!d.harvestConfig?.harvestingEnabled) return;
+      await maybeAutoHarvestBurst(d, { force: true });
+    })();
+    return;
+  }
+
   if (message.type === 'TCH_SESSION_HINT') {
-    showSessionStaleHintIfNeeded();
+    const onCheckout = getPageType() === 'checkout';
+    showToast(
+      onCheckout
+        ? 'Target flagged the session — stay on this page. Do NOT reload or clear site data mid-checkout.'
+        : 'Target may have rejected the session. Clear site data for target.com, reload, and sign in again.',
+      'persistent'
+    );
+    return;
+  }
+
+  if (message.type === 'TCH_SESSION_RECOVERED') {
+    invalidateCache();
+    showToast(
+      message.text || 'Target site data was cleared and this tab reloaded. Sign in again if Target asks.',
+      'success'
+    );
+    return;
+  }
+
+  if (message.type === 'MONITOR_UPDATED') {
+    invalidateCache();
+    void init();
     return;
   }
 
@@ -1772,6 +2120,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     init();
   }
+});
+
+// ─── VISIBILITY CHANGE ────────────────────────────────────────────────────────
+
+document.addEventListener('visibilitychange', () => {
+  try {
+    chrome.runtime.sendMessage({
+      type: 'HARVEST_VISIBILITY_CHANGE',
+      hidden: document.visibilityState === 'hidden',
+    });
+  } catch (_) {}
 });
 
 // ─── GO ──────────────────────────────────────────────────────────────────────

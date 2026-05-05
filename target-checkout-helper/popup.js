@@ -114,10 +114,19 @@ async function refreshHarvestStatus() {
     const s = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
     const c = $('harvestCountText');
     const w = $('harvestSessionWarn');
+    const hw = $('harvestHiddenWarn');
     if (c && s && s.ok !== false) {
-      c.textContent = `Snapshots ready: ${typeof s.count === 'number' ? s.count : '—'}`;
+      const count = typeof s.count === 'number' ? s.count : null;
+      c.textContent = `Snapshots ready: ${count !== null ? count : '—'}`;
+      c.className = 'harvest-count';
+      if (count !== null) {
+        if (count < 10) c.classList.add('harvest-count-low');
+        else if (count < 30) c.classList.add('harvest-count-mid');
+        else c.classList.add('harvest-count-ok');
+      }
     }
     if (w && s) w.hidden = !!s.sessionStorage;
+    if (hw && s) hw.hidden = !s.harvestHidden;
   } catch (_) {}
 }
 
@@ -126,7 +135,7 @@ async function pushHarvestConfig(data) {
   try {
     await chrome.runtime.sendMessage({ type: 'HARVEST_UPDATE_CONFIG', data: data || gatherHarvestConfigFromDom() });
     await refreshHarvestStatus();
-    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: enableToggle.checked });
+    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: !!enableToggle?.checked });
   } catch (_) {}
 }
 
@@ -137,36 +146,64 @@ function parseIntInRange(value, min, max, fallback) {
 }
 
 function updateHeaderVisualState(enabled) {
-  statusText.textContent = enabled
-    ? 'On — open a Target product page to run checkout help'
-    : 'Off — automation paused';
+  if (statusText) {
+    statusText.textContent = enabled
+      ? 'On — open a Target product page to run checkout help'
+      : 'Off — automation paused';
+  }
   document.querySelector('.app-header')?.classList.toggle('is-active', !!enabled);
 }
 
 function gatherSettings() {
   const shipping = {};
   for (const id of SHIPPING_FIELDS) {
-    shipping[id] = $(id).value.trim();
+    const el = $(id);
+    shipping[id] = el ? el.value.trim() : '';
   }
 
   const payment = {};
   for (const id of PAYMENT_FIELDS) {
-    payment[id] = $(id).value.trim();
+    const el = $(id);
+    payment[id] = el ? el.value.trim() : '';
   }
 
   const retryPolicy = {
-    maxAttempts: parseIntInRange(checkoutRetryMaxIn.value, 0, 50, 0),
-    delaySec: parseIntInRange(checkoutRetryDelayIn.value, 1, 60, 1),
+    maxAttempts: checkoutRetryMaxIn
+      ? parseIntInRange(checkoutRetryMaxIn.value, 0, 50, 0)
+      : 0,
+    delaySec: checkoutRetryDelayIn
+      ? parseIntInRange(checkoutRetryDelayIn.value, 1, 60, 1)
+      : 1,
   };
 
+  const shippingJigEl = $('shippingJig');
+
   return {
-    enabled: enableToggle.checked,
+    enabled: !!enableToggle?.checked,
     shipping,
     payment,
     retryPolicy,
-    useSavedPayment: $('useSavedPayment').checked,
-    autoPlaceOrder: $('autoPlaceOrder').checked,
+    useSavedPayment: !!$('useSavedPayment')?.checked,
+    autoPlaceOrder: !!$('autoPlaceOrder')?.checked,
+    preferPickup: !!$('preferPickup')?.checked,
+    checkoutSound: $('checkoutSound') ? !!$('checkoutSound').checked : true,
+    addExtraProduct: !!$('addExtraProduct')?.checked,
+    extraProductTcin: ($('extraProductTcin')?.value || '').trim(),
+    shippingJig: shippingJigEl ? shippingJigEl.value.trim() : '',
+    walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
+    walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
+    walmartUseSavedSession: $('walmartUseSavedSession') ? !!$('walmartUseSavedSession').checked : true,
     harvestConfig: gatherHarvestConfigFromDom(),
+    discordWebhook: ($('discordWebhook')?.value || '').trim(),
+    webhookSendFailures: !!$('webhookSendFailures')?.checked,
+    endlessMode: !!$('endlessMode')?.checked,
+    endlessLimit: $('endlessLimit')
+      ? parseIntInRange($('endlessLimit').value, 0, 99, 0)
+      : 0,
+    highStockOnly: !!$('highStockOnly')?.checked,
+    highStockThreshold: $('highStockThreshold')
+      ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
+      : 10,
   };
 }
 
@@ -230,38 +267,70 @@ function renderSpeedComparison(speeds) {
 }
 
 function populateFields(data) {
-  if (data.enabled) {
-    enableToggle.checked = true;
+  if (enableToggle) {
+    enableToggle.checked = !!data.enabled;
   }
   updateHeaderVisualState(!!data.enabled);
 
   if (data.shipping) {
     for (const id of SHIPPING_FIELDS) {
-      if (data.shipping[id]) $(id).value = data.shipping[id];
+      if (!data.shipping[id]) continue;
+      const el = $(id);
+      if (el) el.value = data.shipping[id];
     }
   }
 
   if (data.payment) {
     for (const id of PAYMENT_FIELDS) {
-      if (data.payment[id]) $(id).value = data.payment[id];
+      if (!data.payment[id]) continue;
+      const el = $(id);
+      if (el) el.value = data.payment[id];
     }
   }
 
   if (data.retryPolicy) {
-    if (typeof data.retryPolicy.maxAttempts === 'number') {
+    if (checkoutRetryMaxIn && typeof data.retryPolicy.maxAttempts === 'number') {
       checkoutRetryMaxIn.value = String(data.retryPolicy.maxAttempts);
     }
-    if (typeof data.retryPolicy.delaySec === 'number') {
+    if (checkoutRetryDelayIn && typeof data.retryPolicy.delaySec === 'number') {
       checkoutRetryDelayIn.value = String(data.retryPolicy.delaySec);
     }
   }
 
-  if (data.useSavedPayment) {
-    $('useSavedPayment').checked = true;
+  const useSaved = $('useSavedPayment');
+  if (useSaved) useSaved.checked = !!data.useSavedPayment;
+
+  const autoPlace = $('autoPlaceOrder');
+  if (autoPlace) autoPlace.checked = !!data.autoPlaceOrder;
+
+  const preferPickupEl = $('preferPickup');
+  if (preferPickupEl) preferPickupEl.checked = !!data.preferPickup;
+
+  const checkoutSoundEl = $('checkoutSound');
+  if (checkoutSoundEl) checkoutSoundEl.checked = data.checkoutSound !== false;
+
+  const addExtraEl = $('addExtraProduct');
+  if (addExtraEl) {
+    addExtraEl.checked = !!data.addExtraProduct;
+    const row = $('extraProductRow');
+    if (row) row.style.display = addExtraEl.checked ? '' : 'none';
   }
 
-  if (data.autoPlaceOrder) {
-    $('autoPlaceOrder').checked = true;
+  const extraTcinEl = $('extraProductTcin');
+  if (extraTcinEl && data.extraProductTcin) extraTcinEl.value = data.extraProductTcin;
+
+  const shippingJigEl = $('shippingJig');
+  if (shippingJigEl && data.shippingJig) shippingJigEl.value = data.shippingJig;
+
+  const wmSkipEl = $('walmartSkipMonitoring');
+  if (wmSkipEl) wmSkipEl.checked = !!data.walmartSkipMonitoring;
+
+  const wmSessionEl = $('walmartUseSavedSession');
+  if (wmSessionEl) wmSessionEl.checked = data.walmartUseSavedSession !== false;
+
+  const wmMaxPrice = $('walmartMaxPrice');
+  if (wmMaxPrice && typeof data.walmartMaxPrice === 'number') {
+    wmMaxPrice.value = String(data.walmartMaxPrice);
   }
 
   const hc = data.harvestConfig || {};
@@ -278,6 +347,29 @@ function populateFields(data) {
   const hap = $('harvestApplyNext');
   if (hap) hap.checked = !!hc.applyNextBeforeCheckout;
 
+  const disc = $('discordWebhook');
+  if (disc && typeof data.discordWebhook === 'string') disc.value = data.discordWebhook;
+  const wsf = $('webhookSendFailures');
+  if (wsf) wsf.checked = !!data.webhookSendFailures;
+
+  const em = $('endlessMode');
+  if (em) {
+    em.checked = !!data.endlessMode;
+    const elRow = $('endlessLimitRow');
+    if (elRow) elRow.style.display = em.checked ? '' : 'none';
+  }
+  const elLim = $('endlessLimit');
+  if (elLim && typeof data.endlessLimit === 'number') elLim.value = String(data.endlessLimit);
+
+  const hs = $('highStockOnly');
+  if (hs) {
+    hs.checked = !!data.highStockOnly;
+    const hsRow = $('highStockThresholdRow');
+    if (hsRow) hsRow.style.display = hs.checked ? '' : 'none';
+  }
+  const hst = $('highStockThreshold');
+  if (hst && typeof data.highStockThreshold === 'number') hst.value = String(data.highStockThreshold);
+
   renderSpeedComparison(data.checkoutSpeeds);
   void refreshHarvestStatus();
   void checkAccountStatus();
@@ -293,6 +385,7 @@ async function save() {
     showToast('Open from the toolbar puzzle icon');
     return;
   }
+  if (!saveBtn) return;
   saveBtn.disabled = true;
   try {
     const prev = await chrome.storage.local.get('advancedSettings');
@@ -322,18 +415,20 @@ async function save() {
   }
 }
 
-enableToggle.addEventListener('change', async () => {
-  const enabled = enableToggle.checked;
-  updateHeaderVisualState(enabled);
-  if (!hasChromeStorage()) return;
-  try {
-    const data = await chrome.storage.local.get(null);
-    await chrome.storage.local.set({ ...data, enabled });
-    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled });
-  } catch (_) {}
-});
+if (enableToggle) {
+  enableToggle.addEventListener('change', async () => {
+    const enabled = !!enableToggle.checked;
+    updateHeaderVisualState(enabled);
+    if (!hasChromeStorage()) return;
+    try {
+      const data = await chrome.storage.local.get(null);
+      await chrome.storage.local.set({ ...data, enabled });
+      chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled });
+    } catch (_) {}
+  });
+}
 
-saveBtn.addEventListener('click', save);
+if (saveBtn) saveBtn.addEventListener('click', save);
 
 if (hasChromeStorage()) {
   chrome.storage.local.get(
@@ -344,9 +439,23 @@ if (hasChromeStorage()) {
       'retryPolicy',
       'useSavedPayment',
       'autoPlaceOrder',
+      'preferPickup',
+      'checkoutSound',
+      'addExtraProduct',
+      'extraProductTcin',
+      'shippingJig',
+      'walmartMaxPrice',
+      'walmartSkipMonitoring',
+      'walmartUseSavedSession',
       'checkoutSpeeds',
       'harvestConfig',
       'advancedSettings',
+      'discordWebhook',
+      'webhookSendFailures',
+      'endlessMode',
+      'endlessLimit',
+      'highStockOnly',
+      'highStockThreshold',
     ],
     populateFields
   );
@@ -371,7 +480,7 @@ function wireHarvestControls() {
       await chrome.runtime.sendMessage({ type: 'HARVEST_CLEAR' });
       showToast('Harvest cleared');
       await refreshHarvestStatus();
-      chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: enableToggle.checked });
+      chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: !!enableToggle?.checked });
     } catch (_) {}
   });
   $('harvestNowBtn')?.addEventListener('click', async () => {
@@ -418,6 +527,42 @@ async function autoSaveToggle() {
 }
 $('useSavedPayment')?.addEventListener('change', autoSaveToggle);
 $('autoPlaceOrder')?.addEventListener('change', autoSaveToggle);
+$('preferPickup')?.addEventListener('change', autoSaveToggle);
+$('checkoutSound')?.addEventListener('change', autoSaveToggle);
+$('walmartSkipMonitoring')?.addEventListener('change', autoSaveToggle);
+$('walmartUseSavedSession')?.addEventListener('change', autoSaveToggle);
+$('addExtraProduct')?.addEventListener('change', () => {
+  const row = $('extraProductRow');
+  if (row) row.style.display = $('addExtraProduct').checked ? '' : 'none';
+  autoSaveToggle();
+});
+$('endlessMode')?.addEventListener('change', () => {
+  const row = $('endlessLimitRow');
+  if (row) row.style.display = $('endlessMode')?.checked ? '' : 'none';
+  autoSaveToggle();
+});
+$('highStockOnly')?.addEventListener('change', () => {
+  const row = $('highStockThresholdRow');
+  if (row) row.style.display = $('highStockOnly')?.checked ? '' : 'none';
+  autoSaveToggle();
+});
+$('discordWebhook')?.addEventListener('change', autoSaveToggle);
+$('webhookSendFailures')?.addEventListener('change', autoSaveToggle);
+$('endlessLimit')?.addEventListener('change', autoSaveToggle);
+$('highStockThreshold')?.addEventListener('change', autoSaveToggle);
+
+$('webhookTestBtn')?.addEventListener('click', async () => {
+  if (!hasChromeStorage()) return;
+  await autoSaveToggle().catch(() => {});
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'WEBHOOK_TEST' });
+    if (r?.ok) showToast('Test webhook sent');
+    else if (r?.skipped) showToast('Paste a discord.com webhook URL first');
+    else showToast('Webhook request failed — check URL and network');
+  } catch (_) {
+    showToast('Webhook test failed');
+  }
+});
 
 function wireAdvancedDebuggerControls() {
   $('debuggerAllowAnyTab')?.addEventListener('change', async () => {
@@ -475,36 +620,62 @@ try {
 
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 
-const tabGuide   = $('tabGuide');
-const panelGuide = $('panelGuide');
+const tabWalmart   = $('tabWalmart');
+const panelWalmart = $('panelWalmart');
+const tabGuide     = $('tabGuide');
+const panelGuide   = $('panelGuide');
 
 function setActiveTab(panel) {
-  const isMain  = panel === 'main';
-  const isForms = panel === 'forms';
-  const isGuide = panel === 'guide';
+  const isMain    = panel === 'main';
+  const isWalmart = panel === 'walmart';
+  const isForms   = panel === 'forms';
+  const isGuide   = panel === 'guide';
   tabMain.classList.toggle('tab-btn-active', isMain);
   tabMain.setAttribute('aria-selected', isMain);
+  tabWalmart.classList.toggle('tab-btn-active', isWalmart);
+  tabWalmart.setAttribute('aria-selected', isWalmart);
   tabForms.classList.toggle('tab-btn-active', isForms);
   tabForms.setAttribute('aria-selected', isForms);
   tabGuide.classList.toggle('tab-btn-active', isGuide);
   tabGuide.setAttribute('aria-selected', isGuide);
-  panelMain.hidden  = !isMain;
-  panelForms.hidden = !isForms;
-  panelGuide.hidden = !isGuide;
+  panelMain.hidden    = !isMain;
+  panelWalmart.hidden = !isWalmart;
+  panelForms.hidden   = !isForms;
+  panelGuide.hidden   = !isGuide;
+
+  // Header color + title
+  const header = document.querySelector('.app-header');
+  const title  = $('appTitle');
+  if (isWalmart) {
+    header?.classList.add('header-walmart');
+    if (title) title.textContent = 'Walmart Checkout Helper';
+  } else {
+    header?.classList.remove('header-walmart');
+    if (title) title.textContent = 'Target Checkout Helper';
+  }
 }
 
-tabMain.addEventListener('click',  () => setActiveTab('main'));
-tabForms.addEventListener('click', () => setActiveTab('forms'));
-tabGuide.addEventListener('click', () => setActiveTab('guide'));
+tabMain.addEventListener('click',    () => setActiveTab('main'));
+tabWalmart.addEventListener('click', () => setActiveTab('walmart'));
+tabForms.addEventListener('click',   () => setActiveTab('forms'));
+tabGuide.addEventListener('click',   () => setActiveTab('guide'));
 
 tabMain.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault(); tabWalmart.focus(); setActiveTab('walmart');
+  }
+});
+tabWalmart.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault(); tabMain.focus(); setActiveTab('main');
+  }
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     e.preventDefault(); tabForms.focus(); setActiveTab('forms');
   }
 });
 tabForms.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-    e.preventDefault(); tabMain.focus(); setActiveTab('main');
+    e.preventDefault(); tabWalmart.focus(); setActiveTab('walmart');
   }
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     e.preventDefault(); tabGuide.focus(); setActiveTab('guide');
@@ -558,9 +729,12 @@ function extractProductName(url) {
 function renderProducts() {
   productListEl.innerHTML = '';
   if (monitorControls) monitorControls.hidden = false;
-  if (productListEmpty) productListEmpty.hidden = products.length > 0;
+  // Monitor tab shows Target products only — Walmart products live on the Walmart tab
+  const targetProducts = products.filter(p => !/walmart\.com/i.test(p.url));
+  if (productListEmpty) productListEmpty.hidden = targetProducts.length > 0;
 
-  products.forEach((p, i) => {
+  targetProducts.forEach((p) => {
+    const i = products.indexOf(p); // keep real index for edits/removes
     const li = document.createElement('li');
     li.className = 'product-item';
 
@@ -613,13 +787,43 @@ function renderProducts() {
 
     const urlRow = document.createElement('div');
     urlRow.className = 'product-item-url';
-    urlRow.textContent = p.url;
     urlRow.title = p.url;
+
+    // Retailer badge
+    const isWalmartProduct = /walmart\.com\/ip\//i.test(p.url);
+    const badge = document.createElement('span');
+    badge.className = 'retailer-badge retailer-badge-' + (isWalmartProduct ? 'wmt' : 'tgt');
+    badge.textContent = isWalmartProduct ? 'WMT' : 'TGT';
+    const urlText = document.createTextNode(' ' + p.url);
+    urlRow.appendChild(badge);
+    urlRow.appendChild(urlText);
 
     li.appendChild(topRow);
     li.appendChild(urlRow);
+
+    // OID row — Walmart only
+    if (isWalmartProduct) {
+      const oidRow = document.createElement('div');
+      oidRow.className = 'product-item-oid';
+      const oidInput = document.createElement('input');
+      oidInput.type = 'text';
+      oidInput.className = 'product-oid-edit';
+      oidInput.placeholder = 'OID (optional)';
+      oidInput.value = p.oid || '';
+      oidInput.disabled = monitorActive;
+      oidInput.setAttribute('aria-label', 'Walmart Offer ID');
+      oidInput.addEventListener('change', () => {
+        products[i].oid = oidInput.value.trim() || null;
+        saveProducts();
+      });
+      oidRow.appendChild(oidInput);
+      li.appendChild(oidRow);
+    }
+
     productListEl.appendChild(li);
   });
+  // Keep Walmart tab list in sync
+  renderWalmartProducts();
 }
 
 function readDropExpectedAtValue() {
@@ -676,7 +880,7 @@ function addProduct() {
 
   if (!/^https?:\/\/(www\.)?target\.com\/p\//i.test(url)) {
     productUrlInput.classList.add('error');
-    showToast('Use a Target product URL (/p/…)');
+    showToast('Use a Target product URL (/p/…) — Walmart goes on the Walmart tab');
     setTimeout(() => productUrlInput.classList.remove('error'), 1500);
     return;
   }
@@ -690,10 +894,13 @@ function addProduct() {
   }
 
   const nameInputEl = $('productName');
-  const customName = nameInputEl?.value.trim() || '';
-  products.push({ url, qty: 1, name: customName || extractProductName(url) });
+  const oidInputEl  = $('productOid');
+  const customName  = nameInputEl?.value.trim() || '';
+  const customOid   = oidInputEl?.value.trim() || '';
+  products.push({ url, qty: 1, name: customName || extractProductName(url), oid: customOid || null });
   productUrlInput.value = '';
   if (nameInputEl) nameInputEl.value = '';
+  if (oidInputEl)  oidInputEl.value  = '';
   saveProducts();
   renderProducts();
   showToast('Added to list');
@@ -702,6 +909,229 @@ function addProduct() {
 addProductBtn.addEventListener('click', addProduct);
 productUrlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addProduct();
+});
+
+// ─── WALMART TAB ─────────────────────────────────────────────────────────────
+
+let wmEditIndex = -1; // -1 = adding new, >=0 = editing existing
+
+function wmSetEditMode(index) {
+  wmEditIndex = index;
+  const label   = $('wmFormLabel');
+  const addBtn  = $('wmAddProductBtn');
+  const cancelBtn = $('wmCancelEditBtn');
+  if (index >= 0) {
+    if (label)   { label.textContent = 'Edit product'; label.className = 'wm-form-label editing'; }
+    if (addBtn)  addBtn.textContent = 'Update product';
+    if (cancelBtn) cancelBtn.style.display = '';
+  } else {
+    if (label)   { label.textContent = 'Add product'; label.className = 'wm-form-label'; }
+    if (addBtn)  addBtn.textContent = 'Save product';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    wmClearForm();
+  }
+}
+
+function wmClearForm() {
+  const u = $('wmProductUrl');  if (u) u.value = '';
+  const o = $('wmProductOid');  if (o) o.value = '';
+  const n = $('wmProductName'); if (n) n.value = '';
+  const q = $('wmProductQty');  if (q) q.value = '1';
+  wmSaveDraft();
+}
+
+// Auto-save draft so popup closing never loses partially-entered data
+function wmSaveDraft() {
+  if (!hasChromeStorage()) return;
+  const draft = {
+    url:  ($('wmProductUrl')?.value  || '').trim(),
+    oid:  ($('wmProductOid')?.value  || '').trim(),
+    name: ($('wmProductName')?.value || '').trim(),
+    qty:  $('wmProductQty')?.value || '1',
+  };
+  chrome.storage.local.set({ wmDraft: draft }).catch(() => {});
+}
+
+function wmRestoreDraft(draft) {
+  if (!draft) return;
+  if (draft.url  && $('wmProductUrl'))  $('wmProductUrl').value  = draft.url;
+  if (draft.oid  && $('wmProductOid'))  $('wmProductOid').value  = draft.oid;
+  if (draft.name && $('wmProductName')) $('wmProductName').value = draft.name;
+  if (draft.qty  && $('wmProductQty'))  $('wmProductQty').value  = draft.qty;
+}
+
+['wmProductUrl','wmProductOid','wmProductName','wmProductQty'].forEach(id => {
+  $(`${id}`)?.addEventListener('input', wmSaveDraft);
+  $(`${id}`)?.addEventListener('change', wmSaveDraft);
+});
+
+function addWalmartProduct() {
+  const url  = ($('wmProductUrl')?.value  || '').trim();
+  const name = ($('wmProductName')?.value || '').trim();
+  const oid  = ($('wmProductOid')?.value  || '').trim();
+  const qty  = parseInt($('wmProductQty')?.value || '1', 10);
+
+  if (!url) { showToast('Paste a Walmart URL first'); return; }
+
+  if (wmEditIndex >= 0 && wmEditIndex < products.length) {
+    // Update existing
+    products[wmEditIndex] = { ...products[wmEditIndex], url, name: name || extractProductName(url), oid: oid || null, qty };
+    showToast('Updated');
+  } else {
+    // Add new
+    products.push({ url, qty, name: name || extractProductName(url), oid: oid || null });
+    showToast('Added');
+  }
+
+  wmSetEditMode(-1);
+  chrome.storage.local.set({ wmDraft: null }).catch(() => {});
+  saveProducts();
+  renderProducts();
+}
+
+function renderWalmartProducts() {
+  const listEl  = $('wmProductList');
+  const emptyEl = $('wmProductListEmpty');
+  if (!listEl) return;
+  const wmProducts = products.filter(p => /walmart\.com/i.test(p.url));
+  if (emptyEl) emptyEl.hidden = wmProducts.length > 0;
+  listEl.innerHTML = '';
+  wmProducts.forEach((p) => {
+    const i = products.indexOf(p);
+    const li = document.createElement('li');
+    li.className = 'product-item';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'product-item-top';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;cursor:pointer';
+    nameSpan.textContent = p.name || extractProductName(p.url);
+    nameSpan.title = 'Click to edit';
+
+    const badges = document.createElement('span');
+    badges.className = 'inline-hint';
+    badges.style.flexShrink = '0';
+    badges.textContent = `qty ${p.qty}`;
+    if (p.oid) {
+      const ob = document.createElement('span');
+      ob.style.cssText = 'color:#0071ce;margin-left:4px';
+      ob.textContent = 'OID';
+      badges.appendChild(ob);
+    }
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'harvest-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.style.cssText = 'font-size:10px;padding:2px 6px;flex-shrink:0';
+    editBtn.addEventListener('click', () => {
+      const u = $('wmProductUrl');  if (u) u.value = p.url;
+      const o = $('wmProductOid');  if (o) o.value = p.oid || '';
+      const n = $('wmProductName'); if (n) n.value = p.name || '';
+      const q = $('wmProductQty');  if (q) q.value = String(p.qty || 1);
+      wmSetEditMode(i);
+      wmSaveDraft();
+      $('wmProductUrl')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $('wmProductUrl')?.focus();
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-remove';
+    removeBtn.textContent = '×';
+    removeBtn.setAttribute('aria-label', 'Remove');
+    removeBtn.addEventListener('click', () => {
+      if (wmEditIndex === i) wmSetEditMode(-1);
+      products.splice(i, 1);
+      saveProducts();
+      renderProducts();
+    });
+
+    topRow.appendChild(nameSpan);
+    topRow.appendChild(badges);
+    topRow.appendChild(editBtn);
+    topRow.appendChild(removeBtn);
+    li.appendChild(topRow);
+    listEl.appendChild(li);
+  });
+}
+
+$('wmAddProductBtn')?.addEventListener('click', addWalmartProduct);
+$('wmCancelEditBtn')?.addEventListener('click', () => wmSetEditMode(-1));
+$('wmProductUrl')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addWalmartProduct(); });
+
+// Walmart drop time — synced with Monitor tab's dropExpectedAt
+$('wmDropExpectedAt')?.addEventListener('change', () => {
+  const v = $('wmDropExpectedAt').value;
+  if (dropExpectedAtIn) dropExpectedAtIn.value = v;
+  saveProducts();
+  formatDropCountdown(v);
+  wmFormatDropCountdown(v);
+});
+
+function wmFormatDropCountdown(iso) {
+  const el = $('wmDropCountdown');
+  if (!el || !iso) { if (el) el.textContent = ''; return; }
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) { el.textContent = ''; return; }
+  const d = t - Date.now();
+  if (d < 0 && Date.now() - t <= 3 * 60 * 1000) { el.textContent = 'In drop window — fast polling'; return; }
+  if (d < 0) { el.textContent = 'Drop time passed'; return; }
+  const s = Math.floor(d / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  el.textContent = h > 0 ? `${h}h ${m % 60}m until drop` : m > 0 ? `${m}m ${s % 60}s until drop` : `${s}s until drop`;
+}
+
+// Walmart Start/Stop button — mirrors the main toggleMonitor
+$('wmMonitorBtn')?.addEventListener('click', () => {
+  // Sync drop time from Walmart tab before toggling
+  const wmDrop = $('wmDropExpectedAt')?.value;
+  if (wmDrop && dropExpectedAtIn) dropExpectedAtIn.value = wmDrop;
+  toggleMonitor();
+});
+
+function updateWmMonitorBtn() {
+  const btn = $('wmMonitorBtn');
+  const status = $('wmMonitorStatus');
+  if (!btn) return;
+  btn.textContent = monitorActive ? 'Stop monitoring' : 'Start monitoring';
+  btn.style.background = monitorActive ? '#333' : '#0071ce';
+  btn.style.borderColor = monitorActive ? '#333' : '#0071ce';
+  if (status) {
+    const mainStatus = $('monitorStatus');
+    status.textContent = mainStatus?.textContent || '';
+    status.className = 'monitor-status-panel' + (monitorActive ? ' is-live' : '');
+  }
+}
+
+// Grab URL from the current active tab
+$('wmGrabTabBtn')?.addEventListener('click', async () => {
+  try {
+    const allActive = await chrome.tabs.query({ active: true });
+    const tab =
+      allActive.find(t => /walmart\.com\/ip\//i.test(t.url || '')) ||
+      allActive.find(t => !/^chrome(-extension)?:\/\//i.test(t.url || ''));
+    if (!tab?.url) { showToast('No active tab found'); return; }
+    const urlEl = $('wmProductUrl');
+    if (urlEl) {
+      urlEl.value = tab.url;
+      wmSaveDraft();
+      urlEl.focus();
+      showToast('URL loaded');
+    }
+  } catch { showToast('Could not read tab URL'); }
+});
+
+// Pop out — opens the popup as a standalone window that stays open
+$('popoutBtn')?.addEventListener('click', () => {
+  chrome.windows.create({
+    url: chrome.runtime.getURL('popup.html'),
+    type: 'popup',
+    width: 440,
+    height: 680,
+  });
 });
 
 async function toggleMonitor() {
@@ -726,6 +1156,11 @@ async function toggleMonitor() {
       products,
       refreshInterval: parseInt(refreshIntervalIn.value, 10) || 1,
       dropExpectedAt: readDropExpectedAtValue(),
+      walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
+      highStockOnly: !!$('highStockOnly')?.checked,
+      highStockThreshold: $('highStockThreshold')
+        ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
+        : 10,
     });
     monitorActive = true;
     updateMonitorUI();
@@ -742,6 +1177,14 @@ function updateMonitorUI() {
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
   if (dropExpectedAtIn) dropExpectedAtIn.disabled = monitorActive;
+  const hsOnlyEl = $('highStockOnly');
+  if (hsOnlyEl) hsOnlyEl.disabled = monitorActive;
+  const hsThrEl = $('highStockThreshold');
+  if (hsThrEl) hsThrEl.disabled = monitorActive;
+  // Sync Walmart tab drop time display
+  const wmDrop = $('wmDropExpectedAt');
+  if (wmDrop && dropExpectedAtIn?.value) wmDrop.value = dropExpectedAtIn.value;
+  updateWmMonitorBtn();
   renderProducts();
 }
 
@@ -765,6 +1208,7 @@ async function pollStatus() {
       if (parts.length) textParts.push(parts.join(' · '));
       if (retryStatus) textParts.push(retryStatus);
       monitorStatusEl.textContent = textParts.join(' | ');
+      void refreshHarvestStatus();
     } else if (monitorActive) {
       monitorActive = false;
       updateMonitorUI();
@@ -844,8 +1288,22 @@ async function loadMonitorData() {
   products = monitor.products || [];
   monitorActive = !!monitor.active;
   if (monitor.refreshInterval) refreshIntervalIn.value = monitor.refreshInterval;
+  if ($('highStockOnly')) {
+    $('highStockOnly').checked = !!monitor.highStockOnly;
+    const hsr = $('highStockThresholdRow');
+    if (hsr) hsr.style.display = $('highStockOnly').checked ? '' : 'none';
+  }
+  if ($('highStockThreshold') && monitor.highStockThreshold != null) {
+    $('highStockThreshold').value = String(monitor.highStockThreshold);
+  }
   if (dropExpectedAtIn && monitor.dropExpectedAt) {
     dropExpectedAtIn.value = monitor.dropExpectedAt;
+  }
+  // Sync Walmart tab drop time
+  const wmDrop = $('wmDropExpectedAt');
+  if (wmDrop && monitor.dropExpectedAt) {
+    wmDrop.value = monitor.dropExpectedAt;
+    wmFormatDropCountdown(monitor.dropExpectedAt);
   }
 
   renderProducts();
@@ -853,6 +1311,10 @@ async function loadMonitorData() {
   formatDropCountdown(monitor.dropExpectedAt || readDropExpectedAtValue() || '');
   if (monitorActive) startStatusPoll();
   else pollStatus();
+
+  // Restore Walmart draft fields (data entered before popup closed)
+  const { wmDraft } = await chrome.storage.local.get('wmDraft').catch(() => ({}));
+  if (wmDraft?.url || wmDraft?.oid) wmRestoreDraft(wmDraft);
 }
 
 if (dropExpectedAtIn) {
@@ -867,3 +1329,50 @@ setInterval(() => {
 }, 1000);
 
 loadMonitorData();
+
+// ─── SETTINGS EXPORT / IMPORT ────────────────────────────────────────────────
+
+async function exportSettings() {
+  if (!hasChromeStorage()) { showToast('Not available outside extension popup'); return; }
+  try {
+    const data = await chrome.storage.local.get(null);
+    const { monitor, checkoutTelemetry, checkoutSpeeds, bgApiKey, bgRedskyBase, wmDraft, ...exportable } = data;
+    const json = JSON.stringify(exportable, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tch-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Settings exported');
+  } catch (e) {
+    showToast('Export failed');
+    console.error('[TCH popup] export failed', e);
+  }
+}
+
+async function importSettings() {
+  const fileInput = $('importFileInput');
+  if (!fileInput) return;
+  fileInput.onchange = async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null) throw new Error('not an object');
+      await chrome.storage.local.set(parsed);
+      showToast('Settings imported — reloading…');
+      setTimeout(() => location.reload(), 800);
+    } catch (e) {
+      showToast('Import failed — check file format');
+      console.error('[TCH popup] import failed', e);
+    }
+    fileInput.value = '';
+  };
+  fileInput.click();
+}
+
+$('exportSettingsBtn')?.addEventListener('click', exportSettings);
+$('importSettingsBtn')?.addEventListener('click', importSettings);

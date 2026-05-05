@@ -7,7 +7,7 @@
     "smoke": "node run.mjs",
     "e2e": "node extension-e2e.mjs",
     "functional": "node extension-functional.mjs",
-    "test:extension": "node extension-e2e.mjs && node extension-functional.mjs",
+    "test:extension": "node extension-e2e.mjs && node extension-functional.mjs && node review-dedup-simulation.mjs",
     "manual-account": "node manual-account-test.mjs",
     "checkout-rehearsal": "node checkout-rehearsal.mjs"
   },

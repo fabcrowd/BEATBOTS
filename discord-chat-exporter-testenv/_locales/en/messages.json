@@ -1,0 +1,473 @@
+{
+   "action_default_title": {
+      "message": "Unlocked Discord Exporter"
+   },
+   "archive_manager_back_btn": {
+      "message": "Back to Studio"
+   },
+   "archive_manager_browse_btn": {
+      "message": "Or browse files..."
+   },
+   "archive_manager_drop_desc": {
+      "message": "Combined chunks are deduplicated by message ID. Supported: Discord export HTML, legacy .chatlog bundles."
+   },
+   "archive_manager_drop_title": {
+      "message": "Drop HTML files here"
+   },
+   "archive_manager_subtitle": {
+      "message": "Merge multiple HTML exports into one archive."
+   },
+   "archive_manager_title": {
+      "message": "Archive Manager"
+   },
+   "chrome_extension_description": {
+      "message": "Securely archive Discord history to HTML or XLSX. Precise sync with folder organization and date range selection."
+   },
+   "chrome_extension_name": {
+      "message": "Unlocked Discord Exporter"
+   },
+   "common_cancel": {
+      "message": "Cancel"
+   },
+   "common_click_here": {
+      "message": "Click here"
+   },
+   "common_close": {
+      "message": "Close"
+   },
+   "common_dash": {
+      "message": "—"
+   },
+   "common_dismiss": {
+      "message": "Dismiss"
+   },
+   "common_please_wait": {
+      "message": "Please wait..."
+   },
+   "common_retry": {
+      "message": "Retry"
+   },
+   "common_support": {
+      "message": "Support"
+   },
+   "common_verify": {
+      "message": "Verify"
+   },
+   "copy_path": {
+      "message": "Copy path"
+   },
+   "dash_auto_refresh_exhausted": {
+      "message": "Auto-refresh failed repeatedly. Make sure the channel page is open in the foreground, or reopen the extension from the toolbar."
+   },
+   "dash_backup_channel_title": {
+      "message": "Back up this channel"
+   },
+   "dash_backup_dm_title": {
+      "message": "Back up this conversation"
+   },
+   "dash_channels_heading": {
+      "message": "Channels"
+   },
+   "dash_connecting_discord_tab": {
+      "message": "Connecting to Discord tab…"
+   },
+   "dash_connecting_discord_waiting": {
+      "message": "Connecting to Discord tab, please wait…"
+   },
+   "dash_date_end": {
+      "message": "End"
+   },
+   "dash_date_start": {
+      "message": "Start"
+   },
+   "dash_download_path": {
+      "message": "Downloads / $1 / $2"
+   },
+   "dash_export_format": {
+      "message": "Export format"
+   },
+   "dash_export_format_html": {
+      "message": "HTML"
+   },
+   "dash_export_format_xlsx": {
+      "message": "XLSX"
+   },
+   "dash_export_locating": {
+      "message": "Fetching messages…"
+   },
+   "dash_export_locating_date": {
+      "message": "Scan position: $1"
+   },
+   "dash_first_export_hint": {
+      "message": "Pick a date range below, then run Start Sync to create your first export and timeline."
+   },
+   "dash_folder_exports_checkbox_label": {
+      "message": "Save exports in folders by server and channel"
+   },
+   "dash_folder_path_hint": {
+      "message": "Files go under Downloads → Server → Channel → filename"
+   },
+   "dash_format_html_split": {
+      "message": "Large exports are split into multiple HTML files."
+   },
+   "dash_free_plan_quota": {
+      "message": "Free plan: $1 / $2 messages exported"
+   },
+   "dash_last_backup_completed_at": {
+      "message": "Last backup completed at $1."
+   },
+   "dash_last_download": {
+      "message": "Last download"
+   },
+   "dash_last_synced_prefix": {
+      "message": "Last synced · "
+   },
+   "dash_legend_backed_up": {
+      "message": "Backed Up"
+   },
+   "dash_legend_capped": {
+      "message": "Capped (Limit Reached)"
+   },
+   "dash_legend_missing_gaps": {
+      "message": "Missing Gaps"
+   },
+   "dash_mode_continuous": {
+      "message": "Continuous"
+   },
+   "dash_mode_label": {
+      "message": "Mode"
+   },
+   "dash_mode_manual": {
+      "message": "Manual"
+   },
+   "dash_no_backup_in_range": {
+      "message": "No backup in this range"
+   },
+   "dash_open_extension_from_toolbar": {
+      "message": "Open this extension from the Discord channel or DM page in the toolbar to connect."
+   },
+   "dash_preset_last_days": {
+      "message": "Last $1 days"
+   },
+   "dash_ready_to_backup": {
+      "message": "You're ready to back up."
+   },
+   "dash_remove_server_aria": {
+      "message": "Remove server from backup list"
+   },
+   "dash_remove_server_title": {
+      "message": "Remove server from backup list"
+   },
+   "dash_segment_n_messages_backed": {
+      "message": "$1 messages backed up"
+   },
+   "dash_segment_one_message_backed": {
+      "message": "1 message backed up"
+   },
+   "dash_sync_loading": {
+      "message": "LOADING"
+   },
+   "dash_sync_packaging": {
+      "message": "PACKAGING"
+   },
+   "dash_sync_queued": {
+      "message": "QUEUED"
+   },
+   "dash_sync_staging": {
+      "message": "STAGING..."
+   },
+   "dash_sync_start": {
+      "message": "START SYNC"
+   },
+   "dash_sync_syncing_pct": {
+      "message": "SYNCING $1%"
+   },
+   "dash_sync_up_to_date": {
+      "message": "UP TO DATE"
+   },
+   "dash_syncing_from_to_now": {
+      "message": "Syncing from $1 to Now"
+   },
+   "dash_time_h_ago": {
+      "message": "$1 h ago"
+   },
+   "dash_time_just_now": {
+      "message": "just now"
+   },
+   "dash_time_min_ago": {
+      "message": "$1 min ago"
+   },
+   "dash_timeline_backed_aria": {
+      "message": "Backed up"
+   },
+   "dash_timeline_backfill_aria": {
+      "message": "Backfill older range"
+   },
+   "dash_timeline_backfill_title": {
+      "message": "Backfill older range (30 days)"
+   },
+   "dash_timeline_gap_aria": {
+      "message": "Missing gap"
+   },
+   "dash_title_extension_icon": {
+      "message": "Unlocked Discord Exporter"
+   },
+   "dash_tooltip_backed_range": {
+      "message": "Backed up: $1 - $2"
+   },
+   "dash_tooltip_capped_segment": {
+      "message": "Free tier limit ($1 messages) reached; newer messages were not synced."
+   },
+   "dash_tooltip_leading_range": {
+      "message": "Pending sync: $1 - $2 (click to set range)"
+   },
+   "dash_tooltip_pending_continue": {
+      "message": "Pending sync: $1 - $2 (click to sync remaining)"
+   },
+   "dash_tooltip_pending_set_range": {
+      "message": "Pending sync: $1 - $2 (click to set range)"
+   },
+   "dashboard_page_title": {
+      "message": "Unlocked Discord Exporter - Dashboard"
+   },
+   "empty_range_notice_text": {
+      "message": "No messages in the selected date range."
+   },
+   "export_bot_no": {
+      "message": "No"
+   },
+   "export_bot_yes": {
+      "message": "Yes"
+   },
+   "export_col_attachments": {
+      "message": "Attachments"
+   },
+   "export_col_author_avatar": {
+      "message": "Author avatar"
+   },
+   "export_col_author_tag": {
+      "message": "Author tag"
+   },
+   "export_col_author_username": {
+      "message": "Author username"
+   },
+   "export_col_content": {
+      "message": "Content"
+   },
+   "export_col_date": {
+      "message": "Date"
+   },
+   "export_col_is_bot": {
+      "message": "Is bot"
+   },
+   "export_col_mentions": {
+      "message": "Mentions"
+   },
+   "export_embed_n": {
+      "message": "Embed $1"
+   },
+   "export_embed_n_image": {
+      "message": "Embed $1 image"
+   },
+   "export_embed_n_thumbnail": {
+      "message": "Embed $1 thumbnail"
+   },
+   "export_embed_n_url": {
+      "message": "Embed $1 url"
+   },
+   "export_embed_n_video": {
+      "message": "Embed $1 video"
+   },
+   "export_free_xlsx_cap_row": {
+      "message": "Free tier can export $1 messages. Upgrade to PRO to remove the limit."
+   },
+   "export_workbook_creator": {
+      "message": "Unlocked Discord Exporter"
+   },
+   "export_xlsx_sheet_chatlog": {
+      "message": "chatlog"
+   },
+   "folder_exports_pro_feature_cta": {
+      "message": "PRO feature. Upgrade to unlock hierarchical exports."
+   },
+   "folder_exports_pro_tooltip": {
+      "message": "PRO only: Keep your archive organized with hierarchical folders."
+   },
+   "free_export_cap_note": {
+      "message": "Free export: up to $1 messages. PRO removes the limit."
+   },
+   "license_token_format_invalid": {
+      "message": "Invalid license key format. Use only lowercase letters and digits: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   },
+   "license_token_label": {
+      "message": "License Token"
+   },
+   "license_token_placeholder": {
+      "message": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   },
+   "pop_loading_checking_tab": {
+      "message": "Checking current tab..."
+   },
+   "pop_need_channel_subtitle": {
+      "message": "You are on Discord, but not inside a backup-ready conversation yet."
+   },
+   "pop_need_channel_title": {
+      "message": "Open a channel or DM first"
+   },
+   "pop_not_discord_title": {
+      "message": "Discord session not detected"
+   },
+   "pop_open_discord_button": {
+      "message": "Open Discord in browser"
+   },
+   "pop_step_discord_web": {
+      "message": "Discord Web"
+   },
+   "pop_step_keep_tab": {
+      "message": "Stay on that Discord tab, then click this extension icon again."
+   },
+   "pop_step_open_channel_part1": {
+      "message": "Enter a text channel or DM in your target server so the address bar shows the"
+   },
+   "pop_step_open_channel_part2": {
+      "message": "path."
+   },
+   "pop_step_open_channel_path": {
+      "message": "/channels/..."
+   },
+   "pop_step_open_discord_prefix": {
+      "message": "Open"
+   },
+   "pop_step_open_discord_suffix": {
+      "message": "in your browser and make sure you are signed in."
+   },
+   "pro_modal_already_have_token": {
+      "message": "Already have a token?"
+   },
+   "pro_modal_check_loading": {
+      "message": "Verifying license with server..."
+   },
+   "pro_modal_feature_archive_depth_desc": {
+      "message": "Break the $1-message barrier. Sync entire server histories in one click."
+   },
+   "pro_modal_feature_archive_depth_title": {
+      "message": "Infinite Archive Depth"
+   },
+   "pro_modal_feature_smart_folder_desc_prefix": {
+      "message": "Automatically organize exports into hierarchical"
+   },
+   "pro_modal_feature_smart_folder_desc_suffix": {
+      "message": "folders."
+   },
+   "pro_modal_feature_smart_folder_title": {
+      "message": "Smart Folder Organization"
+   },
+   "pro_modal_free_cap_note": {
+      "message": "Up to $1 messages on Free. PRO removes the limit."
+   },
+   "pro_modal_header_subtitle_free": {
+      "message": "Compare plans and activate your license."
+   },
+   "pro_modal_header_subtitle_pro": {
+      "message": "Manage your license and subscription."
+   },
+   "pro_modal_header_subtitle_trial": {
+      "message": "Manage your license during the trial."
+   },
+   "pro_modal_hierarchy_tail": {
+      "message": "hierarchy."
+   },
+   "pro_modal_manage_billing": {
+      "message": "manage your billing."
+   },
+   "pro_modal_member_title": {
+      "message": "You're a PRO member"
+   },
+   "pro_modal_plan_free": {
+      "message": "Free"
+   },
+   "pro_modal_plan_free_limit": {
+      "message": "Up to $1 messages per sync."
+   },
+   "pro_modal_plan_free_manual": {
+      "message": "Manual file management."
+   },
+   "pro_modal_plan_get_started": {
+      "message": "Get started"
+   },
+   "pro_modal_plan_pro": {
+      "message": "PRO"
+   },
+   "pro_modal_plan_pro_headline": {
+      "message": "Unlimited + Smart folders"
+   },
+   "pro_modal_plan_pro_unlimited_tail": {
+      "message": "messages per sync."
+   },
+   "pro_modal_smart_folder_org": {
+      "message": "Smart Folder Organization"
+   },
+   "pro_modal_subscription_canceled": {
+      "message": "Your subscription has been canceled."
+   },
+   "pro_modal_title": {
+      "message": "PRO & License"
+   },
+   "pro_modal_trial_active": {
+      "message": "Trial PRO active"
+   },
+   "pro_modal_trial_ends_on": {
+      "message": "Your trial ends on $1."
+   },
+   "pro_modal_unlimited_word": {
+      "message": "Unlimited"
+   },
+   "pro_modal_unsubscribe": {
+      "message": "Unsubscribe"
+   },
+   "pro_modal_why_choose_pro": {
+      "message": "Why teams choose PRO"
+   },
+   "pro_settings_title": {
+      "message": "PRO Settings"
+   },
+   "show_in_folder": {
+      "message": "Show in folder"
+   },
+   "status_free": {
+      "message": "Free"
+   },
+   "status_pro": {
+      "message": "PRO"
+   },
+   "status_trial": {
+      "message": "Trial"
+   },
+   "token_check_error_generic": {
+      "message": "Could not verify your license token. Please try again."
+   },
+   "token_check_error_http": {
+      "message": "License server returned an error. Please try again later."
+   },
+   "token_check_error_network": {
+      "message": "Could not reach the license server. Check your network and tap Retry."
+   },
+   "token_check_error_timeout": {
+      "message": "License server did not respond in time. Check your connection and tap Retry."
+   },
+   "token_save_error": {
+      "message": "Could not save your token locally. Please try again."
+   },
+   "trial_waiting_desc": {
+      "message": "The review page has opened in a new tab. Complete the flow there; this page tracks time in the background and then enables Verify (the extension cannot confirm whether you actually submitted a review)."
+   },
+   "trial_waiting_title": {
+      "message": "Waiting for review completion"
+   },
+   "upgrade_to_pro_btn": {
+      "message": "Upgrade to PRO"
+   },
+   "view_pro_link": {
+      "message": "View PRO"
+   }
+}

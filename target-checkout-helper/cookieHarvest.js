@@ -11,7 +11,7 @@ let memoryHarvestFallback = [];
 const DEFAULT_HARVEST_CONFIG = {
   harvestingEnabled: false,
   harvestsPerPageLoad: 1,
-  expirationMinutes: 3,
+  expirationMinutes: 8,
   removalOrder: 'lifo',
   dontStopHarvesting: false,
   applyNextBeforeCheckout: false,
@@ -160,7 +160,9 @@ async function tchApplyNextSnapshot() {
   const cfg = await tchGetHarvestConfig();
   let entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
   if (!entries.length) return { ok: false, reason: 'empty', remaining: 0 };
-  const idx = cfg.removalOrder === 'fifo' ? 0 : entries.length - 1;
+  // Prefer ATC snapshots — they carry cart-session authority vs. homepage/keepalive cookies.
+  const atcIdx = entries.findIndex(e => e.kind === 'atc');
+  const idx = atcIdx !== -1 ? atcIdx : (cfg.removalOrder === 'fifo' ? 0 : entries.length - 1);
   const snap = entries[idx];
   const setUrl = 'https://www.target.com';
   for (const c of snap.cookies || []) {

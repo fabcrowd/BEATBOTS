@@ -163,14 +163,7 @@
           return;
         }
         attachedTabId = tabId;
-        chrome.debugger.sendCommand({ tabId: tabId }, 'Network.enable', {}, function () {
-          if (chrome.runtime.lastError) {
-            root.tchDebuggerDetach();
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          resolve({ ok: true, tabId: tabId });
-        });
+        resolve({ ok: true, tabId: tabId });
       });
     });
   }
