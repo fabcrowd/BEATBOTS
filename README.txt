@@ -6,7 +6,7 @@ Chrome extension to automate Target checkout flow from product page to order rev
 INSTALLATION (Windows, easiest)
 -------------------------------
 
-After using GitHub "Code -> Download ZIP":
+After using GitHub "Code -> Download ZIP": Green button at the top
 
 1) Extract the downloaded repository ZIP.
 2) In the extracted top-level folder, double-click:
