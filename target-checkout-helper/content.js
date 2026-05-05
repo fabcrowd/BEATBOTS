@@ -56,6 +56,7 @@ async function getSettings() {
       'extraProductTcin',
       'highStockOnly',
       'highStockThreshold',
+      'targetMaxPrice',
     ]);
   }
   return settingsCache;
@@ -1581,10 +1582,122 @@ function buildFulfillmentApiUrl(productUrl) {
   return `${baseUrl}/${endpoint}?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
 }
 
+/** Same logic as background extractTargetRetailPrice — fulfillment-only responses often omit this. */
+function extractTargetRetailPriceFromPayload(payload) {
+  const product = payload?.data?.product;
+  if (!product || typeof product !== 'object') return null;
+  const price = product.price;
+  if (!price || typeof price !== 'object') return null;
+  const nums = [
+    price.current_retail,
+    price.reg_retail,
+    price.reg_min_retail,
+    price.reg_max_retail,
+    price.location_based_minimum_advertised_price,
+  ];
+  for (const c of nums) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const fp =
+    price.formatted_current_price
+    || price.formatted_comparison_price
+    || price.display_string;
+  if (typeof fp === 'string') {
+    const m = fp.replace(/[$,\s]/g, '').match(/\d+(?:\.\d{1,2})?/);
+    if (m) {
+      const x = parseFloat(m[0]);
+      if (Number.isFinite(x) && x > 0) return x;
+    }
+  }
+  return null;
+}
+
+/** Parse Target product-page HTML / embedded JSON / ld+json for a retail number (USD). */
+function extractTargetPriceFromLdJson(html) {
+  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const raw = (m[1] || '').trim();
+    if (!raw) continue;
+    try {
+      const j = JSON.parse(raw);
+      const nodes = Array.isArray(j) ? j : [j];
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object') continue;
+        const t = node['@type'];
+        const types = Array.isArray(t) ? t : t ? [t] : [];
+        if (!types.includes('Product')) continue;
+        const offers = node.offers;
+        if (!offers) continue;
+        const off = Array.isArray(offers) ? offers[0] : offers;
+        const p = off?.price ?? off?.lowPrice ?? off?.highPrice;
+        const n = typeof p === 'string'
+          ? parseFloat(p.replace(/[$,\s]/g, ''))
+          : Number(p);
+        if (Number.isFinite(n) && n > 0 && n < 1e6) return n;
+      }
+    } catch (_) { /* skip */ }
+  }
+  return null;
+}
+
+function extractTargetPriceFromEmbeddedJson(html) {
+  const patterns = [
+    /"current_retail"\s*:\s*(?!null\b)(\d+(?:\.\d{1,4})?)\b/,
+    /"current_retail_min"\s*:\s*(?!null\b)(\d+(?:\.\d{1,4})?)\b/,
+    /"formatted_current_price"\s*:\s*"\s*\$?\s*([\d,]+\.?\d*)\s*"/,
+    /"formatted_comparison_price"\s*:\s*"\s*\$?\s*([\d,]+\.?\d*)\s*"/,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (!m?.[1]) continue;
+    const x = parseFloat(String(m[1]).replace(/,/g, ''));
+    if (Number.isFinite(x) && x > 0 && x < 1e6) return x;
+  }
+  return null;
+}
+
+function extractTargetPriceFromHtml(html) {
+  if (!html || typeof html !== 'string') return null;
+  const ld = extractTargetPriceFromLdJson(html);
+  if (ld != null) return ld;
+  const emb = extractTargetPriceFromEmbeddedJson(html);
+  if (emb != null) return emb;
+  const ip =
+    html.match(/itemprop=["']price["'][^>]*\bcontent=["']([\d.]+)/i)
+    || html.match(/\bcontent=["']([\d.]+)["'][^>]*\bitemprop=["']price["']/i);
+  if (ip) {
+    const x = parseFloat(ip[1]);
+    if (Number.isFinite(x) && x > 0 && x < 1e6) return x;
+  }
+  return null;
+}
+
+/** When max price is set: allow stock only if HTML price is unknown or ≤ max. */
+function targetStockAllowedWithMaxHtml(html, stockOpts) {
+  const maxP = Number(stockOpts?.targetMaxPrice) || 0;
+  if (maxP <= 0) return true;
+  const pr = extractTargetPriceFromHtml(html);
+  if (pr == null) return true;
+  return pr <= maxP;
+}
+
+/** Live product tab: block ATC / Buy Now when parsed page price exceeds saved max. */
+function targetLivePriceExceedsMax(settings) {
+  const maxP = Number(settings?.targetMaxPrice) || 0;
+  if (maxP <= 0) return false;
+  const html = document.documentElement?.outerHTML || '';
+  const pr = extractTargetPriceFromHtml(html);
+  if (pr == null) return false;
+  return pr > maxP;
+}
+
 function parseFulfillmentStockStatus(payload) {
+  const retailPrice = extractTargetRetailPriceFromPayload(payload);
   const fulfillment = payload?.data?.product?.fulfillment;
   if (!fulfillment || typeof fulfillment !== 'object') {
-    return { result: null, status: '', qty: 0, soldOut: false, oosAllStores: false };
+    return { result: null, status: '', qty: 0, soldOut: false, oosAllStores: false, price: retailPrice };
   }
 
   const shipping = fulfillment.shipping_options || {};
@@ -1600,12 +1713,12 @@ function parseFulfillmentStockStatus(payload) {
     || (oosAllStores && qty <= 0 && !sellable);
 
   if (sellable && !soldOut) {
-    return { result: true, status, qty, soldOut, oosAllStores };
+    return { result: true, status, qty, soldOut, oosAllStores, price: retailPrice };
   }
   if (blocked) {
-    return { result: false, status, qty, soldOut, oosAllStores };
+    return { result: false, status, qty, soldOut, oosAllStores, price: retailPrice };
   }
-  return { result: null, status, qty, soldOut, oosAllStores };
+  return { result: null, status, qty, soldOut, oosAllStores, price: retailPrice };
 }
 
 async function checkStockFromFulfillmentApi(url, timeoutMs = 3000, stockOpts = null) {
@@ -1633,6 +1746,13 @@ async function checkStockFromFulfillmentApi(url, timeoutMs = 3000, stockOpts = n
       const th = Number(stockOpts.highStockThreshold) || 10;
       const q = parsed.qty || 0;
       if (q > 0 && q < th) return 'low_stock';
+    }
+    if (parsed.result === true && stockOpts?.targetMaxPrice > 0) {
+      const maxP = Number(stockOpts.targetMaxPrice) || 0;
+      const pr = parsed.price;
+      if (typeof pr === 'number' && Number.isFinite(pr) && pr > 0 && pr > maxP) return 'price_above_max';
+      // No usable API price — need streamed HTML / ld+json before trusting in-stock + max filter.
+      if (pr == null || !(typeof pr === 'number' && Number.isFinite(pr) && pr > 0)) return null;
     }
     return parsed.result;
   } catch {
@@ -1662,6 +1782,7 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
     stockOpts
   );
   if (fulfillmentResult === 'low_stock') return 'low_stock';
+  if (fulfillmentResult === 'price_above_max') return 'price_above_max';
   if (fulfillmentResult !== null) {
     return fulfillmentResult;
   }
@@ -1702,6 +1823,7 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       if (signals.enabledATCMatch) {
         if (!requireFullParse) {
           clearTimeout(timer); reader.cancel();
+          if (!targetStockAllowedWithMaxHtml(buf, stockOpts)) return 'price_above_max';
           return true;
         }
       } else if (signals.weakInStockMatch && !loggedWeakCandidate) {
@@ -1711,7 +1833,10 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
       // checkStockFromHTML at end checks enabledATCMatch first.
     }
     clearTimeout(timer);
-    return checkStockFromHTML(buf);
+    const stockOk = checkStockFromHTML(buf);
+    if (stockOk !== true) return stockOk;
+    if (!targetStockAllowedWithMaxHtml(buf, stockOpts)) return 'price_above_max';
+    return true;
   } catch {
     clearTimeout(timer);
     return null;
@@ -1732,15 +1857,20 @@ async function handleMonitoredATC(monitor, product) {
   if (settings.useSavedPayment) {
     const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
     if (buyNowBtn && !buyNowBtn.disabled) {
-      console.log('[TCH] monitor: clicking Buy It Now (saved payment mode)');
-      markCheckoutStart('saved');
-      await debuggerClick(buyNowBtn);
-      showToast('Monitor: Buy It Now → checkout…');
-      setNavigationMark('product_to_checkout');
-      // Buy It Now routes directly to checkout; ATC_SUCCESS will be implied
-      // once checkout completes, so send it now to let the background update counts.
-      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
-      return;
+      if (targetLivePriceExceedsMax(settings)) {
+        console.warn('[TCH] monitor: Buy It Now skipped — live price above max');
+        showToast(`Price above max ($${Number(settings.targetMaxPrice).toFixed(2)}) — waiting…`, 'persistent');
+      } else {
+        console.log('[TCH] monitor: clicking Buy It Now (saved payment mode)');
+        markCheckoutStart('saved');
+        await debuggerClick(buyNowBtn);
+        showToast('Monitor: Buy It Now → checkout…');
+        setNavigationMark('product_to_checkout');
+        // Buy It Now routes directly to checkout; ATC_SUCCESS will be implied
+        // once checkout completes, so send it now to let the background update counts.
+        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+        return;
+      }
     }
   }
 
@@ -1771,64 +1901,69 @@ async function handleMonitoredATC(monitor, product) {
   }
 
   if (addBtn && !addBtn.disabled && !pageOOS) {
-    showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
-    await debuggerClick(addBtn);
-    await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
+    if (targetLivePriceExceedsMax(settings)) {
+      console.warn('[TCH] monitor: ATC deferred — live price above max');
+      showToast(`Price above max ($${Number(settings.targetMaxPrice).toFixed(2)}) — waiting…`, 'persistent');
+    } else {
+      showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
+      await debuggerClick(addBtn);
+      await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
 
-    // Decline any protection/coverage upsell modal immediately.
-    setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
+      // Decline any protection/coverage upsell modal immediately.
+      setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
 
-    if (settings.useSavedPayment) {
-      // With saved payment: click "View Cart & Check Out" from the ATC modal for fastest path.
-      let cartConfirmed = false;
-      try {
-        const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
-        setNavigationMark('product_to_checkout');
-        await debuggerClick(viewCartBtn);
-        cartConfirmed = true;
-      } catch {
-        // Modal didn't appear; navigate to checkout directly.
-        setNavigationMark('product_to_checkout');
-        await maybeApplyHarvestedSession(settings);
-        window.location.href = 'https://www.target.com/checkout';
-        cartConfirmed = true;
-      }
-      showToast(`Monitor: Added! → checkout (${currentCount + 1}/${product.qty})`, 'success');
-      console.log(`[TCH] monitor ATC (saved): navigating to checkout`);
-      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
-      return;
-    }
-
-    // Without saved payment: navigate directly to checkout to skip the cart page round-trip.
-    let cartConfirmed = false;
-    try {
-      await waitForAny([
-        { sel: SEL.viewCart },
-        { text: 'view cart' }, { text: 'view cart & check out' },
-        { text: 'item added' }, { text: 'added to cart' },
-      ], 2500);
-      cartConfirmed = true;
-    } catch { /* modal didn't appear — item may still have been added */ }
-
-    markCartReady();
-    chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
-
-    // Extra product trick: visit extra item page before checkout.
-    if (settings.addExtraProduct && settings.extraProductTcin) {
-      const extraTcin = settings.extraProductTcin;
-      const currentTcin = extractTcinFromUrl(location.href);
-      if (currentTcin !== extraTcin) {
-        try { sessionStorage.setItem(EXTRA_ATC_STATE_KEY, 'needed'); } catch {}
-        showToast(`Monitor: Added! → extra item…`, 'persistent');
-        console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}, redirecting to extra TCIN`);
-        window.location.href = `https://www.target.com/p/-/A-${extraTcin}`;
+      if (settings.useSavedPayment) {
+        // With saved payment: click "View Cart & Check Out" from the ATC modal for fastest path.
+        let cartConfirmed = false;
+        try {
+          const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
+          setNavigationMark('product_to_checkout');
+          await debuggerClick(viewCartBtn);
+          cartConfirmed = true;
+        } catch {
+          // Modal didn't appear; navigate to checkout directly.
+          setNavigationMark('product_to_checkout');
+          await maybeApplyHarvestedSession(settings);
+          window.location.href = 'https://www.target.com/checkout';
+          cartConfirmed = true;
+        }
+        showToast(`Monitor: Added! → checkout (${currentCount + 1}/${product.qty})`, 'success');
+        console.log(`[TCH] monitor ATC (saved): navigating to checkout`);
+        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
         return;
       }
-    }
 
-    showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
-    console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}`);
-    return;
+      // Without saved payment: navigate directly to checkout to skip the cart page round-trip.
+      let cartConfirmed = false;
+      try {
+        await waitForAny([
+          { sel: SEL.viewCart },
+          { text: 'view cart' }, { text: 'view cart & check out' },
+          { text: 'item added' }, { text: 'added to cart' },
+        ], 2500);
+        cartConfirmed = true;
+      } catch { /* modal didn't appear — item may still have been added */ }
+
+      markCartReady();
+      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+
+      // Extra product trick: visit extra item page before checkout.
+      if (settings.addExtraProduct && settings.extraProductTcin) {
+        const extraTcin = settings.extraProductTcin;
+        const currentTcin = extractTcinFromUrl(location.href);
+        if (currentTcin !== extraTcin) {
+          try { sessionStorage.setItem(EXTRA_ATC_STATE_KEY, 'needed'); } catch {}
+          showToast(`Monitor: Added! → extra item…`, 'persistent');
+          console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}, redirecting to extra TCIN`);
+          window.location.href = `https://www.target.com/p/-/A-${extraTcin}`;
+          return;
+        }
+      }
+
+      showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
+      console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}`);
+      return;
+    }
   }
 
   // Streaming fetch polling — reads chunks, terminates early on match
@@ -1854,6 +1989,7 @@ async function handleMonitoredATC(monitor, product) {
       const stockOpts = {
         highStockOnly: !!pollSettings.highStockOnly,
         highStockThreshold: Number(pollSettings.highStockThreshold) || 10,
+        targetMaxPrice: Number(pollSettings.targetMaxPrice) || 0,
       };
       const result = await streamingStockCheck(normUrl, 8000, { stockOpts });
       if (result === true) {
@@ -1866,6 +2002,10 @@ async function handleMonitoredATC(monitor, product) {
         if (pollCount % 15 === 0) {
           const th = stockOpts.highStockThreshold;
           showToast(`In stock but below ${th} units (high-stock filter) — waiting…`, 'persistent');
+        }
+      } else if (result === 'price_above_max') {
+        if (pollCount % 15 === 0 && stockOpts.targetMaxPrice > 0) {
+          showToast(`Listed price above $${stockOpts.targetMaxPrice.toFixed(2)} max — waiting…`, 'persistent');
         }
       } else if (result === null) {
         // network error — skip this poll

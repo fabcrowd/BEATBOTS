@@ -223,9 +223,39 @@ const SELLABLE_STATUSES = new Set([
 ]);
 const BLOCKED_RE = /(OUT_OF_STOCK|UNSELLABLE|UNAVAILABLE|NOT_AVAILABLE|NO_INVENTORY|INVENTORY_UNAVAILABLE)/i;
 
-/** @returns {{ stock: boolean | null, qty: number }} */
+/** Best-effort current retail USD from RedSky product node; null when absent (do not gate on unknown). */
+function extractTargetRetailPrice(product) {
+  if (!product || typeof product !== 'object') return null;
+  const price = product.price;
+  if (!price || typeof price !== 'object') return null;
+  const nums = [
+    price.current_retail,
+    price.reg_retail,
+    price.reg_min_retail,
+    price.reg_max_retail,
+    price.location_based_minimum_advertised_price,
+  ];
+  for (const c of nums) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const fp =
+    price.formatted_current_price
+    || price.formatted_comparison_price
+    || price.display_string;
+  if (typeof fp === 'string') {
+    const m = fp.replace(/[$,\s]/g, '').match(/\d+(?:\.\d{1,2})?/);
+    if (m) {
+      const x = parseFloat(m[0]);
+      if (Number.isFinite(x) && x > 0) return x;
+    }
+  }
+  return null;
+}
+
+/** @returns {{ stock: boolean | null, qty: number, price: number | null }} */
 function parseFulfillmentBlock(fulfillment) {
-  if (!fulfillment || typeof fulfillment !== 'object') return { stock: null, qty: 0 };
+  if (!fulfillment || typeof fulfillment !== 'object') return { stock: null, qty: 0, price: null };
   const shipping = fulfillment.shipping_options || {};
   const status = String(shipping.availability_status || '').toUpperCase();
   const qty = Number(shipping.available_to_promise_quantity) || 0;
@@ -233,19 +263,24 @@ function parseFulfillmentBlock(fulfillment) {
   const oosAll  = fulfillment.is_out_of_stock_in_all_store_locations === true;
   const sellable = qty > 0 || SELLABLE_STATUSES.has(status);
   const blocked  = soldOut || BLOCKED_RE.test(status) || (oosAll && qty <= 0 && !sellable);
-  if (sellable && !soldOut) return { stock: true, qty };
-  if (blocked) return { stock: false, qty };
-  return { stock: null, qty };
+  if (sellable && !soldOut) return { stock: true, qty, price: null };
+  if (blocked) return { stock: false, qty, price: null };
+  return { stock: null, qty, price: null };
+}
+
+function mergeTargetStockAndPrice(block, productNode) {
+  const price = extractTargetRetailPrice(productNode);
+  return { ...block, price };
 }
 
 // Parse the batch product_summary_with_fulfillment_v1 response.
-// Returns a Map of tcin (string) → { stock, qty }.
+// Returns a Map of tcin (string) → { stock, qty, price }.
 function parseBatchFulfillmentResponse(payload) {
   const out = new Map();
   const products = payload?.data?.products ?? [];
   for (const p of products) {
     const tcin = String(p.tcin ?? '');
-    if (tcin) out.set(tcin, parseFulfillmentBlock(p.fulfillment));
+    if (tcin) out.set(tcin, mergeTargetStockAndPrice(parseFulfillmentBlock(p.fulfillment), p));
   }
   return out;
 }
@@ -324,7 +359,8 @@ async function checkSingleTcin(tcin, apiKey, redskyBase) {
     if (!res.ok) return null;
     const json = await res.json();
     redskyErrorStreak = 0;
-    return parseFulfillmentBlock(json?.data?.product?.fulfillment);
+    const prod = json?.data?.product;
+    return mergeTargetStockAndPrice(parseFulfillmentBlock(prod?.fulfillment), prod);
   } catch {
     return null;
   }
@@ -481,6 +517,20 @@ async function runBackgroundPoll() {
         }
       }
 
+      const maxPrice = Number(monitor.targetMaxPrice) || 0;
+      if (maxPrice > 0 && tcin) {
+        const p =
+          entry && typeof entry === 'object' && typeof entry.price === 'number'
+            ? entry.price
+            : null;
+        if (p != null && Number.isFinite(p) && p > 0 && p > maxPrice) {
+          if (pollCycles % 60 === 0) {
+            console.log(`[TCH bg] max-price gate: $${p} > $${maxPrice} — skipping ${normUrl.slice(-40)}`);
+          }
+          continue;
+        }
+      }
+
       // Restock detected — navigate the assigned monitor tab.
       const tabId = urlToTabId[normUrl];
       console.log(`[TCH bg] RESTOCK: url=${product.url} tabId=${tabId}`);
@@ -496,6 +546,14 @@ async function runBackgroundPoll() {
             value: entry && typeof entry === 'object'
               ? String(entry.qty ?? '—')
               : '—',
+            inline: true,
+          },
+          {
+            name: 'Retail (API)',
+            value:
+              entry && typeof entry === 'object' && typeof entry.price === 'number'
+                ? `$${entry.price.toFixed(2)}`
+                : '—',
             inline: true,
           },
         ],
@@ -668,6 +726,7 @@ async function maybeRestartEndlessMonitor() {
     {
       highStockOnly: !!monitor.highStockOnly,
       highStockThreshold: Number(monitor.highStockThreshold) || 10,
+      targetMaxPrice: Number(monitor.targetMaxPrice) || 0,
       resetEndlessSuccessCount: false,
     }
   );
@@ -751,6 +810,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         {
           highStockOnly: !!message.highStockOnly,
           highStockThreshold: Number(message.highStockThreshold) || 10,
+          targetMaxPrice: Number(message.targetMaxPrice) || 0,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1019,6 +1079,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   const {
     highStockOnly = false,
     highStockThreshold = 10,
+    targetMaxPrice = 0,
     resetEndlessSuccessCount = true,
   } = opts;
 
@@ -1045,6 +1106,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   if (skipMonitoring) monitor.skipMonitoring = true;
   monitor.highStockOnly = !!highStockOnly;
   monitor.highStockThreshold = Math.max(1, Math.min(999, Number(highStockThreshold) || 10));
+  monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
 
   await chrome.storage.local.set({
     monitor,

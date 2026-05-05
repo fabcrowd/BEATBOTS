@@ -204,6 +204,7 @@ function gatherSettings() {
     highStockThreshold: $('highStockThreshold')
       ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
       : 10,
+    targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
   };
 }
 
@@ -370,6 +371,9 @@ function populateFields(data) {
   const hst = $('highStockThreshold');
   if (hst && typeof data.highStockThreshold === 'number') hst.value = String(data.highStockThreshold);
 
+  const tm = $('targetMaxPrice');
+  if (tm && typeof data.targetMaxPrice === 'number') tm.value = String(data.targetMaxPrice);
+
   renderSpeedComparison(data.checkoutSpeeds);
   void refreshHarvestStatus();
   void checkAccountStatus();
@@ -456,6 +460,7 @@ if (hasChromeStorage()) {
       'endlessLimit',
       'highStockOnly',
       'highStockThreshold',
+      'targetMaxPrice',
     ],
     populateFields
   );
@@ -550,6 +555,7 @@ $('discordWebhook')?.addEventListener('change', autoSaveToggle);
 $('webhookSendFailures')?.addEventListener('change', autoSaveToggle);
 $('endlessLimit')?.addEventListener('change', autoSaveToggle);
 $('highStockThreshold')?.addEventListener('change', autoSaveToggle);
+$('targetMaxPrice')?.addEventListener('change', autoSaveToggle);
 
 $('webhookTestBtn')?.addEventListener('click', async () => {
   if (!hasChromeStorage()) return;
@@ -1161,6 +1167,7 @@ async function toggleMonitor() {
       highStockThreshold: $('highStockThreshold')
         ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
         : 10,
+      targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
     });
     monitorActive = true;
     updateMonitorUI();
@@ -1181,6 +1188,8 @@ function updateMonitorUI() {
   if (hsOnlyEl) hsOnlyEl.disabled = monitorActive;
   const hsThrEl = $('highStockThreshold');
   if (hsThrEl) hsThrEl.disabled = monitorActive;
+  const tmEl = $('targetMaxPrice');
+  if (tmEl) tmEl.disabled = monitorActive;
   // Sync Walmart tab drop time display
   const wmDrop = $('wmDropExpectedAt');
   if (wmDrop && dropExpectedAtIn?.value) wmDrop.value = dropExpectedAtIn.value;
@@ -1295,6 +1304,9 @@ async function loadMonitorData() {
   }
   if ($('highStockThreshold') && monitor.highStockThreshold != null) {
     $('highStockThreshold').value = String(monitor.highStockThreshold);
+  }
+  if ($('targetMaxPrice') && monitor.targetMaxPrice != null) {
+    $('targetMaxPrice').value = String(monitor.targetMaxPrice);
   }
   if (dropExpectedAtIn && monitor.dropExpectedAt) {
     dropExpectedAtIn.value = monitor.dropExpectedAt;

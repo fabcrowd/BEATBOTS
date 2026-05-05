@@ -198,6 +198,11 @@
             <label class="field-label" for="highStockThreshold">Minimum units</label>
             <input type="number" id="highStockThreshold" value="10" min="1" max="999">
           </div>
+          <div class="monitor-field" style="margin-top:8px">
+            <label class="field-label" for="targetMaxPrice">Max price — Target ($)</label>
+            <input type="number" id="targetMaxPrice" value="0" min="0" step="0.01">
+            <span class="inline-hint">Do not proceed when retail is above this (API or page HTML / JSON-LD). 0 = no limit. If no price can be read, we do not block.</span>
+          </div>
           <button type="button" id="monitorBtn" class="btn-monitor">Start monitoring</button>
         </div>
         <div id="monitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
