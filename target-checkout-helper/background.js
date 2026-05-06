@@ -457,6 +457,9 @@ const inQueueUrls    = new Set();
 const navigationLock = new Set();
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
+// NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
+let ntpOffsetMs = 0;
+let lastClockSyncMs = 0;
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   harvestHiddenTabs.delete(tabId);
@@ -573,6 +576,56 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
   return out;
 }
 
+// ─── CLOCK SYNC (millisecond-accurate NTP) ───────────────────────────────────
+// Fetches the server-side time from lm-clock.vercel.app (preferred — ms precision)
+// falling back to the Walmart `Date` response header (second precision). Calculates
+// a local offset so accurateNow() compensates for PC clock drift before drop time.
+
+async function syncServerClock() {
+  const tryFetch = async (url, opts = {}) => {
+    const t0 = Date.now();
+    const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(4000), ...opts });
+    const t1 = Date.now();
+    return { res, t0, t1 };
+  };
+
+  // Primary: lm-clock JSON API (sub-second accuracy)
+  try {
+    const { res, t0, t1 } = await tryFetch('https://lm-clock.vercel.app/api/time');
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      const serverMs = data?.ms ?? data?.time ?? (data?.unix != null ? data.unix * 1000 : null);
+      if (serverMs) {
+        ntpOffsetMs = serverMs - Math.round((t0 + t1) / 2);
+        lastClockSyncMs = Date.now();
+        console.log('[TCH bg] NTP synced (lm-clock), offset:', ntpOffsetMs, 'ms');
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('[TCH bg] lm-clock sync failed:', e.message);
+  }
+
+  // Fallback: Walmart Date header (1-second resolution)
+  try {
+    const { res, t0, t1 } = await tryFetch('https://www.walmart.com/robots.txt');
+    const dateHdr = res.headers.get('Date');
+    if (dateHdr) {
+      const serverMs = new Date(dateHdr).getTime();
+      ntpOffsetMs = serverMs - Math.round((t0 + t1) / 2);
+      lastClockSyncMs = Date.now();
+      console.log('[TCH bg] NTP synced (Walmart header), offset:', ntpOffsetMs, 'ms');
+    }
+  } catch (e) {
+    console.warn('[TCH bg] Walmart clock sync failed:', e.message);
+  }
+}
+
+/** Returns Date.now() corrected by the last NTP sync offset. */
+function accurateNow() {
+  return Date.now() + ntpOffsetMs;
+}
+
 // ─── BACKGROUND POLL LOOP ────────────────────────────────────────────────────
 
 async function runBackgroundPoll() {
@@ -628,9 +681,14 @@ async function runBackgroundPoll() {
       }
     }
 
-    // Has the drop time arrived? Used to arm skip-monitoring at exactly the right moment.
+    // Sync server clock at most once every 5 minutes while monitoring.
+    if (accurateNow() - lastClockSyncMs > 5 * 60 * 1000) {
+      syncServerClock().catch(() => {});
+    }
+
+    // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
     const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
-    const dropArmed = !dropMs || Date.now() >= dropMs;
+    const dropArmed = !dropMs || accurateNow() >= dropMs;
 
     for (const wp of walmartProducts) {
       const itemId = extractWalmartItemId(wp.url);
@@ -990,6 +1048,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'START_MONITOR':
+      // Sync server clock immediately so drop-time arming is accurate from the start.
+      syncServerClock().catch(() => {});
       startMonitor(
         message.products,
         message.refreshInterval,
@@ -1052,6 +1112,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return true;
     }
+
+    case 'GET_NTP_OFFSET':
+      // Popup requests the current NTP offset for live clock display.
+      sendResponse({ ntpOffsetMs, lastSyncMs: lastClockSyncMs });
+      return false;
 
     case 'ATC_SUCCESS':
       handleATCSuccess(message.url, sender.tab.id)

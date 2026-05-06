@@ -1611,6 +1611,53 @@ setInterval(() => {
   formatDropCountdown(readDropExpectedAtValue() || '');
 }, 1000);
 
+// ─── LIVE NTP CLOCK (Walmart tab) ────────────────────────────────────────────
+// Fetches the NTP offset from the background service worker once, then ticks
+// locally every ~16ms (≈60fps) for a smooth millisecond display.
+
+let wmNtpOffset = 0;
+
+function wmTickClock() {
+  const clockEl = $('wmLiveClock');
+  if (!clockEl) return;
+  const now = new Date(Date.now() + wmNtpOffset);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const ms = String(now.getMilliseconds()).padStart(3, '0');
+  clockEl.textContent = `${hh}:${mm}:${ss}.${ms}`;
+}
+
+function wmStartClock() {
+  if (!hasChromeStorage()) return;
+  chrome.runtime.sendMessage({ type: 'GET_NTP_OFFSET' }, (resp) => {
+    if (chrome.runtime.lastError || !resp) return;
+    wmNtpOffset = resp.ntpOffsetMs || 0;
+    const badge = $('wmNtpBadge');
+    if (badge) {
+      const synced = resp.lastSyncMs > 0;
+      badge.textContent = synced ? `offset ${wmNtpOffset > 0 ? '+' : ''}${wmNtpOffset}ms` : 'not synced';
+      badge.style.color = synced ? '#4caf50' : '#888';
+    }
+  });
+  // Re-fetch offset every 30s in case background resynced
+  setInterval(() => {
+    if (!hasChromeStorage()) return;
+    chrome.runtime.sendMessage({ type: 'GET_NTP_OFFSET' }, (resp) => {
+      if (chrome.runtime.lastError || !resp) return;
+      wmNtpOffset = resp.ntpOffsetMs || 0;
+      const badge = $('wmNtpBadge');
+      if (badge && resp.lastSyncMs > 0) {
+        badge.textContent = `offset ${wmNtpOffset > 0 ? '+' : ''}${wmNtpOffset}ms`;
+        badge.style.color = '#4caf50';
+      }
+    });
+  }, 30000);
+  setInterval(wmTickClock, 16);
+}
+
+wmStartClock();
+
 loadMonitorData();
 
 // ─── SETTINGS EXPORT / IMPORT ────────────────────────────────────────────────

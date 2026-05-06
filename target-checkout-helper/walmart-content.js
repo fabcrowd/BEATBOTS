@@ -315,9 +315,18 @@ function wmGetPageType() {
  * @param {string} oid  Walmart Offer ID (hex string)
  * @returns {Promise<boolean>}  true if item was added and we navigated to checkout
  */
-async function wmDirectAtc(oid, settings) {
+/**
+ * @param {string} oid
+ * @param {object} settings
+ * @param {object} [opts]
+ * @param {number} [opts.rapidRetryMs=0]  If >0, retry every 200ms including on 4xx
+ *   until this many ms have elapsed. Use for skip-monitoring mode where the item
+ *   may go live any moment and a 4xx just means "not yet".
+ */
+async function wmDirectAtc(oid, settings, opts = {}) {
+  const { rapidRetryMs = 0 } = opts;
   wmShowToast('Direct ATC via OID…', 'persistent');
-  console.log('[WMT] Direct ATC — OID:', oid);
+  console.log('[WMT] Direct ATC — OID:', oid, rapidRetryMs > 0 ? `rapid ${rapidRetryMs}ms` : 'single');
 
   // Extract customer ID (CID) required by the v3 cart API.
   // Walmart embeds it in __NEXT_DATA__.props.pageProps.customerId and also in
@@ -352,11 +361,11 @@ async function wmDirectAtc(oid, settings) {
     shipMethodDefaultRule: 'SHIP_RULE_1',
   };
 
-  // In skip-monitoring mode allow up to 3 attempts, but ONLY retry on network
-  // exceptions (timeout, offline). A 4xx/5xx response means the item isn't
-  // available yet — retrying immediately just wastes 800ms × N.
-  const maxAttempts = settings?.walmartSkipMonitoring ? 3 : 1;
-  for (let i = 0; i < maxAttempts; i++) {
+  const deadline = Date.now() + (rapidRetryMs > 0 ? rapidRetryMs : 0);
+  let attempt = 0;
+
+  do {
+    attempt++;
     let res;
     try {
       res = await fetch(url, {
@@ -375,12 +384,12 @@ async function wmDirectAtc(oid, settings) {
         signal: AbortSignal.timeout(5000),
       });
     } catch (e) {
-      // Network error (timeout, DNS, offline) — worth retrying
-      console.warn('[WMT] Direct ATC network error (attempt', i + 1, '):', e.message);
-      if (i < maxAttempts - 1) await wmSleep(800);
+      console.warn('[WMT] Direct ATC network error (attempt', attempt, '):', e.message);
+      await wmSleep(200);
       continue;
     }
-    console.log('[WMT] Direct ATC response:', res.status, 'attempt', i + 1);
+
+    console.log('[WMT] Direct ATC response:', res.status, 'attempt', attempt);
     if (res.ok) {
       wmShowToast('OID cart add succeeded — going to checkout…', 'success');
       wmSignalAtcSuccess(null);
@@ -388,10 +397,19 @@ async function wmDirectAtc(oid, settings) {
       window.location.href = 'https://www.walmart.com/checkout';
       return true;
     }
-    // HTTP error (4xx/5xx) — item not available or rejected; no point retrying
-    console.warn('[WMT] Direct ATC HTTP', res.status, '— not retrying');
-    break;
-  }
+
+    if (rapidRetryMs === 0) {
+      // Single-attempt mode: any HTTP error means fall through to DOM path.
+      console.warn('[WMT] Direct ATC HTTP', res.status, '— falling back to DOM');
+      break;
+    }
+
+    // Rapid mode: 4xx/5xx = item not live yet. Retry in 200ms.
+    if (attempt % 10 === 0) {
+      wmShowToast(`Direct ATC retry #${attempt} (HTTP ${res.status})…`, 'persistent');
+    }
+    await wmSleep(200);
+  } while (Date.now() < deadline);
 
   console.warn('[WMT] Direct ATC failed — falling back to DOM');
   return false;
@@ -544,8 +562,11 @@ async function wmHandleProductPage(settings, oid) {
   // ── OID direct-API path ──────────────────────────────────────────────────
   // If an Offer ID is set, try the fast cart API path first. Faster than DOM
   // click = earlier checkout endpoint hit on drops without a queue.
+  // In skip-monitoring mode the drop fires at a precise time — if we fire early
+  // we'll get 4xx until the item goes live, so use rapid retry for up to 30s.
   if (oid) {
-    const ok = await wmDirectAtc(oid, settings);
+    const atcOpts = settings?.walmartSkipMonitoring ? { rapidRetryMs: 30000 } : {};
+    const ok = await wmDirectAtc(oid, settings, atcOpts);
     if (ok) return;
     // API failed — fall through to DOM path
   }

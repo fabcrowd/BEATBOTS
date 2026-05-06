@@ -19,6 +19,22 @@ Read after `AGENTS.md`. Continuity for agents without long chat history.
 | Main world bridge | `target-checkout-helper/main_world.js` |
 | Cookie pool | `target-checkout-helper/cookieHarvest.js` (imported by SW) |
 
+## Recent session (v1.9.0 — Rapid OID retry + millisecond NTP clock)
+
+### Changes
+
+1. **`wmDirectAtc(oid, settings, opts = {})` (walmart-content.js)** — Added `opts.rapidRetryMs` parameter. In rapid mode (`rapidRetryMs > 0`) retries every 200ms including on 4xx responses (item may not be live yet) until deadline. In single mode (`rapidRetryMs = 0`, default) breaks on any HTTP error — prior behavior preserved for post-queue ATC calls.
+2. **`wmHandleProductPage` (walmart-content.js L548)** — Now passes `{ rapidRetryMs: 30000 }` to `wmDirectAtc` when `walmartSkipMonitoring` is set — the bot fires OID ATC at drop time and retries every 200ms for up to 30 seconds if the item isn't live yet instead of silently falling back to DOM path.
+3. **`syncServerClock()` (background.js)** — Fetches `https://lm-clock.vercel.app/api/time` (primary, ms precision) with fallback to Walmart `Date` response header. Computes `ntpOffsetMs` = serverMs − local midpoint (standard NTP propagation correction). Runs at `START_MONITOR` and every 5 min in poll loop.
+4. **`accurateNow()` (background.js)** — Returns `Date.now() + ntpOffsetMs`. Used for drop-time arming instead of raw `Date.now()`.
+5. **`GET_NTP_OFFSET` message handler (background.js)** — Returns `{ ntpOffsetMs, lastSyncMs }` to popup for live clock display.
+6. **Live millisecond clock (popup.html + popup.js)** — Dark pill in Walmart tab shows `HH:MM:SS.mmm` ticking at 60fps. Offset badge shows `+Nms` / `-Nms` in green once synced. Re-fetches offset from background every 30s.
+
+### Key invariants
+- `rapidRetryMs = 0` = single attempt + break on HTTP error (used in `wmWaitInProductQueue` after queue clears — item already live)
+- `rapidRetryMs = 30000` = retry loop including 4xx for 30s (used in skip-monitoring pre-arm ATC)
+- `accurateNow()` only affects drop-time arming (`dropArmed` check); all other timing still uses `Date.now()`
+
 ## Recent session (v1.8.0 — Walmart Phase 2 bug fixes + queue strategy)
 
 ### Bugs fixed
