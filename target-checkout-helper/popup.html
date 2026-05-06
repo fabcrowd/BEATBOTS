@@ -96,7 +96,7 @@
         <div id="monitorControls" class="monitor-controls" hidden>
           <div class="drop-block">
             <label class="field-label" for="dropExpectedAt">Expected drop / restock (local time)</label>
-            <input type="datetime-local" id="dropExpectedAt" class="input-datetime" aria-describedby="dropHint" title="If you know when the item goes live, enter that time here. The poll speeds up to 250ms in the 10 minutes before this time and holds fast for 3 minutes after. Leave blank for unknown restocks — the poll runs at a steady rate.">
+            <input type="datetime-local" id="dropExpectedAt" class="input-datetime" step="1" aria-describedby="dropHint" title="If you know when the item goes live, enter that time here. The poll speeds up to 250ms in the 10 minutes before this time and holds fast for 3 minutes after. Leave blank for unknown restocks — the poll runs at a steady rate. For Walmart drops, set 10 seconds before actual drop time (e.g. 8:59:50 for 9:00 PM).">
             <p id="dropCountdown" class="drop-countdown" aria-live="polite"></p>
             <p id="dropHint" class="field-hint">Optional. Polling speeds up in the 10 minutes before this time (and briefly after). Leave blank if you don't know when it restocks.</p>
           </div>
@@ -299,8 +299,9 @@
         <div style="margin-top:12px">
           <div class="drop-block">
             <label class="field-label" for="wmDropExpectedAt">Expected drop time (local)</label>
-            <input type="datetime-local" id="wmDropExpectedAt" class="input-datetime" title="The exact time the Walmart drop goes live. Polling speeds up to 250ms in the 10-minute window before this time. Enter your local time — the extension handles timezone conversion.">
+            <input type="datetime-local" id="wmDropExpectedAt" class="input-datetime" step="1" title="Set this 10 seconds BEFORE the actual drop time (e.g. 8:59:50 PM for a 9:00 PM drop). This pre-loads the product tab so the bot is in active polling mode when stock goes live — instead of spending 1-2 seconds loading the page after the drop starts. The step=1 attribute enables second-level precision in the time picker.">
             <p id="wmDropCountdown" class="drop-countdown" aria-live="polite"></p>
+            <p class="option-hint" style="margin-top:4px">⚡ Set <strong>10 seconds early</strong> (e.g. 8:59:50 for a 9:00 PM drop) — tab pre-loads so bot fires the instant stock goes live.</p>
           </div>
           <div class="monitor-grid" style="margin-top:8px">
             <div class="monitor-field">
@@ -340,7 +341,7 @@
           <h2>Step 1 — Setup (30 min before drop)</h2>
           <ol class="guide-steps">
             <li>Add each product URL to the monitor list. Paste the OID in the field below the URL — this is your fast lane into the queue.</li>
-            <li>Set <strong>Drop time</strong> to <strong>10 seconds before the actual drop</strong> (e.g. for a 9:00 PM ET drop, enter 8:59:50 PM ET). This pre-loads the product page so the bot is ready the instant stock goes live, instead of spending 1–2 seconds loading after drop time.</li>
+            <li>Set <strong>Drop time</strong> to <strong>10 seconds before the actual drop</strong>. Example: 9:00 PM ET drop → enter <strong>8:59:50 PM</strong>. The time picker shows seconds — click the seconds field or use the keyboard to set it. Why: this pre-loads the product tab so the bot is in active polling mode when stock goes live, instead of spending 1–2 seconds loading the page after the drop starts.</li>
             <li>Turn on <strong>Skip stock monitoring</strong>. It won't fire until your drop time — you can set it now and walk away.</li>
             <li>Choose your mode:
               <ul>
