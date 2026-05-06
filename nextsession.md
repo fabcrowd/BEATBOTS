@@ -126,7 +126,191 @@ Read after `AGENTS.md`. Continuity for agents without long chat history.
 
 - Deep read-only pass + second pass on checkout state machine; **`AGENTS.md` line 69** (“never clicks Place Order”) contradicts **`autoPlaceOrder`** + `content.js` — doc cleanup still optional.
 
-## Outstanding
+## Build Plans (v2.x roadmap — from repo research + Refract guide)
+
+These four features were identified by comparing our extension against Refract, walmart_pokemon, and refract-source-code. Listed priority order: highest value first.
+
+---
+
+### Plan A — IMAP 2FA Auto-Read (v2.0)
+
+**What:** When Walmart sends a login verification code to the account email, the bot reads it automatically via IMAP and submits it — no human needed. Refract calls this the most important setup step. Without it, accounts that trigger 2FA stall silently.
+
+**Trigger:** Walmart fires 2FA when:
+- First login from a new IP/proxy
+- Account flagged by PX after a drop
+- Password reset flow
+
+**Design:**
+
+```
+popup.html  →  new "Accounts" tab
+  - Per-account rows: email, password, IMAP host, IMAP port, IMAP password (may differ)
+  - Stored encrypted in chrome.storage.local (AES-GCM with a user-set passphrase)
+  - "Test IMAP" button — tries connecting and reading inbox
+
+background.js  →  new wmReadImapCode(accountEmail, imapConfig, timeoutMs)
+  - Cannot do raw TCP from a service worker (no net.Socket in MV3)
+  - Two options:
+      A. Native messaging host (small Node.js sidecar the user installs once)
+         - Extension sends { type: 'IMAP_READ_CODE', email, imapConfig } to native host
+         - Native host uses `imap` npm package, searches INBOX for subject "Walmart" since T-60s
+         - Returns first 6-digit code found
+      B. Gmail API (OAuth2) — only works if accounts use Gmail
+         - Simpler, no sidecar, but locks to Gmail only
+  - Recommended: Option A (native messaging) — supports any IMAP provider
+
+content.js  →  wmHandle2FA() (new)
+  - Detects 2FA code input on Walmart login page (selector: input[id*="code"], input[name*="code"])
+  - Sends GET_2FA_CODE message to background with the account email
+  - Background calls native host, waits up to 60s polling every 3s for new email
+  - Fills code and submits
+
+walmart-content.js  →  _wmInit() login branch
+  - If walmartUseSavedSession=false and not logged in, detect if 2FA step appears after login form submit
+  - Hand off to wmHandle2FA() instead of giving up
+```
+
+**Files to create/modify:**
+- `target-checkout-helper/native-host/imap-bridge.js` — new Node.js native messaging host
+- `target-checkout-helper/native-host/com.tch.imapbridge.json` — native host manifest
+- `target-checkout-helper/manifest.json` — add `nativeMessaging` permission
+- `target-checkout-helper/popup.html` — new Accounts tab with per-account IMAP fields
+- `target-checkout-helper/popup.js` — account CRUD, IMAP test, encrypt/store creds
+- `target-checkout-helper/background.js` — `wmReadImapCode()`, `GET_2FA_CODE` handler
+- `target-checkout-helper/walmart-content.js` — `wmHandle2FA()`, wire into `_wmInit()`
+
+**Complexity:** High (~3 sessions). Native host requires user to run an installer once. Consider shipping a small `install-native-host.bat` / `.sh`.
+
+**Decision point before starting:** Ask user whether accounts are Gmail-only. If yes, use Gmail API (OAuth) and skip the native host entirely — much simpler.
+
+---
+
+### Plan B — Missing ATC Selectors (v1.10 — 30-min job)
+
+**What:** Add 3 selectors from walmart_pokemon as fallbacks in `WM_SEL`. Improves reliability when Walmart rotates class names on the ATC button (happens during drops).
+
+**Selectors to add:**
+
+```js
+// WM_SEL in walmart-content.js — add to existing atc / atcAlt / queue selectors:
+atc: [
+  'button[data-automation-id="atc-button"]',           // NEW — walmart_pokemon
+  'button[data-tl-id="ProductPrimaryCTA-cta_add_to_cart_button"]',  // NEW
+  // ... existing selectors
+],
+queueHoldSpot: 'button[data-automation-id="queue-hold-spot-btn"]',  // NEW
+```
+
+**Files:** `target-checkout-helper/walmart-content.js` only.
+
+**Steps:**
+1. Open `WM_SEL` object at top of walmart-content.js
+2. Prepend the two `data-automation-id` / `data-tl-id` selectors to the `atc` field (or add as `atcAlt2`)
+3. Add `queueHoldSpot` to `WM_SEL`
+4. In `wmWaitInProductQueue()` — also check for `WM_SEL.queueHoldSpot` enabled state as a secondary "queue cleared" signal
+5. `node --check`, reload extension
+
+**Complexity:** Trivial. Do this first.
+
+---
+
+### Plan C — Address Jig Suffix + Unit Variation (v1.11 — 1 session)
+
+**What:** Extend the existing `shippingJig` prefix system to also vary street suffix spelling and append fake unit numbers. Refract guide: same street on every profile = cancelled orders. Current jig only prepends a character to address line 1.
+
+**Current behavior (`content.js` + `walmart-content.js`):**
+```js
+address1 = settings.shippingJig + settings.shipping.address1;
+// Result: "A 123 Sesame Street" — same suffix every time
+```
+
+**Target behavior:**
+```js
+// Given base address "123 Sesame Street", jig index 4 produces:
+"123 Sesame Stret Apt 4B"   // suffix typo + fake unit
+// jig index 7:
+"123 Sesame St. Unit 7C"
+```
+
+**Design:**
+
+```js
+// New helper: wmJigAddress(baseAddress1, jigIndex)
+// 1. Suffix table: ['St', 'St.', 'Str', 'Strt', 'Stet', 'Street', 'Str.', 'Ste']
+//    Pick suffix = SUFFIX_TABLE[jigIndex % SUFFIX_TABLE.length]
+//    Strip existing suffix from base address, append picked suffix
+// 2. Unit table: ['', 'Apt', 'Unit', 'Suite', '#', 'Ste']
+//    unitType = UNIT_TABLE[jigIndex % UNIT_TABLE.length]
+//    unitNum = String.fromCharCode(65 + (jigIndex % 26)) + ((jigIndex % 9) + 1)  → "A1", "B2" etc.
+//    Append if unitType !== ''
+// 3. Returns jigged address line 1
+```
+
+**popup.html changes:**
+- Replace `shippingJig` free-text input with a numeric `jigIndex` field (0–99)
+- Add hint: "Each account should use a different index. 0 = no jig."
+
+**Files:**
+- `target-checkout-helper/popup.html` — replace shippingJig input UI
+- `target-checkout-helper/popup.js` — update gatherSettings / populateFields for jigIndex
+- `target-checkout-helper/content.js` — replace shippingJig prefix logic with wmJigAddress()
+- `target-checkout-helper/walmart-content.js` — same
+
+**Complexity:** Low-medium (~half session). Must test that jigged addresses still pass Walmart address validation (it's lenient for minor typos per the Refract guide).
+
+---
+
+### Plan D — WebSocket Queue Listener (v2.1)
+
+**What:** Instead of polling the DOM every 1s for queue state changes, inject a WebSocket listener into Walmart's page context and detect queue movement events in real-time. Refract uses this for sub-second queue state detection.
+
+**How Walmart's queue works internally:**
+- Queue-it sends WebSocket messages to update position/status
+- Messages arrive as JSON frames: `{ type: 'queueUpdated', position: N, expectedWait: Ns }`
+- Current approach: poll DOM every 1s for ATC button enabled state — misses the ws event by up to 1s
+
+**Design:**
+
+```js
+// In main_world.js (runs in page context, has access to real WebSocket)
+// Intercept WebSocket constructor to sniff queue messages:
+const OrigWS = window.WebSocket;
+window.WebSocket = function(url, protocols) {
+  const ws = new OrigWS(url, protocols);
+  if (/queue-it|queueit/.test(url)) {
+    ws.addEventListener('message', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'queuePassed' || data.position === 0) {
+          window.dispatchEvent(new CustomEvent('TCH_QUEUE_PASSED'));
+        }
+      } catch {}
+    });
+  }
+  return ws;
+};
+
+// In walmart-content.js wmWaitInProductQueue():
+// Add listener for TCH_QUEUE_PASSED event alongside existing ATC button poll
+// When event fires → immediately attempt ATC (don't wait for next 1s poll)
+window.addEventListener('TCH_QUEUE_PASSED', () => { queuePassedSignal = true; });
+```
+
+**Files:**
+- `target-checkout-helper/main_world.js` — WebSocket intercept, dispatch `TCH_QUEUE_PASSED`
+- `target-checkout-helper/walmart-content.js` — listen for event in `wmWaitInProductQueue`, set flag, break poll loop immediately
+- `target-checkout-helper/manifest.json` — verify `main_world.js` is declared as `MAIN` world script for walmart.com
+
+**Risk:** Queue-it may not use WebSocket on all drop types (some use long-polling). Keep existing DOM poll as fallback — event listener just accelerates it.
+
+**Complexity:** Medium (~1 session). Main complexity is verifying actual Queue-it WS message schema during a live drop — may need to instrument and observe first.
+
+**Pre-work:** On next Walmart drop, open DevTools → Network → WS tab and capture the raw frames from the /qp page. Paste them here before implementing so we wire the right message type.
+
+---
+
+## Outstanding (carry-forward)
 
 1. **Docs:** Align `AGENTS.md` Place Order / `autoPlaceOrder` + permissions / `package.json` note for `scripts/browser-smoke/`.
 2. Optional: tighten `markCartReady` / `ATC_SUCCESS` timing (see `.audit/findings/nemesis-verified.md` if still open).
