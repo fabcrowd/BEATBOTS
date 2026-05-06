@@ -334,46 +334,86 @@
       </section>
 
       <section class="card guide-section" aria-labelledby="wmQueueHeading">
-        <h2 id="wmQueueHeading">How Walmart drops work</h2>
+        <h2 id="wmQueueHeading">Walmart Drop Playbook</h2>
 
         <section class="card guide-section">
-          <h2>The queue</h2>
-          <p class="guide-note">Walmart Wednesday drops use a <strong>server-side virtual waiting room</strong>. You cannot skip or bypass it — everyone waits.</p>
-          <ul class="guide-steps">
-            <li>At drop time Walmart opens a checkout endpoint. First to hit it gets the best queue position.</li>
-            <li>Typical wait: <strong>14–31 minutes</strong> regardless of how fast you entered.</li>
-            <li>Queue position determines how long you wait — but if the item sells out before you clear the queue, checkout fails.</li>
-            <li>This bot <strong>cannot bypass the queue</strong>. It gets you in as fast as possible, then waits with you.</li>
-          </ul>
-        </section>
-
-        <section class="card guide-section">
-          <h2>Does getting in fast matter?</h2>
-          <ul class="guide-steps">
-            <li><strong>Yes</strong> — queue is first-come-first-served. Earlier position = shorter wait = better chance the item isn't sold out when you reach checkout.</li>
-            <li>A few seconds at drop time can be the difference between position 400 (success) and position 600 (too late).</li>
-          </ul>
-        </section>
-
-        <section class="card guide-section">
-          <h2>OID (Offer ID) — the fast path</h2>
-          <p class="guide-note">The OID lets the bot add to cart via a <strong>direct API call</strong> instead of clicking the button on the page. Skips page rendering entirely — faster queue entry.</p>
+          <h2>Step 1 — Setup (30 min before drop)</h2>
           <ol class="guide-steps">
-            <li>Get the OID from a bot monitor service or the drop announcement</li>
-            <li>Paste product URL, paste OID in the field below it</li>
-            <li>At drop time the bot tries the OID path first. If it fails it falls back to the normal ATC click.</li>
-            <li>OID is optional — without it the bot still works, just enters queue a few seconds later</li>
+            <li>Add each product URL to the monitor list. Paste the OID in the field below the URL — this is your fast lane into the queue.</li>
+            <li>Set <strong>Drop time</strong> to <strong>10 seconds before the actual drop</strong> (e.g. for a 9:00 PM ET drop, enter 8:59:50 PM ET). This pre-loads the product page so the bot is ready the instant stock goes live, instead of spending 1–2 seconds loading after drop time.</li>
+            <li>Turn on <strong>Skip stock monitoring</strong>. It won't fire until your drop time — you can set it now and walk away.</li>
+            <li>Choose your mode:
+              <ul>
+                <li><strong>ATC Only ON</strong> — bot gets you in the cart, beeps, then stops. You handle checkout. Best if you want control over payment and Place Order.</li>
+                <li><strong>ATC Only OFF</strong> — bot handles everything: ATC → cart → checkout → shipping → payment → stops at review. You click Place Order (or turn on Auto place order to go fully hands-off).</li>
+              </ul>
+            </li>
+            <li>Click <strong>Start monitoring</strong>. Background tabs open — leave them alone.</li>
           </ol>
         </section>
 
         <section class="card guide-section">
-          <h2>Pre-drop high price trap</h2>
-          <p class="guide-note">Walmart often lists drop items at a high MSRP before go-time. The real drop price appears at exactly drop time.</p>
+          <h2>Step 2 — While waiting (before drop time)</h2>
+          <ul class="guide-steps">
+            <li>Bot is polling stock every ~250ms as drop time approaches. You'll see a toast on the product tab.</li>
+            <li><strong>Do not close or navigate the product tabs.</strong> The bot needs them open and ready.</li>
+            <li>The countdown timers Walmart shows (29:59, 9:59) are placeholders — your real wait is assigned server-side. Ignore them.</li>
+          </ul>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Step 3a — You're IN the queue (bot is waiting)</h2>
+          <p class="guide-note">The bot detects the queue (ATC button disabled or /qp waiting room page) and holds your position automatically.</p>
+          <ul class="guide-steps">
+            <li><strong>Do nothing.</strong> The bot polls every second for the ATC button to enable. When your turn comes it fires immediately.</li>
+            <li>Do NOT click anywhere on the product page or navigate away — you will lose your queue spot.</li>
+            <li>You'll see a toast updating every 30 seconds with elapsed wait time.</li>
+            <li>When your turn comes: bot fires ATC, navigates to cart, then either stops (ATC Only) or continues to checkout (Full Auto).</li>
+          </ul>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Step 3b — ATC done, bot handed off (ATC Only mode)</h2>
+          <p class="guide-note">You'll hear a beep and see "✅ ATC done — take over now!" on the cart page.</p>
           <ol class="guide-steps">
-            <li>Set <strong>Max price</strong> to the expected drop price</li>
-            <li>Bot blocks ATC while the price is above that number</li>
-            <li>The moment the price updates at drop time, ATC fires automatically</li>
+            <li>You're on <strong>walmart.com/cart</strong>. Verify the item is there.</li>
+            <li>Click <strong>Checkout</strong> — this enters Walmart's checkout queue (different from the product queue). Typical wait: 14–31 min.</li>
+            <li>When the queue clears, Walmart drops you into the checkout flow. Fill shipping and payment, then click <strong>Place Order</strong>.</li>
+            <li>If Walmart rejects your card: most common cause is too many authorization attempts from the same card in a short window. Let it cool 5–10 min and retry.</li>
           </ol>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Step 3c — Full Auto mode (ATC Only OFF)</h2>
+          <p class="guide-note">Bot fills shipping and payment for you, stops at the review page.</p>
+          <ol class="guide-steps">
+            <li>Bot handles ATC → cart → checkout queue wait → shipping → payment automatically.</li>
+            <li>When the review page loads you'll hear a beep and see "Reached review — Place Order remains manual."</li>
+            <li><strong>Verify the order</strong> (item, price, address, card), then click <strong>Place Order</strong>.</li>
+            <li>If <strong>Auto place order</strong> is ON, the bot clicks Place Order for you — only use this if you trust all your settings are correct.</li>
+          </ol>
+        </section>
+
+        <section class="card guide-section">
+          <h2>Common issues</h2>
+          <ul class="guide-steps">
+            <li><strong>Bot loops on "hang tight / loading"</strong> — Walmart's PX bot check. Bot waits for the auto-redirect; do not reload. If it loops for 2+ min, restart monitoring.</li>
+            <li><strong>456 error / "generating session" loop</strong> — your proxy or IP is flagged. Bot auto-rotates if you have proxies set. Otherwise, refresh Walmart manually and let the session re-establish.</li>
+            <li><strong>Invalid card at checkout</strong> — too many auth charges from same card in short window. Wait 5–10 min for your bank to unblock it.</li>
+            <li><strong>Queue timer stuck at 29:59 or 9:59</strong> — normal. These are Walmart placeholders. Your real position is being calculated server-side. Don't restart tasks.</li>
+            <li><strong>Item sold out before your turn</strong> — the queue cleared but inventory was gone. Nothing to do — try restocks.</li>
+          </ul>
+        </section>
+
+        <section class="card guide-section">
+          <h2>OID (Offer ID) — why it matters</h2>
+          <p class="guide-note">OID lets the bot add to cart via a <strong>direct API call</strong> instead of waiting for the page button. Skips 1–2 seconds of rendering — that's earlier queue entry.</p>
+          <ul class="guide-steps">
+            <li>Get the OID from your monitor service or drop announcement before go-time.</li>
+            <li>Paste it in the OID field under the product URL.</li>
+            <li>Bot tries OID first. If the API rejects it (item not live yet), it falls back to DOM click automatically — no action needed.</li>
+            <li>OID is optional. Without it the bot still works, just enters queue slightly later.</li>
+          </ul>
         </section>
       </section>
     </div>
