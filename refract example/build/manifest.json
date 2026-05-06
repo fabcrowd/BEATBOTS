@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Refract Extension",
+  "description": "Companion Chrome Extension for Refract",
+  "version": "3.1.10",
+  "icons": {
+    "320": "icon.png"
+  },
+  "permissions": [
+    "webRequest",
+    "webRequestAuthProvider",
+    "webNavigation",
+    "browsingData",
+    "cookies",
+    "notifications",
+    "proxy",
+    "tabs",
+    "storage",
+    "debugger",
+    "scripting",
+    "declarativeNetRequest"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "blocking",
+        "enabled": true,
+        "path": "./rules/blocking.json"
+      }
+    ]
+  },
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Refract Extension"
+  },
+  "background": {
+    "service_worker": "serviceWorker.js"
+  }
+}

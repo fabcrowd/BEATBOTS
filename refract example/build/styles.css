@@ -1,0 +1,262 @@
+:root {
+  --text-primary: #f8f0e3;
+  --text-secondary: #aeaeae;
+  --borders: #3f3f46;
+  --background: #0f0f10;
+  --background-light: #383838;
+  --success: #2eb84d;
+  --warning: #e7ae21;
+  --danger: #ea3543;
+}
+
+body {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--background);
+  margin: 0;
+  padding: 30px;
+  box-sizing: border-box;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-family: Inter, sans-serif;
+}
+
+img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  -webkit-user-drag: none;
+}
+
+label {
+  font-weight: 600;
+}
+
+#branding-container {
+  height: 30px;
+  text-align: center;
+}
+
+#content-container {
+  width: 100%;
+  border-radius: 4px;
+  padding: 15px;
+  justify-content: center;
+  display: none;
+  flex-direction: column;
+}
+
+.header {
+  width: 350px;
+  margin: 0 auto 10px;
+}
+
+.subheader {
+  width: 350px;
+  margin: 0 auto 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+#dropdown-container {
+  position: relative;
+  height: 30px;
+  width: 350px;
+  margin: 0 auto 20px;
+}
+
+input, select {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 7px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  color: var(--text-primary);
+  background-color: var(--background);
+  border: 1px solid var(--borders);
+  outline: none;
+  appearance: none;
+}
+
+#harvests-per-page-load-container {
+  width: 350px;
+  margin: 0 auto 20px;
+}
+
+#expiration-minutes-container {
+  width: 350px;
+  margin: 0 auto 20px;
+}
+
+#actions-container {
+  width: 350px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#actions-container > button {
+  width: 100%;
+  height: 100%;
+  color: var(--text-primary);
+  border: 1px solid var(--borders);
+  outline: none;
+  border-radius: 4px;
+  cursor: pointer;
+  height: 30px;
+}
+
+#actions-container > button.green-button {
+  background-color: var(--success);
+}
+
+#actions-container > button.red-button {
+  background-color: var(--danger);
+}
+
+#loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 350px;
+  width: 100%;
+}
+
+#removal-order-label {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+#removal-order {
+  background-color: #23a8f2;
+}
+
+#automation-label {
+  margin-top: 5px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+#automation {
+  background-color: var(--success);
+}
+
+#harvest-label {
+  margin-top: 5px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+#harvest {
+  background-color: var(--success);
+}
+
+#automation-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+#footer {
+  height: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  gap: 3px;
+  flex-direction: column;
+}
+
+#amount-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  font-size: 12px;
+  gap:2px;
+  color: var(--text-secondary);
+}
+
+#amount-container > p {
+  margin: 5px 0;
+}
+
+
+.animation {
+  display: inline-block;
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.animation div {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  animation: animation 1.2s linear infinite;
+}
+.animation div:nth-child(1) {
+  top: 8px;
+  left: 8px;
+  animation-delay: 0s;
+}
+.animation div:nth-child(2) {
+  top: 8px;
+  left: 32px;
+  animation-delay: -0.4s;
+}
+.animation div:nth-child(3) {
+  top: 8px;
+  left: 56px;
+  animation-delay: -0.8s;
+}
+.animation div:nth-child(4) {
+  top: 32px;
+  left: 8px;
+  animation-delay: -0.4s;
+}
+.animation div:nth-child(5) {
+  top: 32px;
+  left: 32px;
+  animation-delay: -0.8s;
+}
+.animation div:nth-child(6) {
+  top: 32px;
+  left: 56px;
+  animation-delay: -1.2s;
+}
+.animation div:nth-child(7) {
+  top: 56px;
+  left: 8px;
+  animation-delay: -0.8s;
+}
+.animation div:nth-child(8) {
+  top: 56px;
+  left: 32px;
+  animation-delay: -1.2s;
+}
+.animation div:nth-child(9) {
+  top: 56px;
+  left: 56px;
+  animation-delay: -1.6s;
+}
+
+@keyframes animation {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

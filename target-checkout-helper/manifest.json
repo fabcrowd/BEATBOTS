@@ -3,7 +3,7 @@
   "name": "Target Checkout Helper",
   "version": "1.7.3",
   "description": "Automates Target.com and Walmart.com checkout steps — Add to Cart through Order Review. You place the final order.",
-  "permissions": ["storage", "tabs", "alarms", "cookies", "debugger", "declarativeNetRequest", "browsingData"],
+  "permissions": ["storage", "tabs", "alarms", "cookies", "debugger", "declarativeNetRequest", "browsingData", "identity"],
   "declarative_net_request": {
     "rule_resources": [
       { "id": "blocking", "enabled": true, "path": "rules/blocking.json" }

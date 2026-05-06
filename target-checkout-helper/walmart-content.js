@@ -154,30 +154,28 @@ function wmIsVisible(el) {
 }
 
 /**
- * Returns the current product price as a number, or null if unreadable.
- * Checks the `content` attribute (structured data) first, then falls back
- * to the visible text of the first price element.
+ * @param {boolean} [liveOnly=false] Skip __NEXT_DATA__ and read DOM only.
+ *   Use this inside polling loops: __NEXT_DATA__ is frozen at page load and will
+ *   NOT reflect the drop price when Walmart flips it via React re-render at go-time.
  */
-function wmGetCurrentPrice() {
-  // Prefer __NEXT_DATA__ — authoritative, reflects drop price immediately at go-time
-  try {
-    const nd = window.__NEXT_DATA__;
-    const p = nd?.props?.pageProps?.initialData?.data?.product?.priceInfo?.currentPrice?.price;
-    if (typeof p === 'number' && p > 0) return p;
-  } catch (_) {}
+function wmGetCurrentPrice(liveOnly = false) {
+  if (!liveOnly) {
+    try {
+      const nd = window.__NEXT_DATA__;
+      const p = nd?.props?.pageProps?.initialData?.data?.product?.priceInfo?.currentPrice?.price;
+      if (typeof p === 'number' && p > 0) return p;
+    } catch (_) {}
+  }
 
-  // DOM fallbacks
   for (const sel of WM_SEL.price.split(', ')) {
     try {
       const el = document.querySelector(sel);
       if (!el) continue;
-      // structured data: <span itemprop="price" content="49.99">
       const content = el.getAttribute('content');
       if (content) {
         const n = parseFloat(content);
         if (!isNaN(n)) return n;
       }
-      // visible text: strip currency symbol and commas
       const text = el.textContent.replace(/[^0-9.]/g, '');
       if (text) {
         const n = parseFloat(text);
@@ -240,16 +238,22 @@ async function wmDebuggerClick(el) {
 
 /** Generic queue/waiting-room indicator — works on both product page and /checkout. */
 function wmHasQueueIndicators() {
-  // /qp is Walmart's white-labeled waiting room URL (Queue-it under waiting-room.walmart.com)
+  // /qp is Walmart's white-labeled Queue-it waiting room URL
   if (location.pathname.startsWith('/qp')) return true;
   const text = (document.body?.innerText || '').toLowerCase();
+  // Use specific contiguous phrases only — "queue" && "wait" individually are too
+  // common in checkout SPA internals and would false-positive into wmHandleQueue.
   return (
-    text.includes('estimated wait') ||
+    text.includes('estimated wait time') ||
     text.includes("you're in line") ||
+    text.includes("you are in line") ||
     text.includes('your position in line') ||
     text.includes('admission likelihood') ||
-    (text.includes('queue') && text.includes('wait')) ||
-    !!document.querySelector('[class*="QueuePage"], [data-automation-id*="queue"]')
+    text.includes('queue position') ||
+    text.includes('you are in the queue') ||
+    text.includes("you're in the queue") ||
+    text.includes('in queue - ') ||
+    !!document.querySelector('[class*="QueuePage"], [data-automation-id*="queue-room"]')
   );
 }
 
@@ -347,11 +351,14 @@ async function wmDirectAtc(oid, settings) {
     shipMethodDefaultRule: 'SHIP_RULE_1',
   };
 
-  // More attempts when skip-monitoring (speed-race mode); single attempt otherwise.
+  // In skip-monitoring mode allow up to 3 attempts, but ONLY retry on network
+  // exceptions (timeout, offline). A 4xx/5xx response means the item isn't
+  // available yet — retrying immediately just wastes 800ms × N.
   const maxAttempts = settings?.walmartSkipMonitoring ? 3 : 1;
   for (let i = 0; i < maxAttempts; i++) {
+    let res;
     try {
-      const res = await fetch(url, {
+      res = await fetch(url, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -366,18 +373,23 @@ async function wmDirectAtc(oid, settings) {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(5000),
       });
-      console.log('[WMT] Direct ATC response:', res.status, 'attempt', i + 1);
-      if (res.ok) {
-        wmShowToast('OID cart add succeeded — going to checkout…', 'success');
-        wmSignalAtcSuccess(null);
-        await wmSleep(300);
-        window.location.href = 'https://www.walmart.com/checkout';
-        return true;
-      }
     } catch (e) {
-      console.warn('[WMT] Direct ATC error (attempt', i + 1, '):', e.message);
+      // Network error (timeout, DNS, offline) — worth retrying
+      console.warn('[WMT] Direct ATC network error (attempt', i + 1, '):', e.message);
+      if (i < maxAttempts - 1) await wmSleep(800);
+      continue;
     }
-    if (i < maxAttempts - 1) await wmSleep(800);
+    console.log('[WMT] Direct ATC response:', res.status, 'attempt', i + 1);
+    if (res.ok) {
+      wmShowToast('OID cart add succeeded — going to checkout…', 'success');
+      wmSignalAtcSuccess(null);
+      await wmSleep(300);
+      window.location.href = 'https://www.walmart.com/checkout';
+      return true;
+    }
+    // HTTP error (4xx/5xx) — item not available or rejected; no point retrying
+    console.warn('[WMT] Direct ATC HTTP', res.status, '— not retrying');
+    break;
   }
 
   console.warn('[WMT] Direct ATC failed — falling back to DOM');
@@ -410,12 +422,12 @@ async function wmWaitInProductQueue(settings, oid) {
   while (Date.now() - started < maxWaitMs) {
     await wmSleep(1000);
 
-    // Price guard — re-check each second during queue; don't proceed if price still high
+    // Price guard — use DOM-only (liveOnly=true): __NEXT_DATA__ is frozen at
+    // page load and won't update when Walmart flips the drop price at go-time.
     const maxPrice = parseFloat(settings.walmartMaxPrice) || 0;
     if (maxPrice > 0) {
-      const currentPrice = wmGetCurrentPrice();
+      const currentPrice = wmGetCurrentPrice(true);
       if (currentPrice !== null && currentPrice > maxPrice) {
-        // Still pre-drop price — keep waiting silently
         continue;
       }
     }
@@ -456,7 +468,7 @@ async function wmWaitInProductQueue(settings, oid) {
     }
 
     const elapsed = Math.round((Date.now() - started) / 1000);
-    if (elapsed % 30 === 0) {
+    if (elapsed > 0 && elapsed % 30 === 0) {
       wmShowToast(`In queue — ${elapsed}s elapsed…`, 'persistent');
     }
   }
@@ -486,7 +498,7 @@ async function wmHandleQueueRoom(settings) {
     // The SPA watcher fires wmInit() on URL change — no extra action needed here.
     if (!location.pathname.startsWith('/qp')) return;
     const elapsed = Math.round((Date.now() - started) / 1000);
-    if (elapsed % 60 === 0) {
+    if (elapsed > 0 && elapsed % 60 === 0) {
       wmShowToast(`Waiting room — ${Math.round(elapsed / 60)}m elapsed…`, 'persistent');
     }
   }
@@ -525,7 +537,7 @@ async function wmHandleProductPage(settings, oid) {
   // If an Offer ID is set, try the fast cart API path first. Faster than DOM
   // click = earlier checkout endpoint hit on drops without a queue.
   if (oid) {
-    const ok = await wmDirectAtc(oid);
+    const ok = await wmDirectAtc(oid, settings);
     if (ok) return;
     // API failed — fall through to DOM path
   }
@@ -618,9 +630,8 @@ async function wmHandleQueue(settings) {
       await wmHandleCheckout(settings);
       return;
     }
-    // Update toast periodically with elapsed time.
     const elapsed = Math.round((Date.now() - started) / 1000);
-    if (elapsed % 30 === 0) {
+    if (elapsed > 0 && elapsed % 30 === 0) {
       wmShowToast(`In queue — ${elapsed}s elapsed…`, 'persistent');
     }
   }

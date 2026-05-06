@@ -92,7 +92,11 @@ async function maybeAutoHarvestBurst(data, { force = false } = {}) {
   const path = location.pathname + location.search;
   const isProduct = /^\/p\//.test(location.pathname);
   const isLogin = /sign-?in|login|\/account\//i.test(path);
-  if (!isProduct && !isLogin) return;
+  // With "Don't stop harvesting" on, the user explicitly opted into continuous
+  // capture across the Target session, so accept any Target page (homepage,
+  // cart, category, etc.). Cookies are session-wide for target.com — pool
+  // quality does not depend on which page sourced the snapshot.
+  if (!isProduct && !isLogin && !h.dontStopHarvesting && !force) return;
   const url = location.href;
   const now = Date.now();
   const burstDedupMs =
@@ -130,6 +134,40 @@ async function maybeAutoHarvestBurst(data, { force = false } = {}) {
 }
 
 /**
+ * Periodic auto-harvest tick on Target product/login pages.
+ *
+ * Without this, sitting on a single product page produces exactly ONE capture
+ * (the page-load burst) and then nothing — the only periodic re-harvest used
+ * to live inside the monitoring poll loop, so users with harvesting on but
+ * monitoring off saw zero recurring captures even with "Don't stop harvesting".
+ *
+ * The tick fires every 10s; the actual capture decision (dedup vs. config) is
+ * made inside `maybeAutoHarvestBurst`, so this stays cheap when nothing changes.
+ */
+let harvestRecurringTimer = null;
+function startHarvestRecurringTick() {
+  if (harvestRecurringTimer) return;
+  harvestRecurringTimer = setInterval(async () => {
+    // Note: do NOT gate on runtimeEnabled. Page-load harvest in init() also
+    // runs before the !data.enabled guard, so the recurring tick must match
+    // that behavior or a user with the master toggle off can never build a
+    // pool while sitting on any Target tab.
+    if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(location.href) !== 'target') return;
+    try {
+      const d = await getSettings();
+      if (!d.harvestConfig?.harvestingEnabled) return;
+      await maybeAutoHarvestBurst(d);
+    } catch { /* non-fatal */ }
+  }, 10 * 1000);
+}
+function stopHarvestRecurringTick() {
+  if (harvestRecurringTimer) {
+    clearInterval(harvestRecurringTimer);
+    harvestRecurringTimer = null;
+  }
+}
+
+/**
  * Auto sign-in: fills the Target login form and submits if credentials are stored.
  * Called on page load when page type is 'signin', during checkout pending step, and
  * after session recovery reloads a tab that lands on the login page.
@@ -153,35 +191,128 @@ async function handleSignInPage(settings) {
     document.querySelector('button[type="submit"]')
   );
 
-  if (!emailInput || !passInput || !submitBtn) {
-    console.log('[TCH] auto sign-in: login form not found — will wait for DOM');
+  if (!submitBtn) {
+    console.log('[TCH] auto sign-in: no submit button found — will wait for DOM');
     return;
   }
 
-  console.log('[TCH] auto sign-in: filling credentials');
-  showToast('Auto sign-in: filling credentials…', 'persistent');
+  // Step 1: email field only visible — Target's two-step login flow.
+  if (emailInput && !passInput) {
+    console.log('[TCH] auto sign-in: step 1 — filling email via CDP');
+    showToast('Auto sign-in: entering email…', 'persistent');
+    await sleep(300);
+    await signInClickAndType(emailInput, settings.targetEmail);
+    await sleep(Math.floor(Math.random() * 200) + 300);
+    showToast('Auto sign-in: continuing to password…');
+    await signInCdpClick(submitBtn);
+    await waitForSignInPasswordStep(settings);
+    return;
+  }
 
-  await sleep(300);
+  // Step 2 (or single-step checkout modal): password field is present.
+  if (passInput) {
+    console.log('[TCH] auto sign-in: filling password via CDP');
+    showToast('Auto sign-in: filling credentials…', 'persistent');
+    await sleep(300);
+    if (emailInput) {
+      await signInClickAndType(emailInput, settings.targetEmail);
+      await sleep(Math.floor(Math.random() * 200) + 200);
+    }
+    await signInClickAndType(passInput, settings.targetPassword);
+    await sleep(Math.floor(Math.random() * 200) + 200);
+    showToast('Auto sign-in: submitting…');
+    await signInCdpClick(submitBtn);
+    return;
+  }
 
-  // Fill email using native input value setter so React state picks it up.
-  const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-  if (nativeInputSetter) nativeInputSetter.call(emailInput, settings.targetEmail);
-  else emailInput.value = settings.targetEmail;
-  emailInput.dispatchEvent(new Event('input',  { bubbles: true }));
-  emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+  console.log('[TCH] auto sign-in: login form not found — will wait for DOM');
+}
 
-  await sleep(Math.floor(Math.random() * 200) + 200);
+// CDP helpers used by handleSignInPage and waitForSignInPasswordStep.
+// More human-like than JS synthetic events — PX sensor scores CDP input lower risk.
+const _signInNativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
 
-  // Fill password.
-  if (nativeInputSetter) nativeInputSetter.call(passInput, settings.targetPassword);
-  else passInput.value = settings.targetPassword;
-  passInput.dispatchEvent(new Event('input',  { bubbles: true }));
-  passInput.dispatchEvent(new Event('change', { bubbles: true }));
+async function signInClickAndType(input, text) {
+  try {
+    const rect = input.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + rect.height / 2);
+    const clickRes = await chrome.runtime.sendMessage({ type: 'DEBUGGER_CLICK', x, y });
+    if (clickRes?.ok) {
+      await sleep(80 + Math.floor(Math.random() * 80));
+      const typeRes = await chrome.runtime.sendMessage({ type: 'DEBUGGER_TYPE', text });
+      if (typeRes?.ok) return;
+    }
+  } catch { /* debugger unavailable */ }
+  if (_signInNativeSetter) _signInNativeSetter.call(input, text);
+  else input.value = text;
+  input.dispatchEvent(new Event('input',  { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
 
-  await sleep(Math.floor(Math.random() * 200) + 200);
+async function signInCdpClick(el) {
+  try {
+    const rect = el.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + rect.height / 2);
+    const res = await chrome.runtime.sendMessage({ type: 'DEBUGGER_CLICK', x, y });
+    if (res?.ok) return;
+  } catch { /* fall through */ }
+  el.click();
+}
 
-  showToast('Auto sign-in: submitting…');
-  submitBtn.click();
+// Waits for the password field or a 2FA/OTP prompt after the email step (SPA transition).
+async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
+  return new Promise(resolve => {
+    const obs = new MutationObserver(async (_, observer) => {
+      // OTP field — start Gmail polling instead of blocking automation.
+      const otpInput = document.querySelector(
+        'input[autocomplete="one-time-code"],input[inputmode="numeric"][maxlength="6"],' +
+        'input[name*="otp"],input[name*="code"],input[id*="otp"],input[id*="verif"]'
+      );
+      if (otpInput) {
+        observer.disconnect();
+        console.log('[TCH] auto sign-in: 2FA prompt — polling Gmail for OTP');
+        showToast('2FA detected — checking Gmail for code…', 'persistent');
+
+        const otpListener = async (msg) => {
+          if (msg.type === 'OTP_FOUND') {
+            chrome.runtime.onMessage.removeListener(otpListener);
+            showToast('OTP received — submitting…', 'persistent');
+            await sleep(300);
+            await signInClickAndType(otpInput, msg.code);
+            await sleep(200);
+            const btn = document.querySelector('button[type="submit"],[data-test="account-signin-button"]');
+            if (btn) await signInCdpClick(btn);
+          } else if (msg.type === 'OTP_TIMEOUT') {
+            chrome.runtime.onMessage.removeListener(otpListener);
+            showToast('Gmail OTP timed out — enter code manually', 'persistent');
+          }
+        };
+        chrome.runtime.onMessage.addListener(otpListener);
+
+        chrome.runtime.sendMessage({ type: 'START_OTP_WATCH', startMs: Date.now() })
+          .catch(() => showToast('Gmail not configured — enter code manually', 'persistent'));
+
+        resolve();
+        return;
+      }
+
+      const passInput = document.querySelector('input[id="password"],input[type="password"]');
+      if (passInput) {
+        observer.disconnect();
+        await sleep(400);
+        await handleSignInPage(settings);
+        resolve();
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => {
+      obs.disconnect();
+      console.log('[TCH] auto sign-in: timed out waiting for password step');
+      resolve();
+    }, timeoutMs);
+  });
 }
 
 /** Snapshot cookies immediately after ATC — the highest-value harvest moment. Fire-and-forget. */
@@ -959,7 +1090,7 @@ function getPageType() {
   if (/^\/cart/.test(path))                           return 'cart';
   if (/^\/checkout/.test(path))                       return 'checkout';
   if (/^\/co-thankyou/.test(path))                    return 'confirmation';
-  if (/^\/account\/(login|signin)/i.test(path))       return 'signin';
+  if (/^\/(?:account\/)?(?:login|signin)/i.test(path)) return 'signin';
   return 'other';
 }
 
@@ -2054,6 +2185,7 @@ async function init() {
 
   if (data.harvestConfig?.harvestingEnabled) {
     await maybeAutoHarvestBurst(data);
+    startHarvestRecurringTick();
   }
 
   if (data.monitor?.active && page === 'product') {
@@ -2246,6 +2378,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SETTINGS_UPDATED') {
     invalidateCache();
     runtimeEnabled = !!message.enabled;
+    // Reconcile the harvest recurring tick to the latest config. Harvesting is
+    // independent of the master extension toggle, so this must run even when
+    // runtimeEnabled is false (otherwise toggling harvest on while the
+    // extension is off never starts the tick).
+    (async () => {
+      try {
+        const d = await getSettings();
+        const onTarget = typeof TCH_HOSTS !== 'undefined'
+          && TCH_HOSTS.detectRetailer(location.href) === 'target';
+        if (onTarget && d?.harvestConfig?.harvestingEnabled) {
+          startHarvestRecurringTick();
+        } else {
+          stopHarvestRecurringTick();
+        }
+      } catch { /* non-fatal */ }
+    })();
     if (!runtimeEnabled) {
       clearCheckoutRetryState();
       document.getElementById('tch-toast')?.remove();
@@ -2264,14 +2412,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // ─── VISIBILITY CHANGE ────────────────────────────────────────────────────────
 
-document.addEventListener('visibilitychange', () => {
+function tchSendVisibility() {
   try {
     chrome.runtime.sendMessage({
       type: 'HARVEST_VISIBILITY_CHANGE',
       hidden: document.visibilityState === 'hidden',
     });
   } catch (_) {}
-});
+}
+
+document.addEventListener('visibilitychange', tchSendVisibility);
+tchSendVisibility();
 
 // ─── GO ──────────────────────────────────────────────────────────────────────
 

@@ -105,21 +105,21 @@ section('Drop polling logic (mocked clock)');
   const now = DROP_MS - 7 * 60 * 1000;
   const { getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
   assert(getHarvestKeepaliveMinIntervalMs(mon) === 2 * 60 * 1000, 'harvest keepalive 2m in tension');
-  assert(getHarvestBurstSameUrlDedupMs(mon) === 12 * 1000, 'harvest burst dedup 12s in tension');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 20 * 1000, 'harvest burst dedup 20s in tension');
 }
 {
   const mon = { dropExpectedAt: dropIso };
   const now = DROP_MS - 20 * 60 * 1000;
   const { getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
-  assert(getHarvestKeepaliveMinIntervalMs(mon) === 8 * 60 * 1000, 'harvest keepalive 8m within 45m pre-drop');
-  assert(getHarvestBurstSameUrlDedupMs(mon) === 30 * 1000, 'harvest burst dedup 30s within 45m pre-drop');
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 3 * 60 * 1000, 'harvest keepalive 3m within 45m pre-drop');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 45 * 1000, 'harvest burst dedup 45s within 45m pre-drop');
 }
 {
   const mon = { dropExpectedAt: dropIso };
   const now = DROP_MS - 50 * 60 * 1000;
   const { getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
   assert(getHarvestKeepaliveMinIntervalMs(mon) === 5 * 60 * 1000, 'harvest keepalive 5m far from drop');
-  assert(getHarvestBurstSameUrlDedupMs(mon) === 60 * 1000, 'harvest burst dedup 60s far from drop');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 120 * 1000, 'harvest burst dedup 120s far from drop');
 }
 {
   const mon = {};
@@ -181,3 +181,4 @@ if (process.exitCode === 1) {
   process.exit(1);
 }
 console.log('\nAll drop-polling assertions passed.');
+

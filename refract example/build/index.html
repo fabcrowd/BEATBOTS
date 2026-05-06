@@ -1,0 +1,78 @@
+<html lang="en">
+  <head>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="popup.js"></script>
+    <script src="jquery.js"></script>
+  </head>
+  <body>
+    <div id="branding-container">
+      <img src="brand.png" alt="logo" />
+    </div>
+    <div id="loading-container">
+      <div class="animation">
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+      <p>Connecting to Refract (make sure your bot is open)...</p>
+    </div>
+    <div id="content-container">
+      <h4 class="header">Select Proxy List</h4>
+      <div id="dropdown-container">
+        <select id="dropdown-select" onselect=""></select>
+      </div>
+      <h4 class="header">Harvests Per Page Load</h4>
+      <p class="subheader">Usually 1, can do a bit more on login to speed it up.</p>
+      <div id="harvests-per-page-load-container">
+        <input id="harvests-per-page-load-input" type="number" placeholder="1" />
+      </div>
+      <h4 class="header">Data Expiration (Minutes)</h4>
+      <div id="expiration-minutes-container">
+        <input id="expiration-minutes-input" type="number" placeholder="1" />
+      </div>
+      <h4 class="header">Actions</h4>
+      <div id="actions-container">
+        <button class="red-button" id="clear-harvested">
+          Clear Harvested Data
+        </button>
+        <!-- <button class="red-button" id="clear-browser">
+          Clear Browser Data
+        </button> -->
+        <label id="removal-order-label"></label>
+        <button id="removal-order"></button>
+        <label id="automation-label">Current: Harvesting Off</label>
+        <button id="automation">Start Harvesting</button>
+        <label id="harvest-label">Currently: Harvest 3 Per RUNNING Task</label>
+        <button id="harvest">Don't Stop Harvesting</button>
+        <div id="amount-container">
+          <p id="amount">Add To Cart Cookies Ready: Unknown</p>
+          <p>Login Cookies Not Tracked. See guide for more info.</p>
+          <a href="https://help.refractbot.com/modules/target/extension" target="_blank"><p>CLICK HERE FOR GUIDE</p></a>
+        </div>
+        <div id="automation-text">
+          <p>TIPS - READ THIS:</p>
+          <p>- Login may require multiple cookie harvests per task.</p>
+          <p>- Login once per task, then leave it running for ATC.</p>
+          <p>- Only works on product or login page.</p>
+          <p>- 1 Target tab/extension per browser.</p>
+          <p>- Issues? Restart your browser and extension.</p>
+        </div>
+      </div>
+    </div>
+    <div id="footer">
+      <div id="version">Version: Unknown</div>
+    </div>
+  </body>
+</html>
