@@ -316,6 +316,7 @@ function gatherSettings() {
     shippingJig: shippingJigEl ? shippingJigEl.value.trim() : '',
     walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
     walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
+    walmartAtcOnly: !!$('walmartAtcOnly')?.checked,
     walmartUseSavedSession: $('walmartUseSavedSession') ? !!$('walmartUseSavedSession').checked : true,
     harvestConfig: gatherHarvestConfigFromDom(),
     discordWebhook: ($('discordWebhook')?.value || '').trim(),
@@ -466,6 +467,9 @@ function populateFields(data) {
 
   const wmSkipEl = $('walmartSkipMonitoring');
   if (wmSkipEl) wmSkipEl.checked = !!data.walmartSkipMonitoring;
+
+  const wmAtcOnlyEl = $('walmartAtcOnly');
+  if (wmAtcOnlyEl) wmAtcOnlyEl.checked = !!data.walmartAtcOnly;
 
   const wmSessionEl = $('walmartUseSavedSession');
   if (wmSessionEl) wmSessionEl.checked = data.walmartUseSavedSession !== false;
@@ -627,6 +631,7 @@ if (hasChromeStorage()) {
       'shippingJig',
       'walmartMaxPrice',
       'walmartSkipMonitoring',
+      'walmartAtcOnly',
       'walmartUseSavedSession',
       'checkoutSpeeds',
       'harvestConfig',
@@ -724,6 +729,7 @@ $('autoPlaceOrder')?.addEventListener('change', autoSaveToggle);
 $('preferPickup')?.addEventListener('change', autoSaveToggle);
 $('checkoutSound')?.addEventListener('change', autoSaveToggle);
 $('walmartSkipMonitoring')?.addEventListener('change', autoSaveToggle);
+$('walmartAtcOnly')?.addEventListener('change', autoSaveToggle);
 $('walmartUseSavedSession')?.addEventListener('change', autoSaveToggle);
 $('addExtraProduct')?.addEventListener('change', () => {
   const row = $('extraProductRow');

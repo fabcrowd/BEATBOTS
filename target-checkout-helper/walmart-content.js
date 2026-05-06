@@ -58,6 +58,7 @@ async function wmGetSettings() {
       'autoPlaceOrder',
       'walmartMaxPrice',
       'walmartSkipMonitoring',
+      'walmartAtcOnly',
       'walmartUseSavedSession',
       'shippingJig',
       'checkoutSound',
@@ -594,6 +595,13 @@ async function wmHandleProductPage(settings, oid) {
 }
 
 async function wmHandleCart(settings) {
+  // ATC-only mode: bot's job is done. Alert the user and stop here.
+  if (settings.walmartAtcOnly) {
+    wmShowToast('✅ ATC done — take over now! Checkout is yours.', 'persistent');
+    console.log('[WMT] walmartAtcOnly — stopping at cart, handing off to user');
+    if (settings.checkoutSound !== false) wmPlayBeep();
+    return;
+  }
   wmShowToast('In cart — proceeding to checkout…', 'persistent');
   const checkoutBtn = await wmWaitFor(() => {
     const primary = document.querySelector(WM_SEL.checkout);
@@ -983,6 +991,7 @@ async function _wmInit() {
     autoPlaceOrder:        !!data.autoPlaceOrder,
     walmartMaxPrice:       parseFloat(data.walmartMaxPrice) || 0,
     walmartSkipMonitoring: !!data.walmartSkipMonitoring,
+    walmartAtcOnly:        !!data.walmartAtcOnly,
     walmartUseSavedSession: data.walmartUseSavedSession !== false,
     shippingJig:           data.shippingJig || '',
     checkoutSound:         data.checkoutSound !== false,

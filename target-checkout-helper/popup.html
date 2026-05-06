@@ -323,6 +323,12 @@
         </label>
         <p class="option-hint">Forces immediate ATC without waiting for stock confirmation. Only use when the item goes live at exactly the drop time.</p>
 
+        <label class="option-row" style="margin-top:10px" title="When ON, the bot handles ATC and navigates to your cart, then stops. You take over checkout, shipping, payment, and Place Order manually. Use this when you prefer to handle the checkout queue yourself.">
+          <input type="checkbox" id="walmartAtcOnly">
+          <span class="option-label">ATC only — I'll handle checkout manually</span>
+        </label>
+        <p class="option-hint">Bot gets you in the cart, then hands off. You drive the checkout queue and payment.</p>
+
         <button type="button" id="wmMonitorBtn" class="btn-monitor" style="margin-top:12px;background:#0071ce;border-color:#0071ce" title="Starts background monitoring for all Walmart products in the list. Opens tabs, polls inventory, and attempts ATC + checkout when stock appears.">Start monitoring</button>
         <div id="wmMonitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
       </section>
