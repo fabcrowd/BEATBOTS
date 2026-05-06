@@ -486,8 +486,15 @@ async function wmHandleQueueRoom(settings) {
   wmShowToast('In Walmart waiting room — holding your spot…', 'persistent');
   console.log('[WMT] /qp waiting room detected — passive hold, DO NOT navigate');
 
-  const lockUrl = settings?.productUrl || location.href;
-  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
+  // Lock MUST use the product URL (/ip/.../itemId) — the poll loop keys inQueueUrls
+  // by normalized product URL. Using location.href (/qp?...) would normalize to /qp
+  // and never match, leaving the tab unprotected from background re-navigation.
+  const lockUrl = settings?.productUrl;
+  if (lockUrl) {
+    try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
+  } else {
+    console.warn('[WMT] wmHandleQueueRoom: no productUrl in settings — background nav lock NOT set');
+  }
 
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();

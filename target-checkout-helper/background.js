@@ -1474,6 +1474,7 @@ async function handleATCSuccess(url, tabId) {
 
   const normUrl = normalizeProductUrl(url);
   navigationLock.delete(normUrl); // release — ATC succeeded
+  inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
   monitor.counts[normUrl] = (monitor.counts[normUrl] || 0) + 1;
   await chrome.storage.local.set({ monitor });
 
