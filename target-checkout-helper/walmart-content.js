@@ -8,7 +8,8 @@ const WM_SEL = {
   // Product page
   atc:          '[data-automation-id="add-to-cart-btn"]',
   atcAlt:       'button[class*="AddToCartButton"], button[class*="add-to-cart"]',
-  // Price — try structured data first, fall back to text
+  atcFallback:  '#add-on-atc-container button',
+  // Price — __NEXT_DATA__ preferred (see wmGetCurrentPrice); DOM fallbacks below
   price:        '[itemprop="price"], [data-automation-id="product-price"], [class*="price-characteristic"]',
   // Post-ATC modal / mini-cart
   viewCart:     'a[href="/cart"][data-automation-id], button[data-automation-id="go-to-cart-btn"]',
@@ -27,11 +28,18 @@ const WM_SEL = {
   zip:          'input[name="postalCode"], input[name="zipCode"], input[autocomplete="postal-code"]',
   phone:        'input[name="phone"], input[autocomplete="tel"]',
   // Payment fields
-  cardNumber:   'input[name="cardNumber"], input[id*="card-number"], input[autocomplete="cc-number"]',
+  cardNumber:   'input[id="creditCard"], input[name="cardNumber"], input[id*="card-number"], input[autocomplete="cc-number"]',
   expiry:       'input[name="expirationDate"], input[placeholder*="MM/YY"], input[placeholder*="MM / YY"]',
-  expMonth:     'input[name="expiryMonth"], input[id*="exp-month"]',
-  expYear:      'input[name="expiryYear"], input[id*="exp-year"]',
-  cvv:          'input[name="cvvNumber"], input[name="cvv"], input[autocomplete="cc-csc"]',
+  expMonth:     'select[id="month-chooser"], select[name="month"], input[name="expiryMonth"], input[id*="exp-month"]',
+  expYear:      'select[id="year-chooser"], select[name="year"], input[name="expiryYear"], input[id*="exp-year"]',
+  cvv:          'input[id="cvv"], input[name="cvvNumber"], input[name="cvv"], input[autocomplete="cc-csc"]',
+  // Billing address (Walmart validates billing zip matches card)
+  billingFirstName: 'input[id="billingFirstName"], input[name="billingFirstName"]',
+  billingLastName:  'input[id="billingLastName"], input[name="billingLastName"]',
+  billingAddress1:  'input[id="billingAddressLineOne"], input[name="billingAddressLine1"], input[name="billingAddress1"]',
+  billingCity:      'input[id="billingCity"], input[name="billingCity"]',
+  billingState:     'select[id="billingState"], select[name="billingState"]',
+  billingZip:       'input[id="billingPostalCode"], input[name="billingPostalCode"], input[name="billingZip"]',
 };
 
 // ─── SETTINGS CACHE ──────────────────────────────────────────────────────────
@@ -151,6 +159,14 @@ function wmIsVisible(el) {
  * to the visible text of the first price element.
  */
 function wmGetCurrentPrice() {
+  // Prefer __NEXT_DATA__ — authoritative, reflects drop price immediately at go-time
+  try {
+    const nd = window.__NEXT_DATA__;
+    const p = nd?.props?.pageProps?.initialData?.data?.product?.priceInfo?.currentPrice?.price;
+    if (typeof p === 'number' && p > 0) return p;
+  } catch (_) {}
+
+  // DOM fallbacks
   for (const sel of WM_SEL.price.split(', ')) {
     try {
       const el = document.querySelector(sel);
@@ -224,6 +240,8 @@ async function wmDebuggerClick(el) {
 
 /** Generic queue/waiting-room indicator — works on both product page and /checkout. */
 function wmHasQueueIndicators() {
+  // /qp is Walmart's white-labeled waiting room URL (Queue-it under waiting-room.walmart.com)
+  if (location.pathname.startsWith('/qp')) return true;
   const text = (document.body?.innerText || '').toLowerCase();
   return (
     text.includes('estimated wait') ||
@@ -231,7 +249,7 @@ function wmHasQueueIndicators() {
     text.includes('your position in line') ||
     text.includes('admission likelihood') ||
     (text.includes('queue') && text.includes('wait')) ||
-    !!document.querySelector('[class*="QueuePage"], [data-automation-id*="queue"], [class*="queue-it"]')
+    !!document.querySelector('[class*="QueuePage"], [data-automation-id*="queue"]')
   );
 }
 
@@ -268,6 +286,7 @@ function wmGetPageType() {
   const path = location.pathname;
   if (/^\/ip\//.test(path))           return 'product';
   if (/^\/cart/.test(path))           return 'cart';
+  if (/^\/qp/.test(path))             return 'queue-room';
   if (/^\/checkout/.test(path)) {
     if (wmIsQueuePage())              return 'queue';
     if (document.querySelector(WM_SEL.placeOrder) ||
@@ -291,40 +310,77 @@ function wmGetPageType() {
  * @param {string} oid  Walmart Offer ID (hex string)
  * @returns {Promise<boolean>}  true if item was added and we navigated to checkout
  */
-async function wmDirectAtc(oid) {
+async function wmDirectAtc(oid, settings) {
   wmShowToast('Direct ATC via OID…', 'persistent');
   console.log('[WMT] Direct ATC — OID:', oid);
 
-  // Walmart's internal cart API used by the frontend when the ATC button is clicked.
-  // Runs with the user's cookies (credentials: 'include') so no auth headers needed.
-  const endpoints = [
-    { url: 'https://www.walmart.com/api/checkout/v3/cart', body: { offerId: oid, quantity: 1 } },
-    { url: 'https://www.walmart.com/api/checkout/v3/cart/items', body: { offerId: oid, quantity: 1 } },
-  ];
-
-  for (const ep of endpoints) {
+  // Extract customer ID (CID) required by the v3 cart API.
+  // Walmart embeds it in __NEXT_DATA__.props.pageProps.customerId and also in
+  // the vidUserId cookie for guest sessions.
+  const cid = (() => {
     try {
-      const res = await fetch(ep.url, {
+      const nd = window.__NEXT_DATA__;
+      return nd?.props?.pageProps?.customerId || null;
+    } catch { return null; }
+  })() || (() => {
+    const m = document.cookie.match(/(?:^|;\s*)vidUserId=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  })();
+
+  if (!cid) {
+    console.warn('[WMT] wmDirectAtc: no CID found — falling back to DOM');
+    return false;
+  }
+
+  const s = settings?.shipping || {};
+  const url = `https://www.walmart.com/api/v3/cart/guest/${cid}/items`;
+  const body = {
+    offerId: oid,
+    quantity: 1,
+    location: {
+      isZipLocated: !!(s.zip),
+      storeId: '5260',
+      zipCode: s.zip || '10001',
+      stateCode: s.state || 'NY',
+      city: s.city || 'New York',
+    },
+    shipMethodDefaultRule: 'SHIP_RULE_1',
+  };
+
+  // More attempts when skip-monitoring (speed-race mode); single attempt otherwise.
+  const maxAttempts = settings?.walmartSkipMonitoring ? 3 : 1;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const res = await fetch(url, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(ep.body),
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'wm_offer_id': oid,
+          'sec-fetch-site': 'same-origin',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'Referer': 'https://www.walmart.com/',
+        },
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(5000),
       });
-      console.log('[WMT] Direct ATC response:', ep.url, res.status);
-      if (res.ok || res.status === 200) {
+      console.log('[WMT] Direct ATC response:', res.status, 'attempt', i + 1);
+      if (res.ok) {
         wmShowToast('OID cart add succeeded — going to checkout…', 'success');
-        wmSignalAtcSuccess(null); // productUrl resolved by background via sender.tab.url
+        wmSignalAtcSuccess(null);
         await wmSleep(300);
         window.location.href = 'https://www.walmart.com/checkout';
         return true;
       }
     } catch (e) {
-      console.warn('[WMT] Direct ATC error on', ep.url, e.message);
+      console.warn('[WMT] Direct ATC error (attempt', i + 1, '):', e.message);
     }
+    if (i < maxAttempts - 1) await wmSleep(800);
   }
 
-  console.warn('[WMT] Direct ATC failed on all endpoints — falling back to DOM');
+  console.warn('[WMT] Direct ATC failed — falling back to DOM');
   return false;
 }
 
@@ -376,7 +432,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
       // Try OID fast path now that queue has cleared
       if (oid) {
-        const ok = await wmDirectAtc(oid);
+        const ok = await wmDirectAtc(oid, settings);
         if (ok) return;
       }
 
@@ -407,6 +463,36 @@ async function wmWaitInProductQueue(settings, oid) {
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
+}
+
+/**
+ * Handles Walmart's /qp waiting room page (white-labeled Queue-it).
+ * The queue auto-redirects to /checkout when the user's position clears —
+ * we must stay on the page and wait, not navigate or reload.
+ */
+async function wmHandleQueueRoom(settings) {
+  wmShowToast('In Walmart waiting room — holding your spot…', 'persistent');
+  console.log('[WMT] /qp waiting room detected — passive hold, DO NOT navigate');
+
+  const lockUrl = settings?.productUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
+
+  const maxWaitMs = 45 * 60 * 1000;
+  const started = Date.now();
+
+  while (Date.now() - started < maxWaitMs) {
+    await wmSleep(5000);
+    // When the waiting room clears, Walmart redirects away from /qp automatically.
+    // The SPA watcher fires wmInit() on URL change — no extra action needed here.
+    if (!location.pathname.startsWith('/qp')) return;
+    const elapsed = Math.round((Date.now() - started) / 1000);
+    if (elapsed % 60 === 0) {
+      wmShowToast(`Waiting room — ${Math.round(elapsed / 60)}m elapsed…`, 'persistent');
+    }
+  }
+
+  wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
+  console.warn('[WMT] /qp waiting room timeout after 45 min');
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -624,7 +710,7 @@ async function wmHandlePayment(settings) {
     if (el) wmFillInput(el, p.cardNumber);
   }
 
-  // Try combined MM/YY expiry first, then split month/year.
+  // Try combined MM/YY expiry first, then split month/year selects or inputs.
   const expCombined = wmFindFirst(...WM_SEL.expiry.split(', '));
   if (expCombined && p.expMonth && p.expYear) {
     const yr = p.expYear.length === 4 ? p.expYear.slice(-2) : p.expYear;
@@ -632,17 +718,48 @@ async function wmHandlePayment(settings) {
   } else {
     if (p.expMonth) {
       const el = wmFindFirst(...WM_SEL.expMonth.split(', '));
-      if (el) wmFillInput(el, p.expMonth);
+      if (el) {
+        if (el.tagName === 'SELECT') wmFillSelect(el, p.expMonth);
+        else wmFillInput(el, p.expMonth);
+      }
     }
     if (p.expYear) {
       const el = wmFindFirst(...WM_SEL.expYear.split(', '));
-      if (el) wmFillInput(el, p.expYear);
+      if (el) {
+        if (el.tagName === 'SELECT') {
+          // year-chooser options are typically 4-digit values
+          const yr4 = p.expYear.length === 2 ? `20${p.expYear}` : p.expYear;
+          wmFillSelect(el, yr4);
+        } else {
+          wmFillInput(el, p.expYear);
+        }
+      }
     }
   }
 
   if (p.cvv) {
     const el = wmFindFirst(...WM_SEL.cvv.split(', '));
     if (el) wmFillInput(el, p.cvv);
+  }
+
+  // Billing address — Walmart validates billing zip matches the card's billing zip.
+  // Use payment.billingZip if set; fall back to shipping address fields for the rest.
+  const s = settings.shipping || {};
+  const billingMap = [
+    [WM_SEL.billingFirstName, p.billingFirstName || s.firstName],
+    [WM_SEL.billingLastName,  p.billingLastName  || s.lastName],
+    [WM_SEL.billingAddress1,  p.billingAddress1  || s.address1],
+    [WM_SEL.billingCity,      p.billingCity      || s.city],
+    [WM_SEL.billingZip,       p.billingZip       || s.zip],
+  ];
+  for (const [sel, value] of billingMap) {
+    if (!value) continue;
+    const el = wmFindFirst(...sel.split(', '));
+    if (el) wmFillInput(el, value);
+  }
+  if (p.billingState || s.state) {
+    const el = wmFindFirst(...WM_SEL.billingState.split(', '));
+    if (el) wmFillSelect(el, p.billingState || s.state);
   }
 
   await wmSleep(400);
@@ -854,11 +971,25 @@ async function _wmInit() {
     productUrl:            matchedProduct?.url || null,
   };
 
-  if (page === 'product')      await wmHandleProductPage(settings, oid);
-  else if (page === 'cart')    await wmHandleCart(settings);
-  else if (page === 'queue')   await wmHandleQueue(settings);
-  else if (page === 'checkout') await wmHandleCheckout(settings);
-  else if (page === 'review')  await wmHandleReview(settings);
+  if (page === 'product') {
+    // Extract OID from __NEXT_DATA__ and report to background — enables backend-link
+    // mode where background fires ATC immediately at dropExpectedAt without poll delay.
+    const pageOid = (() => {
+      try {
+        const nd = window.__NEXT_DATA__;
+        return nd?.props?.pageProps?.initialData?.data?.product?.primaryOffer?.offerId || null;
+      } catch { return null; }
+    })();
+    if (pageOid && pageOid !== oid) {
+      chrome.runtime.sendMessage({ type: 'WM_OFFER_ID_READY', offerId: pageOid, url: location.href }).catch(() => {});
+    }
+    await wmHandleProductPage(settings, oid || pageOid);
+  }
+  else if (page === 'cart')      await wmHandleCart(settings);
+  else if (page === 'queue-room') await wmHandleQueueRoom(settings);
+  else if (page === 'queue')     await wmHandleQueue(settings);
+  else if (page === 'checkout')  await wmHandleCheckout(settings);
+  else if (page === 'review')    await wmHandleReview(settings);
   else if (page === 'confirmation') wmShowToast('Order placed!', 'success');
 }
 

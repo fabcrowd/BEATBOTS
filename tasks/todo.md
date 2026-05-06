@@ -292,3 +292,230 @@ No cookie harvest in Walmart module — the `captureAtcSnapshot()` pattern is no
 - [ ] **Walmart stock API validation** — `walmart.com/item/json/{id}` may require header tuning; add HTML `__NEXT_DATA__` fallback if it returns 404/403 consistently
 - [ ] **Offer ID support** — deferring; allows targeting a specific drop variant without polling
 - [ ] **Popup title** — still says "Target Checkout Helper"; update to "Checkout Helper" when Walmart is confirmed working
+
+---
+
+## Walmart Phase 2 — Bug Fixes + Queue Strategy (v1.8.0)
+
+**Research source:** Deep codebase analysis + community Discord + Refract extension comparison.
+
+### Summary of bugs found
+
+| # | File | Location | Issue |
+|---|---|---|---|
+| 1 | background.js | `checkWalmartItemStock()` L332–353 | Only accepts `IN_STOCK`; misses `LIMITED_STOCK`; no price extraction |
+| 2 | background.js | `startMonitor()` + poll loop | No `walmartMaxPrice` param; no Walmart price gate before navigation |
+| 3 | background.js | `START_MONITOR` handler | Does not thread `walmartMaxPrice` through to monitor |
+| 4 | popup.js | `toggleMonitor()` | Does not send `walmartMaxPrice` in START_MONITOR message |
+| 5 | walmart-content.js | `wmDirectAtc()` L294–329 | Wrong endpoint (`/api/checkout/v3/cart`); no CID extraction; wrong body |
+| 6 | walmart-content.js | `wmGetPageType()` L267–279 | Missing `queue-room` case for `/qp` path |
+| 7 | walmart-content.js | `wmHasQueueIndicators()` L226–237 | `[class*="queue-it"]` never matches; `/qp` URL not checked |
+| 8 | walmart-content.js | `WM_SEL` L7–35 | Expiry = `input[name="expirationDate"]` — wrong; Walmart uses separate month/year selects |
+| 9 | walmart-content.js | `wmHandlePayment()` L608–654 | No billing address fill; Walmart validates billing zip |
+| 10 | walmart-content.js | `wmGetCurrentPrice()` L153–173 | `[class*="price-characteristic"]` is pre-Next.js, fragile; no `__NEXT_DATA__` fallback |
+
+### Phase 1 — background.js (stock + price gate)
+
+#### 1.1 Fix `checkWalmartItemStock()` — accept LIMITED_STOCK + extract price
+```js
+// Change: status === 'IN_STOCK' → includes LIMITED_STOCK
+const ok = ['IN_STOCK', 'LIMITED_STOCK'].includes(status);
+// Add: extract price from priceInfo.currentPrice.price
+const price = data?.priceInfo?.currentPrice?.price ?? null;
+return { inStock: ok, price };
+```
+
+#### 1.2 Add `walmartMaxPrice` to `startMonitor()` signature + opts
+```js
+// In startMonitor(products, refreshInterval, dropExpectedAt, skipMonitoring, opts):
+monitor.walmartMaxPrice = opts?.walmartMaxPrice ?? null;
+```
+
+#### 1.3 Add Walmart price gate in background poll loop
+After existing Target price gate block (lines ~685–697):
+```js
+if (product.retailer === 'walmart' && monitor.walmartMaxPrice != null) {
+  const { inStock, price } = await checkWalmartItemStock(product.itemId);
+  if (!inStock) continue;
+  if (price != null && price > monitor.walmartMaxPrice) {
+    console.log(`[TCH] Walmart price $${price} > max $${monitor.walmartMaxPrice}, skip`);
+    continue;
+  }
+  // navigate tab
+}
+```
+
+#### 1.4 Thread `walmartMaxPrice` through START_MONITOR handler
+```js
+// In START_MONITOR message handler:
+startMonitor(products, interval, dropExpectedAt, skipMonitoring, {
+  targetMaxPrice: message.targetMaxPrice,
+  walmartMaxPrice: message.walmartMaxPrice,   // ADD THIS
+});
+```
+
+### Phase 2 — walmart-content.js core
+
+#### 2.1 Rewrite `wmDirectAtc()` with correct endpoint + CID extraction
+```js
+async function wmDirectAtc(offerId) {
+  // Extract CID
+  const cid = (() => {
+    try {
+      const nd = window.__NEXT_DATA__;
+      return nd?.props?.pageProps?.customerId || null;
+    } catch { return null; }
+  })() || (() => {
+    const m = document.cookie.match(/(?:^|;\s*)vidUserId=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  })();
+  if (!cid) { console.warn('[TCH] wmDirectAtc: no CID'); return false; }
+
+  const url = `https://www.walmart.com/api/v3/cart/guest/${cid}/items`;
+  const body = {
+    offerId,
+    quantity: 1,
+    location: { isZipLocated: false, storeId: '5260', zipCode: '10001', stateCode: 'NY', city: 'New York' },
+    shipMethodDefaultRule: 'SHIP_RULE_1',
+  };
+  const maxAttempts = walmartSkipMonitoring ? 3 : 1;
+  for (let i = 0; i < maxAttempts; i++) {
+    const r = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'wm_offer_id': offerId,
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-dest': 'empty',
+        'Referer': 'https://www.walmart.com/',
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) return true;
+    if (i < maxAttempts - 1) await new Promise(res => setTimeout(res, 800));
+  }
+  return false;
+}
+```
+
+#### 2.2 Add `queue-room` to `wmGetPageType()`
+```js
+if (location.pathname.startsWith('/qp')) return 'queue-room';
+```
+
+#### 2.3 Fix `wmHasQueueIndicators()`
+- Remove `[class*="queue-it"]` check (never matches Walmart)
+- Add: `location.pathname.startsWith('/qp')` check
+- Keep body text check for "estimated wait" / "you're in queue"
+
+#### 2.4 Add `wmHandleQueueRoom()` + wire into `_wmInit()`
+```js
+async function wmHandleQueueRoom() {
+  setStatus('In Walmart queue — waiting for position...');
+  // Poll every 5s; when page navigates away from /qp, _wmInit() re-fires
+  const check = () => {
+    if (!location.pathname.startsWith('/qp')) return;
+    setTimeout(check, 5000);
+  };
+  check();
+}
+// In _wmInit() dispatch:
+case 'queue-room': return wmHandleQueueRoom();
+```
+
+### Phase 3 — walmart-content.js selectors + payment
+
+#### 3.1 Fix expiry selectors in WM_SEL
+```js
+// Replace single expirationDate input with:
+expiryMonth: 'select[id="month-chooser"], select[name="month"], select[id*="month"]',
+expiryYear: 'select[id="year-chooser"], select[name="year"], select[id*="year"]',
+```
+Add `wmFillSelect(sel, value)` helper that finds the matching `<option>` by value prefix.
+
+#### 3.2 Add missing selectors to WM_SEL
+```js
+cvv: 'input[id="cvv"], input[name="cvv"], input[autocomplete="cc-csc"]',
+cardNumber: 'input[id="creditCard"], input[name*="cardNumber"], input[autocomplete="cc-number"]',
+atcFallback: '#add-on-atc-container button',
+```
+
+#### 3.3 Add `__NEXT_DATA__` price fallback to `wmGetCurrentPrice()`
+```js
+// Try __NEXT_DATA__ first (most reliable)
+try {
+  const nd = window.__NEXT_DATA__;
+  const p = nd?.props?.pageProps?.initialData?.data?.product?.priceInfo?.currentPrice?.price;
+  if (p) return p;
+} catch {}
+// Then DOM selectors (existing code as fallback)
+```
+
+#### 3.4 Add billing address fill to `wmHandlePayment()`
+```js
+// Billing address selectors in WM_SEL:
+billingFirstName: 'input[id="billingFirstName"], input[name="billingFirstName"]',
+billingLastName: 'input[id="billingLastName"], input[name="billingLastName"]',
+billingAddress: 'input[id="billingAddressLineOne"], input[name="billingAddressLine1"]',
+billingCity: 'input[id="billingCity"], input[name="billingCity"]',
+billingState: 'select[id="billingState"], select[name="billingState"]',
+billingZip: 'input[id="billingPostalCode"], input[name="billingPostalCode"]',
+// Fill: use same settings.shippingAddress fields (billing = shipping for most users)
+// Note: billing zip MUST match card zip for Walmart checkout to proceed
+```
+
+### Phase 4 — popup.js
+
+#### 4.1 Send `walmartMaxPrice` in START_MONITOR message
+```js
+// In toggleMonitor() / gatherSettings():
+walmartMaxPrice: parseFloat(document.getElementById('walmartMaxPrice')?.value) || null,
+```
+
+#### 4.2 Add `walmartMaxPrice` input to popup.html
+```html
+<h4 class="header">Walmart Max Price</h4>
+<input id="walmartMaxPrice" type="number" placeholder="e.g. 55" />
+```
+
+### Phase 5 — Backend link / pre-queue strategy
+
+**Finding from community research:** "Backend links" = direct product URLs found before a scheduled drop. Key workflow:
+1. Find the product URL before the drop goes live (often shared in Discord/Reddit)
+2. Navigate to it early — Walmart shows "Unavailable" but the page loads
+3. Extract `offerId` from `__NEXT_DATA__` while page is loaded
+4. At drop time (e.g. 9PM ET Wednesday), execute `wmDirectAtc(offerId)` immediately
+5. If ATC succeeds, proceed to `/cart` → checkout queue
+
+**Implementation:** Add "Backend Link Mode" to popup — user pastes Walmart product URL; extension extracts `offerId` from `__NEXT_DATA__` on page load and stores it. At `dropExpectedAt` time, fires `wmDirectAtc()` immediately instead of waiting for stock polling to detect restock.
+
+```js
+// In walmart-content.js on product page load:
+const nd = window.__NEXT_DATA__;
+const offerId = nd?.props?.pageProps?.initialData?.data?.product?.primaryOffer?.offerId;
+if (offerId) chrome.runtime.sendMessage({ type: 'WM_OFFER_ID_READY', offerId, url: location.href });
+// background.js stores it on monitor; at dropExpectedAt fires content-script ATC immediately
+```
+
+### Implementation order
+
+- [x] **1.1** `checkWalmartItemStock()` — LIMITED_STOCK + price extraction
+- [x] **1.2** `startMonitor()` — add `walmartMaxPrice` to opts
+- [x] **1.3** Poll loop — Walmart price gate
+- [x] **1.4** `START_MONITOR` handler — thread `walmartMaxPrice`
+- [x] **2.1** `wmDirectAtc()` — full rewrite with CID + correct endpoint
+- [x] **2.2** `wmGetPageType()` — add queue-room case for `/qp`
+- [x] **2.3** `wmHasQueueIndicators()` — removed dead `[class*="queue-it"]`, added `/qp` URL check
+- [x] **2.4** `wmHandleQueueRoom()` — new function + dispatch in `_wmInit()`
+- [x] **3.1** WM_SEL expiry — month/year selects (month-chooser / year-chooser) + select-aware fill
+- [x] **3.2** WM_SEL — add cvv id fallback, creditCard id fallback, atcFallback selector
+- [x] **3.3** `wmGetCurrentPrice()` — `__NEXT_DATA__` first
+- [x] **3.4** Billing address — selectors + fill in `wmHandlePayment()` (uses payment.billingZip, falls back to shipping)
+- [x] **4.1** popup.js — send `walmartMaxPrice` in START_MONITOR message
+- [x] **4.2** popup.html — `walmartMaxPrice` input was already present
+- [x] **5** Backend link / offer ID pre-extraction: `_wmInit()` extracts OID from `__NEXT_DATA__`, sends `WM_OFFER_ID_READY` to background; background stores it on product
+- [x] Verify: `node --check target-checkout-helper/*.js` — all OK
+- [x] Verify: `node scripts/checkout-speed-test.mjs` — all assertions passed
+- [ ] Update `nextsession.md`

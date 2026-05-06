@@ -61,6 +61,110 @@ async function postDiscordWebhook({ title, description, color, fields }) {
   }
 }
 
+// ─── GMAIL OTP AUTOMATION ────────────────────────────────────────────────────
+
+/** Returns a valid Gmail access token, refreshing via refresh_token if expired. */
+async function gmailGetValidToken() {
+  const d = await chrome.storage.local.get([
+    'gmailAccessToken', 'gmailTokenExpiry', 'gmailRefreshToken',
+    'gmailClientId', 'gmailClientSecret',
+  ]);
+  if (!d.gmailRefreshToken) return null;
+  if (d.gmailAccessToken && d.gmailTokenExpiry && Date.now() < d.gmailTokenExpiry - 60000) {
+    return d.gmailAccessToken;
+  }
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: d.gmailClientId || '',
+      client_secret: d.gmailClientSecret || '',
+      refresh_token: d.gmailRefreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+  if (!res.ok) { console.warn('[TCH bg] Gmail token refresh failed:', res.status); return null; }
+  const json = await res.json();
+  const token = json.access_token;
+  const expiry = Date.now() + (json.expires_in || 3600) * 1000;
+  await chrome.storage.local.set({ gmailAccessToken: token, gmailTokenExpiry: expiry });
+  return token;
+}
+
+/** Search Gmail for an unread Target OTP email and return the 6-digit code, or null. */
+async function gmailFindOtpCode(token) {
+  const listRes = await fetch(
+    'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=from%3Atarget.com+is%3Aunread+newer_than%3A5m&maxResults=5',
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!listRes.ok) return null;
+  const list = await listRes.json();
+  if (!list.messages?.length) return null;
+
+  for (const { id } of list.messages) {
+    const msgRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!msgRes.ok) continue;
+    const msg = await msgRes.json();
+
+    // Decode body: try payload.body first, then walk parts
+    const decodeB64 = (s) => {
+      try { return atob(s.replace(/-/g, '+').replace(/_/g, '/')); } catch { return ''; }
+    };
+    let body = '';
+    const payload = msg.payload || {};
+    if (payload.body?.data) {
+      body = decodeB64(payload.body.data);
+    } else {
+      const parts = payload.parts || [];
+      for (const p of parts) {
+        if (p.body?.data) body += decodeB64(p.body.data);
+        for (const sp of (p.parts || [])) {
+          if (sp.body?.data) body += decodeB64(sp.body.data);
+        }
+      }
+    }
+
+    const match = body.match(/\b(\d{6})\b/);
+    if (match) {
+      // Mark as read so we don't re-use it
+      fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}/modify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
+      }).catch(() => {});
+      console.log('[TCH bg] Gmail OTP found:', match[1]);
+      return match[1];
+    }
+  }
+  return null;
+}
+
+/** Poll Gmail every 4s for up to 3 minutes; send OTP_FOUND or OTP_TIMEOUT to the tab. */
+async function watchForOtp(tabId, startMs) {
+  const deadline = startMs + 3 * 60 * 1000;
+  console.log('[TCH bg] Gmail OTP watch started for tab', tabId);
+  while (Date.now() < deadline) {
+    try {
+      const token = await gmailGetValidToken();
+      if (token) {
+        const code = await gmailFindOtpCode(token);
+        if (code) {
+          chrome.tabs.sendMessage(tabId, { type: 'OTP_FOUND', code }).catch(() => {});
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[TCH bg] Gmail OTP poll error:', e);
+    }
+    await sleep(4000);
+  }
+  console.log('[TCH bg] Gmail OTP watch timed out for tab', tabId);
+  chrome.tabs.sendMessage(tabId, { type: 'OTP_TIMEOUT' }).catch(() => {});
+}
+
 /** Origins whose storage/cookies we clear on RedSky 401/403 (same idea as Chrome “clear site data”). */
 const TARGET_SESSION_RECOVERY_ORIGINS = [
   'https://www.target.com',
@@ -119,6 +223,17 @@ async function maybeAutoRecoverTargetSession() {
   }
 
   try {
+    // Preserve PX visitor cookies before wiping — losing _pxvid resets the trust score to zero
+    // and makes the next login attempt look like a brand-new bot to PerimeterX.
+    let pxCookiesToRestore = [];
+    try {
+      const allCookies = await chrome.cookies.getAll({ domain: 'target.com' });
+      pxCookiesToRestore = allCookies.filter(c => /^_?px|^pxcts/i.test(c.name));
+      console.log('[TCH bg] Preserving PX cookies across wipe:', pxCookiesToRestore.map(c => c.name));
+    } catch (e) {
+      console.warn('[TCH bg] Could not snapshot PX cookies before wipe:', e);
+    }
+
     await chrome.browsingData.removeDataFromOrigins(
       { origins: TARGET_SESSION_RECOVERY_ORIGINS },
       {
@@ -130,6 +245,28 @@ async function maybeAutoRecoverTargetSession() {
       }
     );
     console.log('[TCH bg] Target session recovery: site data cleared for', TARGET_SESSION_RECOVERY_ORIGINS.length, 'origins');
+
+    // Restore PX cookies so the visitor fingerprint survives the auth session wipe.
+    for (const c of pxCookiesToRestore) {
+      try {
+        await chrome.cookies.set({
+          url: 'https://www.target.com',
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || '/',
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          ...(c.sameSite && c.sameSite !== 'unspecified' ? { sameSite: c.sameSite } : {}),
+          ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
+        });
+      } catch (err) {
+        console.warn('[TCH bg] Failed to restore PX cookie', c.name, ':', err);
+      }
+    }
+    if (pxCookiesToRestore.length) {
+      console.log('[TCH bg] PX cookies restored:', pxCookiesToRestore.map(c => c.name));
+    }
   } catch (e) {
     console.warn('[TCH bg] Target session recovery (browsingData) failed:', e);
     notifyTargetTabsSessionHint();
@@ -207,10 +344,12 @@ async function checkWalmartItemStock(itemId) {
     const qRaw = json?.product?.productAvailability?.inventoryAvailableQuantity
       ?? json?.product?.productAvailability?.quantity;
     const qty = Number(qRaw);
-    const stock = status === 'IN_STOCK';
+    const stock = SELLABLE_STATUSES.has(status);
+    const price = json?.product?.priceInfo?.currentPrice?.price ?? null;
     return {
       stock,
       qty: Number.isFinite(qty) && qty >= 0 ? qty : (stock ? 999 : 0),
+      price: typeof price === 'number' ? price : null,
     };
   } catch { return null; }
 }
@@ -318,6 +457,34 @@ const inQueueUrls    = new Set();
 const navigationLock = new Set();
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  harvestHiddenTabs.delete(tabId);
+});
+
+/**
+ * "Hidden" warning fires only when every currently-open Target tab is hidden.
+ * If the user has any visible Target tab, harvest keepalives are not throttled
+ * (Chrome only throttles timers in fully-hidden tabs/windows). This avoids the
+ * old false-positive where one background tab in the hidden set lit up the warning.
+ */
+async function computeAllTargetTabsHidden() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    const targetTabs = (tabs || []).filter((t) => {
+      try {
+        const h = new URL(t.url || '').hostname.toLowerCase();
+        return h === 'target.com' || h.endsWith('.target.com');
+      } catch {
+        return false;
+      }
+    });
+    if (targetTabs.length === 0) return false;
+    return targetTabs.every((t) => harvestHiddenTabs.has(t.id));
+  } catch {
+    return false;
+  }
+}
 
 // Load a previously-cached API key from storage (survives SW termination).
 async function loadCachedApiKey() {
@@ -526,6 +693,20 @@ async function runBackgroundPoll() {
         if (p != null && Number.isFinite(p) && p > 0 && p > maxPrice) {
           if (pollCycles % 60 === 0) {
             console.log(`[TCH bg] max-price gate: $${p} > $${maxPrice} — skipping ${normUrl.slice(-40)}`);
+          }
+          continue;
+        }
+      }
+
+      const wmMaxPrice = Number(monitor.walmartMaxPrice) || 0;
+      if (wmMaxPrice > 0 && !tcin) {
+        const wmPrice =
+          entry && typeof entry === 'object' && typeof entry.price === 'number'
+            ? entry.price
+            : null;
+        if (wmPrice != null && Number.isFinite(wmPrice) && wmPrice > 0 && wmPrice > wmMaxPrice) {
+          if (pollCycles % 60 === 0) {
+            console.log(`[TCH bg] walmart max-price gate: $${wmPrice} > $${wmMaxPrice} — skipping ${normUrl.slice(-40)}`);
           }
           continue;
         }
@@ -811,6 +992,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           highStockOnly: !!message.highStockOnly,
           highStockThreshold: Number(message.highStockThreshold) || 10,
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
+          walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           resetEndlessSuccessCount: true,
         }
       )
@@ -841,6 +1023,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         inQueueUrls.add(normQueueUrl);
         console.log('[TCH bg] WALMART_IN_QUEUE locked:', normQueueUrl);
       }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'WM_OFFER_ID_READY': {
+      // Content script extracted OID from __NEXT_DATA__ on a Walmart product page.
+      // Store it on the matching monitored product so wmDirectAtc() can use it.
+      chrome.storage.local.get('monitor').then(({ monitor: mon }) => {
+        if (!mon?.products) return;
+        const normUrl = normalizeProductUrl(message.url || '');
+        let updated = false;
+        for (const p of mon.products) {
+          if (normalizeProductUrl(p.url) === normUrl && p.oid !== message.offerId) {
+            p.oid = message.offerId;
+            updated = true;
+          }
+        }
+        if (updated) chrome.storage.local.set({ monitor: mon });
+      }).catch(() => {});
       sendResponse({ ok: true });
       return true;
     }
@@ -892,7 +1093,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         message.data?.url || '',
         message.data?.retailer || 'target'
       )
-        .then((r) => sendResponse(r))
+        .then((r) => {
+          if (r?.ok) {
+            lastHarvestCaptureMs = Date.now();
+            lastHarvestCaptureKind = String(message.data?.kind || 'burst');
+          }
+          sendResponse(r);
+        })
         .catch(() => sendResponse({ ok: false, total: 0 }));
       return true;
 
@@ -905,6 +1112,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(() => tchDebuggerClick(tabId, x, y))
         .then(() => sendResponse({ ok: true }))
         .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+      return true;
+    }
+
+    case 'DEBUGGER_TYPE': {
+      const tabId = Number(sender?.tab?.id);
+      const text = String(message.text || '');
+      if (!tabId || !text) { sendResponse({ ok: false }); return true; }
+      tchDebuggerAutoAttach(tabId)
+        .then(() => tchDebuggerType(tabId, text))
+        .then(() => sendResponse({ ok: true }))
+        .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+      return true;
+    }
+
+    case 'START_OTP_WATCH': {
+      const tabId = Number(sender?.tab?.id);
+      const startMs = Number(message.startMs) || Date.now();
+      if (!tabId) { sendResponse({ ok: false }); return false; }
+      void watchForOtp(tabId, startMs);
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    case 'GMAIL_EXCHANGE_CODE': {
+      (async () => {
+        try {
+          const d = await chrome.storage.local.get(['gmailClientId', 'gmailClientSecret']);
+          const res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              code: String(message.code || ''),
+              client_id: d.gmailClientId || '',
+              client_secret: d.gmailClientSecret || '',
+              redirect_uri: String(message.redirectUri || ''),
+              grant_type: 'authorization_code',
+            }),
+          });
+          if (!res.ok) { sendResponse({ ok: false, status: res.status }); return; }
+          const json = await res.json();
+          if (!json.access_token) { sendResponse({ ok: false, reason: 'no_token' }); return; }
+          await chrome.storage.local.set({
+            gmailAccessToken: json.access_token,
+            gmailTokenExpiry: Date.now() + (json.expires_in || 3600) * 1000,
+            ...(json.refresh_token ? { gmailRefreshToken: json.refresh_token } : {}),
+          });
+          console.log('[TCH bg] Gmail OAuth exchange success; refresh_token:', !!json.refresh_token);
+          sendResponse({ ok: true });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e?.message || e) });
+        }
+      })();
       return true;
     }
 
@@ -943,9 +1202,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'HARVEST_GET_STATUS':
-      tchHarvestStatus()
-        .then((s) => sendResponse({ ...s, harvestHidden: harvestHiddenTabs.size > 0 }))
-        .catch(() => sendResponse({ ok: false }));
+      (async () => {
+        try {
+          const s = await tchHarvestStatus();
+          const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
+          const cfg = s?.config || {};
+          let nextHarvestInMs = null;
+          let nextHarvestMode = '';
+
+          if (cfg.harvestingEnabled && monitor?.active) {
+            const minMs = typeof getHarvestKeepaliveMinIntervalMs === 'function'
+              ? getHarvestKeepaliveMinIntervalMs(monitor)
+              : 25 * 60 * 1000;
+            const elapsed = Date.now() - lastHarvestKeepaliveRunMs;
+            nextHarvestInMs = Math.max(0, minMs - Math.max(0, elapsed));
+            nextHarvestMode = 'monitor_keepalive';
+          } else if (cfg.harvestingEnabled && cfg.dontStopHarvesting && lastHarvestCaptureMs > 0) {
+            const dedupMs = typeof getHarvestBurstSameUrlDedupMs === 'function'
+              ? getHarvestBurstSameUrlDedupMs(monitor || {})
+              : 60 * 1000;
+            const elapsed = Date.now() - lastHarvestCaptureMs;
+            nextHarvestInMs = Math.max(0, dedupMs - Math.max(0, elapsed));
+            nextHarvestMode = 'auto_recurring';
+          }
+
+          const allHidden = await computeAllTargetTabsHidden();
+          sendResponse({
+            ...s,
+            harvestHidden: allHidden,
+            lastHarvestCaptureMs,
+            lastHarvestCaptureKind,
+            nextHarvestInMs,
+            nextHarvestMode,
+          });
+        } catch {
+          sendResponse({ ok: false });
+        }
+      })();
       return true;
 
     case 'HARVEST_VISIBILITY_CHANGE': {
@@ -978,12 +1271,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'CHECK_ACCOUNT_STATUS': {
       (async () => {
         try {
-          const tabs = await new Promise(r => chrome.tabs.query({ url: '*://*.target.com/*' }, r));
-          if (!tabs.length) {
+          const tabs = await chrome.tabs.query({});
+          const targetTabs = (tabs || []).filter((t) => {
+            try {
+              const h = new URL(t.url || '').hostname.toLowerCase();
+              return h === 'target.com' || h.endsWith('.target.com');
+            } catch {
+              return false;
+            }
+          });
+          if (!targetTabs.length) {
             sendResponse({ loggedIn: null, hasAddress: null, hasPayment: null, noTab: true });
             return;
           }
-          const result = await chrome.tabs.sendMessage(tabs[0].id, { type: 'TCH_CHECK_ACCOUNT' })
+          const result = await chrome.tabs.sendMessage(targetTabs[0].id, { type: 'TCH_CHECK_ACCOUNT' })
             .catch(() => ({ loggedIn: null, hasAddress: null, hasPayment: null }));
           sendResponse(result);
         } catch (e) {
@@ -1009,6 +1310,8 @@ chrome.alarms.create('bgPollWatchdog', { periodInMinutes: 0.5 });
 
 /** Throttles drop-aware harvest keep-alive (see maybeRunDropAwareHarvestKeepalive). */
 let lastHarvestKeepaliveRunMs = 0;
+let lastHarvestCaptureMs = 0;
+let lastHarvestCaptureKind = '';
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'bgPollWatchdog') {
@@ -1055,6 +1358,8 @@ async function maybeRunDropAwareHarvestKeepalive() {
   }
 
   await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
+  lastHarvestCaptureMs = Date.now();
+  lastHarvestCaptureKind = 'keepalive';
   console.log('[TCH bg] session keep-alive: snapshot captured');
 }
 
@@ -1080,6 +1385,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     highStockOnly = false,
     highStockThreshold = 10,
     targetMaxPrice = 0,
+    walmartMaxPrice = 0,
     resetEndlessSuccessCount = true,
   } = opts;
 
@@ -1107,6 +1413,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   monitor.highStockOnly = !!highStockOnly;
   monitor.highStockThreshold = Math.max(1, Math.min(999, Number(highStockThreshold) || 10));
   monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
+  monitor.walmartMaxPrice = Math.max(0, Number(walmartMaxPrice) || 0);
 
   await chrome.storage.local.set({
     monitor,

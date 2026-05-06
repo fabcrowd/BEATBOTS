@@ -19,6 +19,34 @@ Read after `AGENTS.md`. Continuity for agents without long chat history.
 | Main world bridge | `target-checkout-helper/main_world.js` |
 | Cookie pool | `target-checkout-helper/cookieHarvest.js` (imported by SW) |
 
+## Recent session (v1.8.0 — Walmart Phase 2 bug fixes + queue strategy)
+
+### Bugs fixed
+
+1. **`checkWalmartItemStock()` (background.js L332–353)** — Now accepts `LIMITED_STOCK` via `SELLABLE_STATUSES.has(status)` (was `=== 'IN_STOCK'` only). Extracts `priceInfo.currentPrice.price` and returns it in the result object.
+2. **`wmDirectAtc()` (walmart-content.js L294+)** — Full rewrite. Old code hit wrong endpoints (`/api/checkout/v3/cart`). New code: extracts CID from `__NEXT_DATA__.props.pageProps.customerId` or `vidUserId` cookie; calls `POST /api/v3/cart/guest/{CID}/items` with correct body (location block, `shipMethodDefaultRule: 'SHIP_RULE_1'`); adds `wm_offer_id`, `sec-fetch-*`, `Referer` headers; 3 attempts if `walmartSkipMonitoring`, 1 otherwise.
+3. **`wmGetPageType()` (walmart-content.js)** — Added `queue-room` return for `/qp` path.
+4. **`wmHasQueueIndicators()` (walmart-content.js)** — Removed dead `[class*="queue-it"]` selector; added `/qp` URL check as primary signal.
+5. **`wmHandleQueueRoom()` (walmart-content.js)** — New function for `/qp` waiting room page; passive 5s poll, sends `WALMART_IN_QUEUE` lock to background, 45-min timeout. Wired into `_wmInit()` dispatch.
+6. **WM_SEL (walmart-content.js)** — `expMonth` now includes `select[id="month-chooser"]`; `expYear` includes `select[id="year-chooser"]`; added `input[id="cvv"]`, `input[id="creditCard"]`, `atcFallback: '#add-on-atc-container button'`; added billing address selector set.
+7. **`wmHandlePayment()` (walmart-content.js)** — Month/year fill now detects SELECT vs INPUT and uses `wmFillSelect` for dropdown elements; handles 2-digit/4-digit year normalization; fills billing address fields (uses `payment.billingZip`, falls back to shipping fields).
+8. **`wmGetCurrentPrice()` (walmart-content.js)** — `__NEXT_DATA__.props.pageProps.initialData.data.product.priceInfo.currentPrice.price` checked first before DOM selectors.
+9. **`walmartMaxPrice` gate (background.js)** — Threaded through `startMonitor()` opts, `START_MONITOR` handler, and poll loop. Walmart products (non-TCIN) now have a price gate that blocks navigation when `stockMap` price > max.
+10. **popup.js** — `toggleMonitor()` now sends `walmartMaxPrice` in `START_MONITOR` message.
+
+### Features added
+
+11. **Backend-link / OID pre-extraction** — `_wmInit()` on product page extracts `primaryOffer.offerId` from `__NEXT_DATA__` and sends `WM_OFFER_ID_READY` to background. Background stores it on the matching product in monitor storage. On next dispatch, `wmHandleProductPage` uses it directly without polling delay — enables zero-latency ATC at `dropExpectedAt`.
+12. **`WM_OFFER_ID_READY` handler (background.js)** — Updates `monitor.products[i].oid` in storage when content script reports OID from page.
+
+### Confirmed from Refract guide research
+
+- OID + Skip Monitoring = non-queue drops / blocked monitor only (not needed for queue drops)
+- Queue timers (29:59, 9:59) are Walmart placeholder values — our passive wait correctly ignores them
+- Multi-SKU doesn't work with Walmart queue — one tab per product is correct behavior
+- 456 errors = proxy issue (proxy rotation is user's responsibility; our `wmIsPxPage()` passive wait is correct response)
+- `walmartMaxPrice` = item price before tax/shipping
+
 ## Recent session (v1.6.0 — RefractBot parity batch)
 
 ### Features added (10)
@@ -33,6 +61,26 @@ Read after `AGENTS.md`. Continuity for agents without long chat history.
 10. **Checkout beep** — `checkoutSound` checkbox (default ON); `playCheckoutBeep()` / `wmPlayBeep()` called in `handleReviewStep()` / `wmHandleReview()` on review page reached.
 11. **Import/export settings** — Export/Import buttons in Guide tab; `exportSettings()` / `importSettings()` in popup.js; strips runtime-only keys on export.
 12. **Extra product trick** — `addExtraProduct` toggle + `extraProductTcin` TCIN input; after main ATC, navigates to extra product page (state: `tch:extraAtcState=needed`) → ATCs it → proceeds to checkout.
+
+## Recent session (Discord exporter local test fork)
+
+- Created local mirror of installed Chrome extension under `discord-chat-exporter-local/` (source id `lljknccjfgeihgdboidlkoofdknieffm`, version `2.0.0_0`).
+- Renamed branding strings to **Unlocked Discord Exporter** in local English locale and HTML titles.
+- Built a private test fork at `discord-chat-exporter-testenv/` via `scripts/patch-dce-testenv.mjs`.
+- Test fork patches applied:
+  - Stubs license token check (`check-token.php`) to premium/pro response.
+  - Removes free-tier caps in UI/state (`freeMessageCap`, `freeExportCap` set to max safe integer).
+  - Disables hard 500-message free-limit branches in HTML/XLSX loops.
+  - Removes install-time promo tab open in `background.js`.
+  - Removes `host_permissions` from manifest and labels build as local test.
+- Verified patched JS syntax with `node --check` and confirmed no `check-token.php` / `fetch(l` license call remains in patched `dash.js`.
+- Added research/probe artifacts (kept intentionally):
+  - `scripts/probe-dce-chunks.mjs`
+  - `scripts/probe-out.txt`
+  - `scripts/probe-out2.txt`
+  - `scripts/count-max-per-file.mjs`
+  - `scripts/find-export-call.mjs`
+- User accepted keeping old export behavior for now (no plaintext single-batch UI feature implemented).
 
 ## Previous session (published work)
 
@@ -68,6 +116,8 @@ Read after `AGENTS.md`. Continuity for agents without long chat history.
 2. Optional: tighten `markCartReady` / `ATC_SUCCESS` timing (see `.audit/findings/nemesis-verified.md` if still open).
 3. **DNR:** Manual QA whether `rules/blocking.json` rule 4 (`||api.target.com` frames) ever breaks checkout — evidence-only until repro.
 4. Reload extension in Chrome after edits.
+5. If continuing Discord exporter work: load unpacked from `discord-chat-exporter-testenv/`; regenerate with `node scripts/patch-dce-testenv.mjs` after upstream/local changes.
+6. If repo hygiene is needed later, decide whether to keep or remove research probe files under `scripts/` (currently retained on purpose).
 
 ## Quick runbook
 

@@ -23,6 +23,15 @@ const productListEmpty = $('productListEmpty');
 
 /** LIFO = newest snapshot consumed first (matches common “use newest first” bot UI). */
 let harvestRemovalIsLifo = true;
+let harvestNextDeadlineMs = null;
+let harvestNextMode = '';
+let harvestLastCaptureMs = 0;
+let harvestLastCaptureKind = '';
+let harvestLastCount = null;
+let harvestEnabled = false;
+let harvestDontStop = false;
+let harvestSessionStorageOk = true;
+let harvestHidden = false;
 
 function gatherHarvestConfigFromDom() {
   const per = $('harvestPerLoad');
@@ -33,7 +42,7 @@ function gatherHarvestConfigFromDom() {
   return {
     harvestingEnabled: !!(he && he.checked),
     harvestsPerPageLoad: per ? parseIntInRange(per.value, 1, 5, 1) : 1,
-    expirationMinutes: ex ? parseIntInRange(ex.value, 1, 120, 3) : 3,
+    expirationMinutes: ex ? parseIntInRange(ex.value, 1, 120, 8) : 8,
     removalOrder: harvestRemovalIsLifo ? 'lifo' : 'fifo',
     dontStopHarvesting: !!(ds && ds.checked),
     applyNextBeforeCheckout: !!(ap && ap.checked),
@@ -113,6 +122,7 @@ async function refreshHarvestStatus() {
   try {
     const s = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
     const c = $('harvestCountText');
+    const n = $('harvestNextText');
     const w = $('harvestSessionWarn');
     const hw = $('harvestHiddenWarn');
     if (c && s && s.ok !== false) {
@@ -127,7 +137,121 @@ async function refreshHarvestStatus() {
     }
     if (w && s) w.hidden = !!s.sessionStorage;
     if (hw && s) hw.hidden = !s.harvestHidden;
+    if (s) {
+      harvestEnabled = !!s?.config?.harvestingEnabled;
+      harvestDontStop = !!s?.config?.dontStopHarvesting;
+      harvestSessionStorageOk = s.sessionStorage !== false;
+      harvestHidden = !!s.harvestHidden;
+      harvestLastCount = typeof s.count === 'number' ? s.count : null;
+      harvestLastCaptureMs = Number(s.lastHarvestCaptureMs) || 0;
+      harvestLastCaptureKind = String(s.lastHarvestCaptureKind || '');
+      harvestNextMode = String(s.nextHarvestMode || '');
+      if (typeof s.nextHarvestInMs === 'number' && Number.isFinite(s.nextHarvestInMs)) {
+        harvestNextDeadlineMs = Date.now() + Math.max(0, s.nextHarvestInMs);
+      } else {
+        harvestNextDeadlineMs = null;
+      }
+    }
+    if (n) updateHarvestNextText();
+    updateHarvestDiagnostics();
   } catch (_) {}
+}
+
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function appendHarvestTimerSpan(parent, text) {
+  const span = document.createElement('span');
+  span.className = 'harvest-timer';
+  span.textContent = text;
+  parent.appendChild(span);
+}
+
+function updateHarvestNextText() {
+  const n = $('harvestNextText');
+  if (!n) return;
+  const hasLast = harvestLastCaptureMs > 0;
+  const lastAgoSec = hasLast ? Math.max(0, Math.floor((Date.now() - harvestLastCaptureMs) / 1000)) : 0;
+
+  n.replaceChildren();
+
+  if (hasLast) {
+    const kind = harvestLastCaptureKind || 'snapshot';
+    n.appendChild(document.createTextNode(`Last capture: ${kind} `));
+    appendHarvestTimerSpan(n, `(${lastAgoSec}s ago)`);
+    n.appendChild(document.createTextNode('. '));
+  } else {
+    n.appendChild(document.createTextNode('Last capture: none yet. '));
+  }
+
+  if (harvestNextMode === 'monitor_keepalive' && harvestNextDeadlineMs) {
+    const leftMs = Math.max(0, harvestNextDeadlineMs - Date.now());
+    n.appendChild(document.createTextNode('Next keepalive harvest in '));
+    appendHarvestTimerSpan(n, formatCountdown(leftMs));
+    n.appendChild(document.createTextNode('.'));
+    return;
+  }
+  if (harvestNextMode === 'auto_recurring' && harvestNextDeadlineMs) {
+    const leftMs = Math.max(0, harvestNextDeadlineMs - Date.now());
+    n.appendChild(document.createTextNode('Next auto harvest in '));
+    appendHarvestTimerSpan(n, formatCountdown(leftMs));
+    n.appendChild(document.createTextNode(' (any open Target tab will capture).'));
+    return;
+  }
+  n.appendChild(document.createTextNode('Next auto harvest happens on Target product/login page load.'));
+}
+
+function updateHarvestDiagnostics() {
+  const l1 = $('harvestDiagLine1');
+  const l2 = $('harvestDiagLine2');
+  const l3 = $('harvestDiagLine3');
+  if (!l1 || !l2 || !l3) return;
+
+  const countText = harvestLastCount == null ? 'unknown' : String(harvestLastCount);
+  l1.textContent = `Status: enabled=${harvestEnabled ? 'yes' : 'no'} | pool=${countText} | storage.session=${harvestSessionStorageOk ? 'ok' : 'unavailable'}`;
+
+  if (!harvestEnabled) {
+    l2.textContent = 'Reason: harvesting is OFF in Cookie harvest settings.';
+    l3.textContent = 'Next action: turn ON Harvesting on, then open a Target product/login page or click Harvest now.';
+    return;
+  }
+  if (!harvestSessionStorageOk) {
+    l2.textContent = 'Reason: Chrome session storage is unavailable, so snapshots only live in temporary worker memory.';
+    l3.textContent = 'Next action: keep the browser open and use Harvest now; restart browser/profile if this persists.';
+    return;
+  }
+  if (harvestHidden) {
+    l2.textContent = 'Reason: every open Target tab is currently hidden; Chrome may throttle background timers.';
+    l3.textContent = 'Next action: bring a Target tab to the foreground (or open one), or use Harvest now manually.';
+    return;
+  }
+  if (!harvestLastCaptureMs) {
+    l2.textContent = 'Reason: no capture has occurred yet this session.';
+    l3.textContent = 'Next action: open a Target /p/ product page (or sign-in page), wait 2-3s, then check count.';
+    return;
+  }
+  if (harvestNextMode === 'monitor_keepalive') {
+    l2.textContent = 'Reason: monitor keepalive scheduler is active.';
+    l3.textContent = 'Next action: no action needed; countdown above shows next automatic keepalive capture.';
+    return;
+  }
+  if (harvestNextMode === 'auto_recurring') {
+    l2.textContent = 'Reason: "Don\u2019t stop harvesting" is on; recurring capture timer is running.';
+    l3.textContent = 'Next action: keep any target.com tab open and visible. Countdown above shows the next eligible recapture.';
+    return;
+  }
+  if (!harvestDontStop) {
+    l2.textContent = 'Reason: "Don\u2019t stop harvesting" is OFF, so each URL captures only once until you navigate.';
+    l3.textContent = 'Next action: turn on "Don\u2019t stop harvesting" (Cookie harvest section) to build the pool from any Target tab, or keep navigating between Target product/sign-in pages.';
+    return;
+  }
+  l2.textContent = `Reason: last capture source = ${harvestLastCaptureKind || 'unknown'}.`;
+  l3.textContent = 'Next action: auto-capture triggers on Target product/login page loads (or monitor keepalive when monitoring is active).';
 }
 
 async function pushHarvestConfig(data) {
@@ -196,6 +320,11 @@ function gatherSettings() {
     harvestConfig: gatherHarvestConfigFromDom(),
     discordWebhook: ($('discordWebhook')?.value || '').trim(),
     webhookSendFailures: !!$('webhookSendFailures')?.checked,
+    gmailClientId: ($('gmailClientId')?.value || '').trim(),
+    gmailClientSecret: ($('gmailClientSecret')?.value || '').trim(),
+    autoSignIn: !!$('autoSignIn')?.checked,
+    targetEmail: ($('targetEmail')?.value || '').trim(),
+    targetPassword: ($('targetPassword')?.value || '').trim(),
     endlessMode: !!$('endlessMode')?.checked,
     endlessLimit: $('endlessLimit')
       ? parseIntInRange($('endlessLimit').value, 0, 99, 0)
@@ -215,6 +344,18 @@ function showToast(msg) {
   el.textContent = msg;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.textContent = ''; }, 2400);
+}
+
+let lastApplyHintAt = 0;
+function showApplyHint(kind = 'save') {
+  const now = Date.now();
+  if (now - lastApplyHintAt < 1200) return;
+  lastApplyHintAt = now;
+  if (kind === 'toggle') {
+    showToast('Extension toggle applies immediately');
+    return;
+  }
+  showToast('Changed setting — click Save settings to fully apply');
 }
 
 function renderSpeedComparison(speeds) {
@@ -353,6 +494,20 @@ function populateFields(data) {
   const wsf = $('webhookSendFailures');
   if (wsf) wsf.checked = !!data.webhookSendFailures;
 
+  const gmCid = $('gmailClientId');
+  if (gmCid && typeof data.gmailClientId === 'string') gmCid.value = data.gmailClientId;
+  const gmSec = $('gmailClientSecret');
+  if (gmSec && typeof data.gmailClientSecret === 'string') gmSec.value = data.gmailClientSecret;
+
+  const asi = $('autoSignIn');
+  if (asi) asi.checked = !!data.autoSignIn;
+  const teml = $('targetEmail');
+  if (teml && typeof data.targetEmail === 'string') teml.value = data.targetEmail;
+  const tpwd = $('targetPassword');
+  if (tpwd && typeof data.targetPassword === 'string') tpwd.value = data.targetPassword;
+
+  void updateGmailStatus();
+
   const em = $('endlessMode');
   if (em) {
     em.checked = !!data.endlessMode;
@@ -423,6 +578,7 @@ if (enableToggle) {
   enableToggle.addEventListener('change', async () => {
     const enabled = !!enableToggle.checked;
     updateHeaderVisualState(enabled);
+    showApplyHint('toggle');
     if (!hasChromeStorage()) return;
     try {
       const data = await chrome.storage.local.get(null);
@@ -433,6 +589,27 @@ if (enableToggle) {
 }
 
 if (saveBtn) saveBtn.addEventListener('click', save);
+
+function wireApplyHintReminders() {
+  const ids = [
+    'useSavedPayment', 'autoPlaceOrder', 'preferPickup', 'checkoutSound',
+    'discordWebhook', 'webhookSendFailures', 'endlessMode', 'endlessLimit',
+    'addExtraProduct', 'extraProductTcin', 'highStockOnly', 'highStockThreshold',
+    'targetMaxPrice', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay',
+    'dropExpectedAt', 'harvestEnabled', 'harvestPerLoad', 'harvestExpireMin',
+    'harvestDontStop', 'harvestApplyNext', 'walmartUseSavedSession',
+    'walmartSkipMonitoring', 'walmartMaxPrice', 'wmDropExpectedAt',
+    'gmailClientId', 'gmailClientSecret', 'autoSignIn', 'targetEmail', 'targetPassword',
+    'firstName', 'lastName', 'address1', 'address2', 'shippingJig', 'city', 'state',
+    'zip', 'phone', 'cardNumber', 'expMonth', 'expYear', 'cvv', 'billingZip',
+  ];
+  for (const id of ids) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('change', () => showApplyHint('save'));
+  }
+}
+wireApplyHintReminders();
 
 if (hasChromeStorage()) {
   chrome.storage.local.get(
@@ -456,6 +633,12 @@ if (hasChromeStorage()) {
       'advancedSettings',
       'discordWebhook',
       'webhookSendFailures',
+      'gmailClientId',
+      'gmailClientSecret',
+      'gmailRefreshToken',
+      'autoSignIn',
+      'targetEmail',
+      'targetPassword',
       'endlessMode',
       'endlessLimit',
       'highStockOnly',
@@ -516,6 +699,12 @@ function wireHarvestControls() {
 }
 
 wireHarvestControls();
+setInterval(() => {
+  updateHarvestNextText();
+}, 1000);
+setInterval(() => {
+  void refreshHarvestStatus();
+}, 5000);
 
 // Auto-save these toggles immediately on change so they survive popup close/reopen.
 async function autoSaveToggle() {
@@ -615,6 +804,81 @@ function wireAdvancedDebuggerControls() {
 }
 
 wireAdvancedDebuggerControls();
+
+// ─── GMAIL 2FA ──────────────────────────────────────────────────────────────
+
+async function updateGmailStatus() {
+  const el = $('gmailStatusText');
+  const hint = $('gmailExtIdHint');
+  if (!el) return;
+  if (hint && typeof chrome !== 'undefined' && chrome.runtime?.id) {
+    hint.textContent = `Extension ID: ${chrome.runtime.id}`;
+  }
+  if (!hasChromeStorage()) { el.textContent = 'Gmail: unavailable'; return; }
+  try {
+    const d = await chrome.storage.local.get(['gmailRefreshToken']);
+    el.textContent = d.gmailRefreshToken
+      ? 'Gmail: \u25CF connected'
+      : 'Gmail: not connected';
+  } catch { el.textContent = 'Gmail: status unknown'; }
+}
+
+async function connectGmail() {
+  if (!hasChromeStorage()) { showToast('Not available outside extension popup'); return; }
+  const clientId = ($('gmailClientId')?.value || '').trim();
+  const clientSecret = ($('gmailClientSecret')?.value || '').trim();
+  if (!clientId) { showToast('Enter your Client ID first'); return; }
+  if (!clientSecret) { showToast('Enter your Client Secret first'); return; }
+
+  await chrome.storage.local.set({ gmailClientId: clientId, gmailClientSecret: clientSecret });
+
+  const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
+  const scope = 'https://www.googleapis.com/auth/gmail.modify';
+  const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth'
+    + `?client_id=${encodeURIComponent(clientId)}`
+    + `&redirect_uri=${encodeURIComponent(redirectUri)}`
+    + `&response_type=code&scope=${encodeURIComponent(scope)}`
+    + '&access_type=offline&prompt=consent';
+
+  chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, async (redirectUrl) => {
+    if (chrome.runtime.lastError || !redirectUrl) {
+      showToast('Gmail auth cancelled or failed');
+      void updateGmailStatus();
+      return;
+    }
+    try {
+      const code = new URL(redirectUrl).searchParams.get('code');
+      if (!code) { showToast('No auth code received'); return; }
+      const result = await chrome.runtime.sendMessage({
+        type: 'GMAIL_EXCHANGE_CODE', code, redirectUri,
+      });
+      if (result?.ok) {
+        showToast('Gmail connected');
+      } else {
+        showToast('Gmail token exchange failed');
+      }
+    } catch (e) {
+      showToast('Gmail connection error');
+      console.error('[TCH popup] Gmail connect error', e);
+    }
+    void updateGmailStatus();
+  });
+}
+
+async function disconnectGmail() {
+  if (!hasChromeStorage()) return;
+  await chrome.storage.local.remove(['gmailRefreshToken', 'gmailAccessToken', 'gmailTokenExpiry']);
+  showToast('Gmail disconnected');
+  void updateGmailStatus();
+}
+
+$('gmailConnectBtn')?.addEventListener('click', connectGmail);
+$('gmailDisconnectBtn')?.addEventListener('click', disconnectGmail);
+$('gmailClientId')?.addEventListener('change', autoSaveToggle);
+$('gmailClientSecret')?.addEventListener('change', autoSaveToggle);
+$('autoSignIn')?.addEventListener('change', autoSaveToggle);
+$('targetEmail')?.addEventListener('change', autoSaveToggle);
+$('targetPassword')?.addEventListener('change', autoSaveToggle);
 
 $('acctCheckBtn')?.addEventListener('click', () => { void checkAccountStatus(); });
 
@@ -1168,6 +1432,7 @@ async function toggleMonitor() {
         ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
         : 10,
       targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+      walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
     });
     monitorActive = true;
     updateMonitorUI();
