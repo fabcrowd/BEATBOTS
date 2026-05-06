@@ -628,12 +628,19 @@ async function runBackgroundPoll() {
       }
     }
 
+    // Has the drop time arrived? Used to arm skip-monitoring at exactly the right moment.
+    const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
+    const dropArmed = !dropMs || Date.now() >= dropMs;
+
     for (const wp of walmartProducts) {
       const itemId = extractWalmartItemId(wp.url);
       if (!itemId) continue;
-      if (monitor.skipMonitoring) {
+      if (monitor.skipMonitoring && dropArmed) {
+        // Skip monitoring is armed — treat item as in-stock and navigate immediately.
         stockMap.set(normalizeProductUrl(wp.url), { stock: true, qty: 999 });
       } else {
+        // Pre-drop or monitoring mode — check actual stock. If skip monitoring is on
+        // but dropExpectedAt hasn't arrived, this keeps the bot quiet until go-time.
         const res = await checkWalmartItemStock(itemId);
         if (res != null) stockMap.set(normalizeProductUrl(wp.url), res);
       }
