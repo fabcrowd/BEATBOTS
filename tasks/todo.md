@@ -2,6 +2,18 @@
 
 ## Status: Complete
 
+## Session: v2.x roadmap (Plans A–D)
+
+### Done
+- [x] **Plan B** — Walmart `WM_SEL.atc` expanded (automation-id / tl-id), `queueHoldSpot`, `wmFindAtcLikeButton()`, queue wait + product ATC paths updated.
+- [x] **Plan C** — `core/jigAddress.js`, manifest preload, `jigIndex` (0–99) + hidden legacy `shippingJig`, Target + Walmart shipping fill.
+- [x] **Plan D** — `walmart-main-world.js` (MAIN, `document_start`), `TCH_QUEUE_PASSED` on `document.documentElement` + `wmWaitInProductQueue` listener.
+- [x] **Plan A** — `nativeMessaging` permission, `IMAP_NATIVE_CALL` in `background.js`, Accounts tab + IMAP fields, `imap-bridge.js` + `npm` deps in `native-host/`, installers under `installer/`, Walmart login `wmPollLoginImap2FA` / `wmTryImap2FA`.
+- [x] `node --check` on touched JS; `node scripts/checkout-speed-test.mjs` passed.
+
+### Review
+- Manifest **2.0.0**. Reload extension after pull. IMAP requires local native host registration + `allowed_origins` extension ID (see `native-host/README.md`).
+
 ## Plan
 - [x] Change retry policy to support run-until-cancel (`maxAttempts = 0` sentinel).
 - [x] Add passive stock-watch mode for OOS/ATC-missing failures to avoid reload loops.

@@ -1024,12 +1024,34 @@ async function recordCheckoutRetryEvent(event) {
 
 // ─── MESSAGE ROUTER ─────────────────────────────────────────────────────────
 
+/** Chrome native messaging host for IMAP 2FA (optional local install). */
+const NATIVE_HOST_IMAP = 'com.tch.imapbridge';
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case 'SETTINGS_UPDATED':
       broadcastToTarget(message);
       sendResponse({ ok: true });
       return true;
+
+    case 'IMAP_NATIVE_CALL': {
+      const payload = message.payload && typeof message.payload === 'object' ? message.payload : {};
+      try {
+        chrome.runtime.sendNativeMessage(NATIVE_HOST_IMAP, payload, (response) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({
+              ok: false,
+              error: chrome.runtime.lastError.message || String(chrome.runtime.lastError),
+            });
+          } else {
+            sendResponse(response && typeof response === 'object' ? response : { ok: false, error: 'invalid host response' });
+          }
+        });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+      }
+      return true;
+    }
 
     case 'TARGET_API_SESSION_STALE':
       maybeAutoRecoverTargetSession()

@@ -1175,6 +1175,14 @@ input.error {
   margin-right: 4px;
 }
 
+.guide-setting-link {
+  color: #0af;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
+}
+.guide-setting-link:hover { color: #6cf; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

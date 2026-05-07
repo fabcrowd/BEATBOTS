@@ -17,8 +17,10 @@ const checkoutRetryMaxIn = $('checkoutRetryMax');
 const checkoutRetryDelayIn = $('checkoutRetryDelay');
 const tabMain = $('tabMain');
 const tabForms = $('tabForms');
+const tabAccounts = $('tabAccounts');
 const panelMain = $('panelMain');
 const panelForms = $('panelForms');
+const panelAccounts = $('panelAccounts');
 const productListEmpty = $('productListEmpty');
 
 /** LIFO = newest snapshot consumed first (matches common “use newest first” bot UI). */
@@ -300,7 +302,8 @@ function gatherSettings() {
       : 1,
   };
 
-  const shippingJigEl = $('shippingJig');
+  const jigEl = $('jigIndex');
+  const legacyJigEl = $('shippingJigLegacy');
 
   return {
     enabled: !!enableToggle?.checked,
@@ -313,7 +316,9 @@ function gatherSettings() {
     checkoutSound: $('checkoutSound') ? !!$('checkoutSound').checked : true,
     addExtraProduct: !!$('addExtraProduct')?.checked,
     extraProductTcin: ($('extraProductTcin')?.value || '').trim(),
-    shippingJig: shippingJigEl ? shippingJigEl.value.trim() : '',
+    jigIndex: jigEl ? parseIntInRange(jigEl.value, 0, 99, 0) : 0,
+    /** @deprecated Kept for exports / migration — prefix-only when jigIndex is 0 */
+    shippingJig: legacyJigEl ? legacyJigEl.value.trim() : '',
     walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
     walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
     walmartAtcOnly: !!$('walmartAtcOnly')?.checked,
@@ -335,6 +340,13 @@ function gatherSettings() {
       ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
       : 10,
     targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+    imap2faEnabled: !!$('imap2faEnabled')?.checked,
+    imapProfile: {
+      host: ($('imapHost')?.value || '').trim(),
+      port: $('imapPort') ? parseIntInRange($('imapPort').value, 1, 65535, 993) : 993,
+      user: ($('imapUser')?.value || '').trim(),
+      password: $('imapPassword')?.value || '',
+    },
   };
 }
 
@@ -462,8 +474,13 @@ function populateFields(data) {
   const extraTcinEl = $('extraProductTcin');
   if (extraTcinEl && data.extraProductTcin) extraTcinEl.value = data.extraProductTcin;
 
-  const shippingJigEl = $('shippingJig');
-  if (shippingJigEl && data.shippingJig) shippingJigEl.value = data.shippingJig;
+  const jigIdxEl = $('jigIndex');
+  if (jigIdxEl) {
+    const ji = typeof data.jigIndex === 'number' ? data.jigIndex : parseInt(String(data.jigIndex ?? '0'), 10);
+    jigIdxEl.value = String(Number.isFinite(ji) ? Math.max(0, Math.min(99, ji)) : 0);
+  }
+  const legacyJigEl = $('shippingJigLegacy');
+  if (legacyJigEl && typeof data.shippingJig === 'string') legacyJigEl.value = data.shippingJig;
 
   const wmSkipEl = $('walmartSkipMonitoring');
   if (wmSkipEl) wmSkipEl.checked = !!data.walmartSkipMonitoring;
@@ -532,6 +549,18 @@ function populateFields(data) {
 
   const tm = $('targetMaxPrice');
   if (tm && typeof data.targetMaxPrice === 'number') tm.value = String(data.targetMaxPrice);
+
+  const i2fa = $('imap2faEnabled');
+  if (i2fa) i2fa.checked = !!data.imap2faEnabled;
+  const ip = data.imapProfile || {};
+  const ih = $('imapHost');
+  if (ih && typeof ip.host === 'string') ih.value = ip.host;
+  const ipt = $('imapPort');
+  if (ipt && typeof ip.port === 'number') ipt.value = String(ip.port);
+  const iu = $('imapUser');
+  if (iu && typeof ip.user === 'string') iu.value = ip.user;
+  const ipw = $('imapPassword');
+  if (ipw && typeof ip.password === 'string' && ip.password) ipw.value = ip.password;
 
   renderSpeedComparison(data.checkoutSpeeds);
   void refreshHarvestStatus();
@@ -604,7 +633,8 @@ function wireApplyHintReminders() {
     'harvestDontStop', 'harvestApplyNext', 'walmartUseSavedSession',
     'walmartSkipMonitoring', 'walmartMaxPrice', 'wmDropExpectedAt',
     'gmailClientId', 'gmailClientSecret', 'autoSignIn', 'targetEmail', 'targetPassword',
-    'firstName', 'lastName', 'address1', 'address2', 'shippingJig', 'city', 'state',
+    'imap2faEnabled', 'imapHost', 'imapPort', 'imapUser', 'imapPassword',
+    'firstName', 'lastName', 'address1', 'address2', 'jigIndex', 'city', 'state',
     'zip', 'phone', 'cardNumber', 'expMonth', 'expYear', 'cvv', 'billingZip',
   ];
   for (const id of ids) {
@@ -629,6 +659,7 @@ if (hasChromeStorage()) {
       'addExtraProduct',
       'extraProductTcin',
       'shippingJig',
+      'jigIndex',
       'walmartMaxPrice',
       'walmartSkipMonitoring',
       'walmartAtcOnly',
@@ -649,6 +680,8 @@ if (hasChromeStorage()) {
       'highStockOnly',
       'highStockThreshold',
       'targetMaxPrice',
+      'imap2faEnabled',
+      'imapProfile',
     ],
     populateFields
   );
@@ -905,6 +938,7 @@ function setActiveTab(panel) {
   const isMain    = panel === 'main';
   const isWalmart = panel === 'walmart';
   const isForms   = panel === 'forms';
+  const isAccounts = panel === 'accounts';
   const isGuide   = panel === 'guide';
   tabMain.classList.toggle('tab-btn-active', isMain);
   tabMain.setAttribute('aria-selected', isMain);
@@ -912,11 +946,16 @@ function setActiveTab(panel) {
   tabWalmart.setAttribute('aria-selected', isWalmart);
   tabForms.classList.toggle('tab-btn-active', isForms);
   tabForms.setAttribute('aria-selected', isForms);
+  if (tabAccounts) {
+    tabAccounts.classList.toggle('tab-btn-active', isAccounts);
+    tabAccounts.setAttribute('aria-selected', isAccounts);
+  }
   tabGuide.classList.toggle('tab-btn-active', isGuide);
   tabGuide.setAttribute('aria-selected', isGuide);
   panelMain.hidden    = !isMain;
   panelWalmart.hidden = !isWalmart;
   panelForms.hidden   = !isForms;
+  if (panelAccounts) panelAccounts.hidden = !isAccounts;
   panelGuide.hidden   = !isGuide;
 
   // Header color + title
@@ -934,7 +973,26 @@ function setActiveTab(panel) {
 tabMain.addEventListener('click',    () => setActiveTab('main'));
 tabWalmart.addEventListener('click', () => setActiveTab('walmart'));
 tabForms.addEventListener('click',   () => setActiveTab('forms'));
+tabAccounts?.addEventListener('click', () => setActiveTab('accounts'));
 tabGuide.addEventListener('click',   () => setActiveTab('guide'));
+
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('.guide-setting-link');
+  if (!link) return;
+  e.preventDefault();
+  const panel = link.dataset.panel;
+  const elId = link.dataset.el;
+  if (panel) setActiveTab(panel);
+  if (elId) {
+    const target = $(elId);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.focus?.();
+      target.style.outline = '2px solid #0af';
+      setTimeout(() => { target.style.outline = ''; }, 2000);
+    }
+  }
+});
 
 tabMain.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
@@ -954,12 +1012,20 @@ tabForms.addEventListener('keydown', (e) => {
     e.preventDefault(); tabWalmart.focus(); setActiveTab('walmart');
   }
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault(); tabAccounts?.focus(); setActiveTab('accounts');
+  }
+});
+tabAccounts?.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault(); tabForms.focus(); setActiveTab('forms');
+  }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     e.preventDefault(); tabGuide.focus(); setActiveTab('guide');
   }
 });
 tabGuide.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-    e.preventDefault(); tabForms.focus(); setActiveTab('forms');
+    e.preventDefault(); tabAccounts?.focus(); setActiveTab('accounts');
   }
 });
 
@@ -1706,3 +1772,53 @@ async function importSettings() {
 
 $('exportSettingsBtn')?.addEventListener('click', exportSettings);
 $('importSettingsBtn')?.addEventListener('click', importSettings);
+
+$('imapTestBtn')?.addEventListener('click', async () => {
+  if (!hasChromeStorage()) {
+    showToast('Use the extension popup');
+    return;
+  }
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'IMAP_NATIVE_CALL',
+      payload: { cmd: 'ping' },
+    });
+    if (r?.ok && r?.pong) showToast('Native host responded');
+    else showToast(r?.error ? String(r.error).slice(0, 120) : 'Native host failed');
+  } catch (e) {
+    showToast('Native host error — see console');
+    console.error('[TCH popup] IMAP ping', e);
+  }
+});
+
+$('imapProbeBtn')?.addEventListener('click', async () => {
+  if (!hasChromeStorage()) {
+    showToast('Use the extension popup');
+    return;
+  }
+  const g = gatherSettings();
+  const p = g.imapProfile || {};
+  if (!p.host || !p.user || !p.password) {
+    showToast('Fill IMAP host, user, and password');
+    return;
+  }
+  showToast('Probing inbox…');
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'IMAP_NATIVE_CALL',
+      payload: {
+        cmd: 'readCode',
+        host: p.host,
+        port: p.port || 993,
+        user: p.user,
+        password: p.password,
+        timeoutMs: 35000,
+      },
+    });
+    if (r?.ok && r?.code) showToast(`Code found: ${r.code}`);
+    else showToast(r?.error ? String(r.error).slice(0, 140) : 'No code in recent mail');
+  } catch (e) {
+    showToast('IMAP probe failed');
+    console.error('[TCH popup] IMAP probe', e);
+  }
+});

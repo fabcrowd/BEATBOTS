@@ -50,6 +50,7 @@ async function getSettings() {
       'targetEmail',
       'targetPassword',
       'shippingJig',
+      'jigIndex',
       'preferPickup',
       'checkoutSound',
       'addExtraProduct',
@@ -1429,8 +1430,17 @@ async function handleShippingStep(settings) {
   }
 
   const stopFill = startTiming('shipping_fill_fields');
-  const jig = (settings.shippingJig || '').trim();
-  const effectiveAddress1 = jig && s.address1 ? `${jig} ${s.address1}` : s.address1;
+  const jiRaw = settings.jigIndex;
+  const jigIdx = typeof jiRaw === 'number' && Number.isFinite(jiRaw)
+    ? jiRaw
+    : parseInt(String(jiRaw ?? ''), 10);
+  const effectiveAddress1 =
+    typeof jigAddressLine1 === 'function'
+      ? jigAddressLine1(s.address1, Number.isFinite(jigIdx) ? jigIdx : 0, settings.shippingJig)
+      : (() => {
+          const jig = (settings.shippingJig || '').trim();
+          return jig && s.address1 ? `${jig} ${s.address1}` : s.address1;
+        })();
   const fieldMap = [
     [['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'], s.firstName],
     [['input[id*="lastName"]', 'input[name="lastName"]', 'input[autocomplete="family-name"]'], s.lastName],
@@ -2222,6 +2232,9 @@ async function init() {
     targetEmail: data.targetEmail || '',
     targetPassword: data.targetPassword || '',
     shippingJig: data.shippingJig || '',
+    jigIndex: typeof data.jigIndex === 'number' && Number.isFinite(data.jigIndex)
+      ? data.jigIndex
+      : Math.max(0, Math.min(99, parseInt(String(data.jigIndex ?? '0'), 10) || 0)),
     preferPickup: !!data.preferPickup,
     checkoutSound: data.checkoutSound !== false,
     addExtraProduct: !!data.addExtraProduct,

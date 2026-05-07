@@ -2,3 +2,5 @@
 *.pem
 .tools/
 scripts/browser-smoke/node_modules/
+target-checkout-helper/native-host/node_modules/
+target-checkout-helper/native-host/com.tch.imapbridge.json

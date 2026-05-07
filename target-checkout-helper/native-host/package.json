@@ -1,0 +1,10 @@
+{
+  "name": "tch-imap-bridge",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Chrome native messaging host for Target Checkout Helper IMAP 2FA",
+  "main": "imap-bridge.js",
+  "dependencies": {
+    "imapflow": "^1.0.164"
+  }
+}

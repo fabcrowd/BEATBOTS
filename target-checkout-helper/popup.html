@@ -30,6 +30,7 @@
     <button type="button" role="tab" id="tabMain" class="tab-btn tab-btn-active" aria-selected="true" aria-controls="panelMain" data-panel="main" title="Target monitoring, cookie harvest, checkout options, and product monitor settings">Monitor</button>
     <button type="button" role="tab" id="tabWalmart" class="tab-btn tab-btn-walmart" aria-selected="false" aria-controls="panelWalmart" data-panel="walmart" title="Walmart product monitoring, drop setup, and queue guide">Walmart</button>
     <button type="button" role="tab" id="tabForms" class="tab-btn" aria-selected="false" aria-controls="panelForms" data-panel="forms" title="Backup shipping address and credit card info. Used only when Use saved payment is OFF.">Shipping &amp; pay</button>
+    <button type="button" role="tab" id="tabAccounts" class="tab-btn" aria-selected="false" aria-controls="panelAccounts" data-panel="accounts" title="Walmart 2FA via IMAP — optional native messaging host">Accounts</button>
     <button type="button" role="tab" id="tabGuide" class="tab-btn" aria-selected="false" aria-controls="panelGuide" data-panel="guide" title="Step-by-step walkthroughs for Target and Walmart drops, plus troubleshooting">Guide</button>
   </nav>
 
@@ -435,7 +436,10 @@
         </div>
         <input type="text" id="address1" placeholder="Address line 1" autocomplete="address-line1" title="Street address line 1. Only used when Use saved payment is OFF.">
         <input type="text" id="address2" placeholder="Address line 2 (optional)" autocomplete="address-line2" title="Apartment, suite, unit, etc. Optional. Only used when Use saved payment is OFF.">
-        <input type="text" id="shippingJig" placeholder="Address jig prefix (optional — e.g. APT 2B)" autocomplete="off" title="Text prepended to address line 1 at checkout (e.g. APT 2B). Some users report this variation helps avoid Item Demand cancellations. Optional.">
+        <label class="field-label" for="jigIndex">Address jig index (0–99)</label>
+        <input type="number" id="jigIndex" min="0" max="99" value="0" placeholder="0" autocomplete="off" title="0 = no jig (legacy prefix below still applies if set). 1–99 varies street suffix spelling and adds a fake unit — use a different index per account.">
+        <p class="field-hint">0 = no jig. Each account should use a different index. Legacy prefix-only jig is preserved when index is 0.</p>
+        <input type="hidden" id="shippingJigLegacy" value="" aria-hidden="true">
         <div class="field-row">
           <input type="text" id="city" placeholder="City" autocomplete="address-level2" title="City for shipping. Only used when Use saved payment is OFF.">
           <select id="state" autocomplete="address-level1" title="State for shipping. Only used when Use saved payment is OFF.">
@@ -475,6 +479,36 @@
           <input type="text" id="cvv" placeholder="CVV" autocomplete="cc-csc" maxlength="4" title="Card security code (3 or 4 digits on back of card). Only used when Use saved payment is OFF.">
         </div>
         <input type="text" id="billingZip" placeholder="Billing ZIP (if different)" maxlength="10" title="Billing ZIP code, only if different from shipping ZIP. Leave blank if same. Only used when Use saved payment is OFF.">
+      </section>
+    </div>
+
+    <div id="panelAccounts" class="tab-panel" role="tabpanel" aria-labelledby="tabAccounts" hidden>
+      <section class="card form-section">
+        <h2>Walmart email verification (IMAP)</h2>
+        <p class="section-lead">When Walmart sends a <strong>6-digit sign-in code</strong> to your inbox, the extension can read it automatically using a small <strong>native messaging host</strong> (Node.js + IMAP). Install once per machine — see <code>native-host/README.md</code>.</p>
+        <label class="option-row" title="Requires native host + Chrome NativeMessagingHosts manifest">
+          <input type="checkbox" id="imap2faEnabled">
+          <span class="option-label">Enable IMAP auto-read for Walmart 2FA</span>
+        </label>
+        <label class="field-label" for="imapHost">IMAP host</label>
+        <input type="text" id="imapHost" placeholder="imap.gmail.com" autocomplete="off" title="Your mail provider IMAP hostname">
+        <div class="field-row">
+          <div class="monitor-field">
+            <label class="field-label" for="imapPort">Port</label>
+            <input type="number" id="imapPort" value="993" min="1" max="65535" title="Usually 993 (TLS)">
+          </div>
+          <div class="monitor-field monitor-field-wide">
+            <label class="field-label" for="imapUser">IMAP username</label>
+            <input type="text" id="imapUser" placeholder="Usually your email address" autocomplete="username" title="Often the full email address">
+          </div>
+        </div>
+        <label class="field-label" for="imapPassword">IMAP password / app password</label>
+        <input type="password" id="imapPassword" placeholder="Stored only in Chrome local storage on this PC" autocomplete="current-password" title="Use an app-specific password if your provider requires it">
+        <p class="field-hint">Password is stored in this browser profile (same as other popup fields). After editing, click Save settings.</p>
+        <div class="harvest-actions">
+          <button type="button" id="imapTestBtn" class="harvest-btn" title="Sends a ping to the native host — verifies Chrome can launch it">Test native host</button>
+          <button type="button" id="imapProbeBtn" class="harvest-btn" title="Connects to IMAP and searches recent mail (requires valid credentials)">Probe inbox</button>
+        </div>
       </section>
     </div>
 
@@ -574,36 +608,48 @@
         </ol>
       </details>
 
-      <!-- ─── WALMART: DROP DAY ──────────────────────────────────── -->
+      <!-- ─── WALMART: DROP GUIDE ────────────────────────────────── -->
 
       <details class="card guide-section" open>
-        <summary class="tips-summary">Walmart — Drop day</summary>
-        <p class="guide-note">Walmart Wednesday drops use a server-side queue. The bot gets you in as fast as possible, waits through the queue with you, then completes checkout automatically.</p>
+        <summary class="tips-summary">Walmart — Drop guide</summary>
 
-        <h3 class="guide-subhead">Before drop (1+ hour early)</h3>
-        <ol class="guide-steps">
-          <li>Log in to <strong>Walmart</strong> in Chrome — make sure your shipping address and credit card are saved</li>
-          <li>Go to the <strong>Walmart</strong> tab in this popup</li>
-          <li>Add product URL + <strong>OID</strong> (if you have it — speeds up queue entry by seconds)</li>
-          <li>Set <strong>Max price</strong> to the expected drop price (blocks ATC while price is inflated pre-drop)</li>
-          <li>Set <strong>Expected drop time</strong></li>
-          <li>Empty your Walmart cart</li>
-        </ol>
+        <h3 class="guide-subhead">When to start (9 PM example)</h3>
+        <table class="guide-timeline" style="width:100%;border-collapse:collapse;margin:8px 0 12px;font-size:12px">
+          <tr style="border-bottom:1px solid #333"><td style="padding:4px 8px;color:#888;white-space:nowrap">8:30</td><td style="padding:4px 8px">Log in to Walmart. Navigate to product page. Verify saved address + card.</td></tr>
+          <tr style="border-bottom:1px solid #333"><td style="padding:4px 8px;color:#888;white-space:nowrap">8:35</td><td style="padding:4px 8px"><strong>Walmart</strong> tab → add URL + <a class="guide-setting-link" data-panel="walmart" data-el="wmProductOid">OID</a>. Set <a class="guide-setting-link" data-panel="walmart" data-el="wmDropExpectedAt">drop time</a> to <strong>8:59:50</strong> (10 sec early). Set <a class="guide-setting-link" data-panel="walmart" data-el="walmartMaxPrice">max price</a>. Turn on <a class="guide-setting-link" data-panel="walmart" data-el="walmartSkipMonitoring">Skip monitoring</a>. Empty cart. <strong>Save.</strong></td></tr>
+          <tr style="border-bottom:1px solid #333"><td style="padding:4px 8px;color:#888;white-space:nowrap">8:40</td><td style="padding:4px 8px">Click <a class="guide-setting-link" data-panel="walmart" data-el="wmMonitorBtn">Start monitoring</a>. Tab opens. <strong>Hands off.</strong></td></tr>
+          <tr style="border-bottom:1px solid #333"><td style="padding:4px 8px;color:#0ff;white-space:nowrap">8:50</td><td style="padding:4px 8px"><strong>Tension window.</strong> Do NOT touch settings or reload.</td></tr>
+          <tr style="border-bottom:1px solid #333"><td style="padding:4px 8px;color:#0f0;white-space:nowrap">9:00</td><td style="padding:4px 8px">ATC fires. Bot enters queue.</td></tr>
+          <tr><td style="padding:4px 8px;color:#888;white-space:nowrap">9:00+</td><td style="padding:4px 8px">Queue wait (14–31 min). Bot fills shipping → payment → review. You click <strong>Place Order</strong>.</td></tr>
+        </table>
+        <p class="guide-note"><strong>Why 20 min early?</strong> The tab must be loaded before the tension window at T-10 min. Starting at 8:59 = page still loading when the drop fires.</p>
 
-        <h3 class="guide-subhead">At drop time</h3>
-        <ol class="guide-steps">
-          <li>Click <strong>Start monitoring</strong> a few minutes before the drop (polling speeds up automatically)</li>
-          <li>When stock + correct price appear, bot fires ATC via OID API (or page click fallback)</li>
-          <li>Bot enters the Walmart queue — typical wait is <strong>14–31 minutes</strong></li>
-          <li>After clearing the queue: bot fills shipping → payment → review automatically</li>
-        </ol>
-
-        <h3 class="guide-subhead">While in queue</h3>
+        <h3 class="guide-subhead">Fastest settings</h3>
         <ul class="guide-steps">
-          <li>Stay near your PC — do not close Chrome</li>
-          <li><strong>"In queue — waiting…"</strong> is normal. Do not reload or interfere.</li>
-          <li>If queue exceeds 45 min, consider taking over manually</li>
-          <li>If item is unavailable after queue clears — it sold out before your position. Nothing the bot can do.</li>
+          <li><a class="guide-setting-link" data-panel="walmart" data-el="walmartSkipMonitoring">Skip monitoring</a> → <strong>ON</strong>. Fires ATC instantly when button enables.</li>
+          <li><a class="guide-setting-link" data-panel="walmart" data-el="wmDropExpectedAt">Drop time</a> → set 10 sec early. Pre-loads tab + ramps polling.</li>
+          <li><a class="guide-setting-link" data-panel="walmart" data-el="wmProductOid">OID</a> → direct API add-to-cart. Saves 1–2 sec over DOM click.</li>
+          <li><a class="guide-setting-link" data-panel="walmart" data-el="walmartMaxPrice">Max price</a> → drop price. Blocks ATC while price is inflated.</li>
+          <li><a class="guide-setting-link" data-panel="walmart" data-el="walmartAtcOnly">ATC only</a> → OFF for full auto. ON = you handle checkout.</li>
+          <li><a class="guide-setting-link" data-panel="forms" data-el="jigIndex">Jig index</a> → 1–99 varies your address. Different index per account.</li>
+        </ul>
+
+        <h3 class="guide-subhead">Will the tension window flag me?</h3>
+        <p class="guide-note"><strong>No.</strong> On Walmart, the bot reads the DOM once per second — <strong>zero network requests</strong>. The WebSocket queue listener is passive (no outbound traffic). The only request is the single ATC call at drop time. PerimeterX flags fingerprint and mouse patterns, not DOM reads.</p>
+
+        <h3 class="guide-subhead">Tabs vs. profiles</h3>
+        <ul class="guide-steps">
+          <li><strong>One tab, one product, one profile.</strong> Multiple tabs share one session/cart and will conflict.</li>
+          <li>Multiple items = separate Chrome profiles. Each gets its own cookies, session, settings, and <a class="guide-setting-link" data-panel="forms" data-el="jigIndex">jig index</a>.</li>
+          <li><a class="guide-setting-link" data-panel="accounts" data-el="imap2faEnabled">IMAP 2FA</a> users: each profile has a different extension ID — update <code>allowed_origins</code> in the native host manifest.</li>
+        </ul>
+
+        <h3 class="guide-subhead">Queue</h3>
+        <ul class="guide-steps">
+          <li>Don't reload. Don't click. Bot holds your position.</li>
+          <li>29:59 / 9:59 timers are Walmart placeholders — real position is server-side.</li>
+          <li>When your turn comes, WebSocket intercept detects it instantly.</li>
+          <li>45 min timeout = take over manually. Item gone after queue = sold out.</li>
         </ul>
       </details>
 

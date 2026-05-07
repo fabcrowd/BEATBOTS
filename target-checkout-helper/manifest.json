@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Target Checkout Helper",
-  "version": "1.7.3",
+  "version": "2.0.0",
   "description": "Automates Target.com and Walmart.com checkout steps — Add to Cart through Order Review. You place the final order.",
-  "permissions": ["storage", "tabs", "alarms", "cookies", "debugger", "declarativeNetRequest", "browsingData", "identity"],
+  "permissions": ["storage", "tabs", "alarms", "cookies", "debugger", "declarativeNetRequest", "browsingData", "identity", "nativeMessaging"],
   "declarative_net_request": {
     "rule_resources": [
       { "id": "blocking", "enabled": true, "path": "rules/blocking.json" }
@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["dropPollingTiming.js", "core/hosts.js", "content.js"],
+      "js": ["dropPollingTiming.js", "core/hosts.js", "core/jigAddress.js", "content.js"],
       "run_at": "document_end"
     },
     {
@@ -27,7 +27,13 @@
     },
     {
       "matches": ["*://*.walmart.com/*"],
-      "js": ["dropPollingTiming.js", "core/hosts.js", "walmart-content.js"],
+      "js": ["walmart-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://*.walmart.com/*"],
+      "js": ["dropPollingTiming.js", "core/hosts.js", "core/jigAddress.js", "walmart-content.js"],
       "run_at": "document_end"
     }
   ],

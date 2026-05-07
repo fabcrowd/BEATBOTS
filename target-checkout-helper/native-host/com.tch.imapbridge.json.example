@@ -1,0 +1,9 @@
+{
+  "name": "com.tch.imapbridge",
+  "description": "TCH IMAP bridge for Walmart 2FA codes",
+  "path": "REPLACE_WITH_ABSOLUTE_PATH_TO_RUN_BRIDGE_BAT_OR_SH",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://REPLACE_WITH_YOUR_EXTENSION_ID/"
+  ]
+}

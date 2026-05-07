@@ -5,10 +5,13 @@
 // ─── SELECTORS ───────────────────────────────────────────────────────────────
 
 const WM_SEL = {
-  // Product page
-  atc:          '[data-automation-id="add-to-cart-btn"]',
+  // Product page — comma chain = first match wins (querySelector)
+  atc:
+    '[data-automation-id="add-to-cart-btn"], button[data-automation-id="atc-button"], button[data-tl-id="ProductPrimaryCTA-cta_add_to_cart_button"]',
   atcAlt:       'button[class*="AddToCartButton"], button[class*="add-to-cart"]',
   atcFallback:  '#add-on-atc-container button',
+  /** Secondary signal that product-page queue cleared (walmart_pokemon parity). */
+  queueHoldSpot: 'button[data-automation-id="queue-hold-spot-btn"]',
   // Price — __NEXT_DATA__ preferred (see wmGetCurrentPrice); DOM fallbacks below
   price:        '[itemprop="price"], [data-automation-id="product-price"], [class*="price-characteristic"]',
   // Post-ATC modal / mini-cart
@@ -61,7 +64,10 @@ async function wmGetSettings() {
       'walmartAtcOnly',
       'walmartUseSavedSession',
       'shippingJig',
+      'jigIndex',
       'checkoutSound',
+      'imap2faEnabled',
+      'imapProfile',
     ]).catch(() => ({}));
   }
   return wmSettingsCache;
@@ -143,6 +149,17 @@ function wmFindByText(text) {
   return Array.from(document.querySelectorAll('a, button')).find(
     el => el.textContent.trim().toLowerCase().includes(lower)
   ) || null;
+}
+
+/** ATC / queue-hold primary controls — keep all paths in sync when Walmart rotates markup. */
+function wmFindAtcLikeButton() {
+  return (
+    document.querySelector(WM_SEL.atc) ||
+    document.querySelector(WM_SEL.atcAlt) ||
+    document.querySelector(WM_SEL.queueHoldSpot) ||
+    document.querySelector(WM_SEL.atcFallback) ||
+    wmFindByText('add to cart')
+  );
 }
 
 function wmIsVisible(el) {
@@ -266,9 +283,7 @@ function wmIsQueuePage() { return wmHasQueueIndicators(); }
  * disabled — the classic Walmart drop queue state.
  */
 function wmIsProductQueued() {
-  const atc = document.querySelector(WM_SEL.atc) ||
-              document.querySelector(WM_SEL.atcAlt) ||
-              wmFindByText('add to cart');
+  const atc = wmFindAtcLikeButton();
   if (!atc) return false;
   return atc.disabled || atc.getAttribute('aria-disabled') === 'true';
 }
@@ -437,9 +452,15 @@ async function wmWaitInProductQueue(settings, oid) {
 
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();
+  let queuePassedSignal = false;
+  const onQueuePassed = () => { queuePassedSignal = true; };
+  const docEl = document.documentElement;
+  docEl.addEventListener('TCH_QUEUE_PASSED', onQueuePassed);
 
+  try {
   while (Date.now() - started < maxWaitMs) {
-    await wmSleep(1000);
+    if (!queuePassedSignal) await wmSleep(1000);
+    else queuePassedSignal = false;
 
     // Price guard — use DOM-only (liveOnly=true): __NEXT_DATA__ is frozen at
     // page load and won't update when Walmart flips the drop price at go-time.
@@ -452,10 +473,7 @@ async function wmWaitInProductQueue(settings, oid) {
     }
 
     // Check if ATC has become enabled (our turn in queue)
-    const btn =
-      document.querySelector(WM_SEL.atc) ||
-      document.querySelector(WM_SEL.atcAlt) ||
-      wmFindByText('add to cart');
+    const btn = wmFindAtcLikeButton();
 
     if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && wmIsVisible(btn)) {
       wmShowToast('Your turn! Adding to cart…', 'success');
@@ -494,6 +512,9 @@ async function wmWaitInProductQueue(settings, oid) {
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
+  } finally {
+    docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
+  }
 }
 
 /**
@@ -575,12 +596,8 @@ async function wmHandleProductPage(settings, oid) {
   // Wait up to 8s for ATC to appear and be enabled. If after 8s it's still
   // disabled, the queue may have just loaded — hand off to wmWaitInProductQueue.
   const atcBtn = await wmWaitFor(() => {
-    const primary = document.querySelector(WM_SEL.atc);
-    if (primary && !primary.disabled && wmIsVisible(primary)) return primary;
-    const alt = document.querySelector(WM_SEL.atcAlt);
-    if (alt && !alt.disabled && wmIsVisible(alt)) return alt;
-    const byText = wmFindByText('add to cart');
-    if (byText && !byText.disabled && wmIsVisible(byText)) return byText;
+    const el = wmFindAtcLikeButton();
+    if (el && !el.disabled && wmIsVisible(el)) return el;
     return null;
   }, 8000);
 
@@ -705,8 +722,17 @@ async function wmHandleShipping(settings) {
     // Saved address may already be selected — just continue.
     console.log('[WMT] No shipping form fields found — assuming saved address');
   } else {
-    const wmJig = (settings.shippingJig || '').trim();
-    const wmEffectiveAddress1 = wmJig && s.address1 ? `${wmJig} ${s.address1}` : s.address1;
+    const jiRaw = settings.jigIndex;
+    const jigIdx = typeof jiRaw === 'number' && Number.isFinite(jiRaw)
+      ? jiRaw
+      : parseInt(String(jiRaw ?? ''), 10);
+    const wmEffectiveAddress1 =
+      typeof jigAddressLine1 === 'function'
+        ? jigAddressLine1(s.address1, Number.isFinite(jigIdx) ? jigIdx : 0, settings.shippingJig)
+        : (() => {
+            const wmJig = (settings.shippingJig || '').trim();
+            return wmJig && s.address1 ? `${wmJig} ${s.address1}` : s.address1;
+          })();
     const fieldMap = [
       [WM_SEL.firstName, s.firstName],
       [WM_SEL.lastName,  s.lastName],
@@ -917,6 +943,64 @@ async function wmHandleCheckout(settings) {
   console.warn('[WMT] wmHandleCheckout timed out after 10 min');
 }
 
+// ─── WALMART LOGIN / 2FA (IMAP via native host) ────────────────────────────────
+
+async function wmTryImap2FA(loginSettings) {
+  const p = loginSettings.imapProfile || {};
+  if (!loginSettings.imap2faEnabled || !p.host || !p.user || !p.password) return false;
+
+  const input = document.querySelector(
+    'input[id*="code"], input[name*="code"], input[id*="verification"], input[id*="otp"], input[autocomplete="one-time-code"], input[inputmode="numeric"]'
+  );
+  if (!input || !wmIsVisible(input)) return false;
+
+  wmShowToast('Fetching verification code from email…', 'persistent');
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({
+      type: 'IMAP_NATIVE_CALL',
+      payload: {
+        cmd: 'readCode',
+        host: p.host,
+        port: Number(p.port) || 993,
+        user: p.user,
+        password: p.password,
+        timeoutMs: 85000,
+      },
+    });
+  } catch (_) {
+    wmShowToast('IMAP request failed', 'error');
+    return false;
+  }
+
+  if (!res?.ok || !res.code) {
+    wmShowToast(res?.error ? String(res.error).slice(0, 120) : 'No code from inbox', 'error');
+    return false;
+  }
+
+  wmFillInput(input, res.code);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+
+  const submitBtn =
+    document.querySelector('button[type="submit"]') ||
+    wmFindByText('verify') ||
+    wmFindByText('continue');
+  if (submitBtn && wmIsVisible(submitBtn)) {
+    await wmSleep(400);
+    await wmDebuggerClick(submitBtn);
+  }
+  wmShowToast('Verification code submitted', 'success');
+  return true;
+}
+
+async function wmPollLoginImap2FA(loginSettings) {
+  const deadline = Date.now() + 150000;
+  while (Date.now() < deadline && /\/account\/login/i.test(location.pathname)) {
+    if (await wmTryImap2FA(loginSettings)) return;
+    await wmSleep(2500);
+  }
+}
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
 let wmRuntimeEnabled = true;
@@ -959,7 +1043,11 @@ async function _wmInit() {
       return;
     }
     if (/\/account\/login/i.test(location.pathname)) {
-      wmShowToast('Please log in to Walmart — bot will resume after login', 'persistent');
+      wmShowToast('Walmart login — complete captcha if shown; 2FA can be filled from email when enabled.', 'persistent');
+      void wmPollLoginImap2FA({
+        imap2faEnabled: !!data.imap2faEnabled,
+        imapProfile: data.imapProfile || {},
+      });
       wmInitInFlight = false;
       return;
     }
@@ -1015,6 +1103,9 @@ async function _wmInit() {
     walmartAtcOnly:        !!data.walmartAtcOnly,
     walmartUseSavedSession: data.walmartUseSavedSession !== false,
     shippingJig:           data.shippingJig || '',
+    jigIndex: typeof data.jigIndex === 'number' && Number.isFinite(data.jigIndex)
+      ? data.jigIndex
+      : Math.max(0, Math.min(99, parseInt(String(data.jigIndex ?? '0'), 10) || 0)),
     checkoutSound:         data.checkoutSound !== false,
     productUrl:            matchedProduct?.url || null,
   };

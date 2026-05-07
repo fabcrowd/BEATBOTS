@@ -4,7 +4,7 @@
 
 ### Project overview
 
-This is **Target + Walmart Checkout Helper**, a Chrome extension (Manifest V3) that automates the checkout flow on Target.com and Walmart.com. It is a pure client-side extension with no backend, no build step, no package manager, and no external dependencies. All files are vanilla HTML/CSS/JS. Declares **`cookies`**, **`browsingData`**, **`debugger`**, and **`host_permissions`: `<all_urls>`**. **`cookies`** is used for optional snapshot/replay of **Target** cookies; **`browsingData`** clears Target origins when RedSky inventory APIs return 401/403 (auto session recovery); **`debugger`** is optional CDP attach from the popup (Target-only by default, or any tab if you enable Advanced).
+This is **Target + Walmart Checkout Helper**, a Chrome extension (Manifest V3) that automates the checkout flow on Target.com and Walmart.com. It is a pure client-side extension with no backend and no build step for the extension bundle itself (vanilla HTML/CSS/JS). Optional **IMAP 2FA** uses a **native messaging host** under `native-host/` (Node.js + `npm install` there only). Declares **`cookies`**, **`browsingData`**, **`debugger`**, **`nativeMessaging`** (for optional IMAP bridge), and **`host_permissions`: `<all_urls>`**. **`cookies`** is used for optional snapshot/replay of **Target** cookies; **`browsingData`** clears Target origins when RedSky inventory APIs return 401/403 (auto session recovery); **`debugger`** is optional CDP attach from the popup (Target-only by default, or any tab if you enable Advanced).
 
 ### Extension files
 
@@ -12,12 +12,15 @@ All extension source lives in `target-checkout-helper/`:
 - `manifest.json` — Chrome MV3 manifest
 - `background.js` — Service worker for message relay
 - `core/hosts.js` — Retailer hostname detection + cookie domain lists (shared with content)
+- `core/jigAddress.js` — Shared shipping address line 1 jig helper (Target + Walmart content scripts)
 - `core/debuggerBridge.js` — `chrome.debugger` attach/detach (service worker only)
 - `cookieHarvest.js` — Target cookie snapshot pool (imported by `background.js`; see Cookie harvest below)
 - `dropPollingTiming.js` — shared drop-window poll intervals (loaded by background + content)
 - `content.js` — Content script (injected on `<all_urls>`; **init exits immediately** unless the page is Target; Walmart pages are handled by `walmart-content.js`)
 - `walmart-content.js` — Content script injected on `*.walmart.com`; handles product ATC → cart → queue wait → shipping → payment → review
 - `main_world.js` — Injected in **MAIN** world on `*.target.com` only (not on every site)
+- `walmart-main-world.js` — Injected in **MAIN** world on `*.walmart.com` at `document_start` (Queue-it WebSocket sniff → `TCH_QUEUE_PASSED` on `document.documentElement`)
+- `native-host/` — Optional Node.js IMAP bridge for Walmart 2FA (`imap-bridge.js`); **each clone and each physical machine** needs its own local setup (`npm install`, native manifest path, extension ID) — see `native-host/README.md`
 - `popup.html`, `popup.js`, `popup.css` — Extension popup UI
 - `icons/` — Extension icons
 
