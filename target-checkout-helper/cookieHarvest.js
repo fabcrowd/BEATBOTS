@@ -8,6 +8,9 @@ const HARVEST_CONFIG_LOCAL_KEY = 'harvestConfig';
 /** If chrome.storage.session is missing (old Chrome), hold pool in SW RAM until worker dies. */
 let memoryHarvestFallback = [];
 
+/** Serializes concurrent snapshot writes to prevent read-modify-write races. */
+let _harvestLock = Promise.resolve();
+
 const DEFAULT_HARVEST_CONFIG = {
   harvestingEnabled: false,
   harvestsPerPageLoad: 1,
@@ -93,41 +96,66 @@ async function tchReadCookiesForRetailer(retailerId) {
 
 async function tchCaptureOneSnapshot(kind, tabUrl, retailerId) {
   const rid = retailerId || 'target';
-  if (rid === 'walmart') {
-    return { ok: false, reason: 'walmart_not_implemented', total: 0 };
-  }
-  if (rid !== 'target') {
-    return { ok: false, reason: 'unknown_retailer', total: 0 };
-  }
+  if (rid === 'walmart') return { ok: false, reason: 'walmart_not_implemented', total: 0 };
+  if (rid !== 'target') return { ok: false, reason: 'unknown_retailer', total: 0 };
   const cfg = await tchGetHarvestConfig();
   if (!cfg.harvestingEnabled) return { ok: false, reason: 'disabled', total: 0 };
   const cookies = await tchReadCookiesForRetailer(rid);
-  let entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
-  entries.push({
-    ts: Date.now(),
-    kind: kind || 'unknown',
-    tabUrl: tabUrl || '',
-    retailer: rid,
-    cookies,
-  });
-  while (entries.length > 48) {
-    if (cfg.removalOrder === 'fifo') entries.pop();
-    else entries.shift();
+  // Acquire lock to serialize the read-modify-write against concurrent calls.
+  const prior = _harvestLock;
+  let releaseLock;
+  _harvestLock = new Promise(resolve => { releaseLock = resolve; });
+  await prior;
+  try {
+    let entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
+    entries.push({
+      ts: Date.now(),
+      kind: kind || 'unknown',
+      tabUrl: tabUrl || '',
+      retailer: rid,
+      cookies,
+    });
+    while (entries.length > 48) {
+      if (cfg.removalOrder === 'fifo') entries.shift(); // oldest first
+      else entries.pop();                               // newest first (lifo)
+    }
+    await tchSetHarvestEntries(entries);
+    return { ok: true, total: entries.length };
+  } finally {
+    releaseLock();
   }
-  await tchSetHarvestEntries(entries);
-  return { ok: true, total: entries.length };
 }
 
 async function tchCaptureBurst(count, kind, tabUrl, retailerId) {
+  const rid = retailerId || 'target';
+  if (rid === 'walmart') return { ok: false, reason: 'walmart_not_implemented', total: 0 };
+  if (rid !== 'target') return { ok: false, reason: 'unknown_retailer', total: 0 };
   const cfg = await tchGetHarvestConfig();
   if (!cfg.harvestingEnabled) return { ok: false, reason: 'disabled', total: 0 };
   const n = Math.max(1, Math.min(5, Number(count) || cfg.harvestsPerPageLoad || 1));
-  let last = { ok: true, total: 0 };
-  for (let i = 0; i < n; i++) {
-    last = await tchCaptureOneSnapshot(kind, tabUrl, retailerId);
-    if (!last.ok) return last;
+  // n=1: delegate to single-snapshot path (acquires its own lock).
+  if (n === 1) return tchCaptureOneSnapshot(kind, tabUrl, rid);
+  // n>1: read cookies once, acquire lock once, push n entries in memory, write once.
+  const cookies = await tchReadCookiesForRetailer(rid);
+  const prior = _harvestLock;
+  let releaseLock;
+  _harvestLock = new Promise(resolve => { releaseLock = resolve; });
+  await prior;
+  try {
+    let entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
+    const ts = Date.now();
+    for (let i = 0; i < n; i++) {
+      entries.push({ ts: ts + i, kind: kind || 'unknown', tabUrl: tabUrl || '', retailer: rid, cookies });
+      while (entries.length > 48) {
+        if (cfg.removalOrder === 'fifo') entries.shift();
+        else entries.pop();
+      }
+    }
+    await tchSetHarvestEntries(entries);
+    return { ok: true, total: entries.length };
+  } finally {
+    releaseLock();
   }
-  return last;
 }
 
 async function tchClearHarvestEntries() {
@@ -138,8 +166,9 @@ async function tchClearHarvestEntries() {
 
 async function tchHarvestStatus() {
   const cfg = await tchGetHarvestConfig();
-  const entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
-  if (entries.length !== (await tchGetHarvestEntries()).length) {
+  const rawEntries = await tchGetHarvestEntries();
+  const entries = tchPruneExpired(rawEntries, cfg.expirationMinutes);
+  if (entries.length !== rawEntries.length) {
     await tchSetHarvestEntries(entries);
   }
   return {

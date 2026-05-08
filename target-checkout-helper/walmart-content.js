@@ -460,7 +460,6 @@ async function wmWaitInProductQueue(settings, oid) {
   try {
   while (Date.now() - started < maxWaitMs) {
     if (!queuePassedSignal) await wmSleep(1000);
-    else queuePassedSignal = false;
 
     // Price guard — use DOM-only (liveOnly=true): __NEXT_DATA__ is frozen at
     // page load and won't update when Walmart flips the drop price at go-time.
@@ -468,9 +467,15 @@ async function wmWaitInProductQueue(settings, oid) {
     if (maxPrice > 0) {
       const currentPrice = wmGetCurrentPrice(true);
       if (currentPrice !== null && currentPrice > maxPrice) {
+        // Don't consume the signal — we may have already passed the queue but
+        // price is still above limit. Retry next tick with signal intact.
+        queuePassedSignal = false;
         continue;
       }
     }
+
+    // Signal consumed only when we proceed to ATC check.
+    queuePassedSignal = false;
 
     // Check if ATC has become enabled (our turn in queue)
     const btn = wmFindAtcLikeButton();

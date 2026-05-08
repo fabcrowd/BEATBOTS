@@ -673,10 +673,13 @@ async function runBackgroundPoll() {
     // Combined stock map — Target keyed by TCIN, Walmart keyed by normalized URL.
     const stockMap = new Map();
 
+    let hadApiError = false;
     if (hasTargetWork) {
       const tcins = targetProducts.map(p => extractTcin(p.url)).filter(Boolean);
       if (tcins.length) {
+        const streakBefore = redskyErrorStreak;
         const targetMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
+        if (redskyErrorStreak > streakBefore) hadApiError = true;
         for (const [k, v] of targetMap) stockMap.set(k, v);
       }
     }
@@ -689,6 +692,13 @@ async function runBackgroundPoll() {
     // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
     const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
     const dropArmed = !dropMs || accurateNow() >= dropMs;
+
+    // Per-product skip monitoring for Target: treat product as in-stock when drop is armed.
+    for (const tp of targetProducts) {
+      if (!tp.skipMonitoring || !dropArmed) continue;
+      const tcin = extractTcin(tp.url);
+      if (tcin) stockMap.set(tcin, { stock: true, qty: 999 });
+    }
 
     for (const wp of walmartProducts) {
       const itemId = extractWalmartItemId(wp.url);
@@ -864,7 +874,10 @@ async function runBackgroundPoll() {
       }
     } catch {}
 
-    await sleep(computeBackgroundPollSleepMs(monitor));
+    const sleepMs = hadApiError
+      ? (monitor.errorRetryDelayMs || 3500)
+      : computeBackgroundPollSleepMs(monitor);
+    await sleep(sleepMs);
   }
   console.log('[TCH bg] background poll stopped');
 }
@@ -1000,8 +1013,9 @@ async function recordCheckoutRetryEvent(event) {
 
   if (compactEvent.status === 'scheduled' || compactEvent.status === 'watching') {
     telemetry.failedAttemptsCurrentRun = compactEvent.attempt;
-    telemetry.totalFailures = (telemetry.totalFailures || 0) + 1;
+    // totalFailures counts episodes (exhausted runs), not individual retry events
   } else if (compactEvent.status === 'exhausted') {
+    telemetry.totalFailures = (telemetry.totalFailures || 0) + 1;
     telemetry.failedAttemptsCurrentRun = compactEvent.maxAttempts || telemetry.failedAttemptsCurrentRun;
   } else if (compactEvent.status === 'cancelled') {
     telemetry.failedAttemptsCurrentRun = 0;
@@ -1082,6 +1096,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           highStockThreshold: Number(message.highStockThreshold) || 10,
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
+          errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1119,8 +1134,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'WM_OFFER_ID_READY': {
       // Content script extracted OID from __NEXT_DATA__ on a Walmart product page.
       // Store it on the matching monitored product so wmDirectAtc() can use it.
-      chrome.storage.local.get('monitor').then(({ monitor: mon }) => {
-        if (!mon?.products) return;
+      chrome.storage.local.get('monitor').then(async ({ monitor: mon }) => {
+        if (!mon?.products) { sendResponse({ ok: false }); return; }
         const normUrl = normalizeProductUrl(message.url || '');
         let updated = false;
         for (const p of mon.products) {
@@ -1129,16 +1144,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             updated = true;
           }
         }
-        if (updated) chrome.storage.local.set({ monitor: mon });
-      }).catch(() => {});
-      sendResponse({ ok: true });
+        if (updated) await chrome.storage.local.set({ monitor: mon });
+        sendResponse({ ok: true });
+      }).catch(() => sendResponse({ ok: false }));
       return true;
     }
 
     case 'GET_NTP_OFFSET':
       // Popup requests the current NTP offset for live clock display.
       sendResponse({ ntpOffsetMs, lastSyncMs: lastClockSyncMs });
-      return false;
+      return true;
 
     case 'ATC_SUCCESS':
       handleATCSuccess(message.url, sender.tab.id)
@@ -1480,6 +1495,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     highStockThreshold = 10,
     targetMaxPrice = 0,
     walmartMaxPrice = 0,
+    errorRetryDelayMs = 3500,
     resetEndlessSuccessCount = true,
   } = opts;
 
@@ -1508,6 +1524,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   monitor.highStockThreshold = Math.max(1, Math.min(999, Number(highStockThreshold) || 10));
   monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
   monitor.walmartMaxPrice = Math.max(0, Number(walmartMaxPrice) || 0);
+  monitor.errorRetryDelayMs = Math.max(500, Math.min(30000, Number(errorRetryDelayMs) || 3500));
 
   await chrome.storage.local.set({
     monitor,
@@ -1567,6 +1584,15 @@ async function handleATCSuccess(url, tabId) {
   if (!monitor?.active) return;
 
   const normUrl = normalizeProductUrl(url);
+
+  // Guard: only count ATCs for products we're actually monitoring.
+  // Orphan counts (from stale/wrong URLs) corrupt quota calculations.
+  const isMonitored = monitor.products?.some(p => normalizeProductUrl(p.url) === normUrl);
+  if (!isMonitored) {
+    console.warn('[TCH bg] ATC_SUCCESS for unmonitored URL (ignored):', normUrl);
+    return;
+  }
+
   navigationLock.delete(normUrl); // release — ATC succeeded
   inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
   monitor.counts[normUrl] = (monitor.counts[normUrl] || 0) + 1;
@@ -1615,3 +1641,91 @@ async function handleATCSuccess(url, tabId) {
     await chrome.storage.local.set({ monitor });
   }
 }
+
+// ─── BEATBOTS Desktop App Bridge ─────────────────────────────────────────────
+// Forwards harvested cookies to the BEATBOTS Electron desktop app via WebSocket.
+// Gracefully degrades: if the app is not running, the extension continues
+// to work standalone as before.
+
+const BB_WS_DEFAULT_PORT = 9235;
+let bbWs = null;
+let bbWsPort = BB_WS_DEFAULT_PORT;
+let bbReconnectTimer = null;
+let bbConnected = false;
+const BB_RECONNECT_DELAY_MS = 5000;
+
+async function bbGetPort() {
+  try {
+    const { beatbotsWsPort } = await chrome.storage.local.get('beatbotsWsPort');
+    return Number(beatbotsWsPort) || BB_WS_DEFAULT_PORT;
+  } catch { return BB_WS_DEFAULT_PORT; }
+}
+
+function bbConnect() {
+  if (bbWs && (bbWs.readyState === WebSocket.OPEN || bbWs.readyState === WebSocket.CONNECTING)) return;
+
+  try {
+    bbWs = new WebSocket(`ws://127.0.0.1:${bbWsPort}`);
+
+    bbWs.addEventListener('open', () => {
+      bbConnected = true;
+      console.log('[TCH] BEATBOTS bridge connected on port', bbWsPort);
+      if (bbReconnectTimer) { clearTimeout(bbReconnectTimer); bbReconnectTimer = null; }
+    });
+
+    bbWs.addEventListener('message', (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'pong' || msg.type === 'hello') return;
+        console.log('[TCH] BEATBOTS msg:', msg.type);
+      } catch {}
+    });
+
+    bbWs.addEventListener('close', () => {
+      bbConnected = false;
+      bbWs = null;
+      // Try the +1 port (app retries on port conflict)
+      bbScheduleReconnect();
+    });
+
+    bbWs.addEventListener('error', () => {
+      bbConnected = false;
+      bbWs = null;
+    });
+  } catch (e) {
+    console.debug('[TCH] BEATBOTS bridge unavailable:', e.message);
+  }
+}
+
+function bbScheduleReconnect() {
+  if (bbReconnectTimer) return;
+  bbReconnectTimer = setTimeout(async () => {
+    bbReconnectTimer = null;
+    bbWsPort = await bbGetPort();
+    bbConnect();
+  }, BB_RECONNECT_DELAY_MS);
+}
+
+/** Send a harvested cookie batch to the desktop app */
+function bbSendCookieHarvest(kind, cookies, shapeHeaders, proxy) {
+  if (!bbConnected || !bbWs || bbWs.readyState !== WebSocket.OPEN) return false;
+  try {
+    bbWs.send(JSON.stringify({ type: 'cookie_harvest', kind, cookies, shapeHeaders: shapeHeaders || {}, proxy: proxy || null }));
+    return true;
+  } catch { return false; }
+}
+
+// Hook into the cookie harvest system — forward to desktop app whenever a snapshot is stored
+// We do this by listening for the TCH_HARVEST_NOW broadcast response pattern
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === 'TCH_HARVEST_RESULT' && msg?.cookies) {
+    const kind = msg.isLoginPage ? 'login' : 'atc';
+    bbSendCookieHarvest(kind, msg.cookies, msg.shapeHeaders, msg.proxy);
+  }
+});
+
+// Initialize bridge on service worker start
+(async () => {
+  bbWsPort = await bbGetPort();
+  bbConnect();
+})();

@@ -555,6 +555,7 @@ const CART_READY_KEY = 'tch:cartReady'; // set after ATC succeeds; cleared on ch
 const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
 const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
+const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; cleared on checkout load
 let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
@@ -1213,7 +1214,6 @@ async function handleProductPage(settings) {
   console.log('[TCH] clicking ATC');
   await debuggerClick(addBtn);
 
-  markCartReady(); // ATC was clicked — cart should now have this item
   await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
 
   if (settings.useSavedPayment) {
@@ -1225,11 +1225,13 @@ async function handleProductPage(settings) {
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
     try {
       const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
+      markCartReady(); // modal confirmed — item is in cart
       setNavigationMark('product_to_checkout');
       await debuggerClick(viewCartBtn);
       return;
     } catch {
       console.log('[TCH] viewCart modal not found; navigating to checkout directly');
+      markCartReady(); // optimistic — modal may not appear even on a successful ATC
       setNavigationMark('product_to_checkout');
       await maybeApplyHarvestedSession(settings);
       window.location.href = 'https://www.target.com/checkout';
@@ -1253,6 +1255,7 @@ async function handleProductPage(settings) {
     }
   }
 
+  markCartReady(); // about to navigate — item should be in cart
   showToast('ATC → checkout…');
   setNavigationMark('product_to_checkout');
   await maybeApplyHarvestedSession(settings);
@@ -1298,6 +1301,15 @@ function markCheckoutFlow(step) {
 
 async function handleCheckoutPage(settings) {
   markCheckoutFlow('page_ready');
+  // If a monitor Buy It Now click was pending confirmation, fire ATC_SUCCESS now that
+  // checkout has loaded (the only reliable signal we have after cross-page navigation).
+  try {
+    const binUrl = sessionStorage.getItem(MONITOR_BIN_PENDING_KEY);
+    if (binUrl) {
+      sessionStorage.removeItem(MONITOR_BIN_PENDING_KEY);
+      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: binUrl }).catch(() => {});
+    }
+  } catch {}
   const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
   if (step === 'shipping')    return handleShippingStep(settings);
@@ -1993,6 +2005,17 @@ async function handleMonitoredATC(monitor, product) {
 
   if (currentCount >= product.qty) return;
 
+  // Hype mode: require at least one cookie snapshot in pool before ATC.
+  if (product.hypeMode) {
+    try {
+      const poolStatus = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
+      if (!poolStatus?.count) {
+        showToast('Hype mode: no cookie snapshots in pool — waiting for harvest…', 'persistent');
+        return;
+      }
+    } catch { /* no-op if SW is inactive */ }
+  }
+
   // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
   const settings = await getSettings();
   if (settings.useSavedPayment) {
@@ -2007,9 +2030,8 @@ async function handleMonitoredATC(monitor, product) {
         await debuggerClick(buyNowBtn);
         showToast('Monitor: Buy It Now → checkout…');
         setNavigationMark('product_to_checkout');
-        // Buy It Now routes directly to checkout; ATC_SUCCESS will be implied
-        // once checkout completes, so send it now to let the background update counts.
-        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+        // Defer ATC_SUCCESS until checkout page loads — content script unloads on nav.
+        try { sessionStorage.setItem(MONITOR_BIN_PENDING_KEY, normUrl); } catch {}
         return;
       }
     }
@@ -2070,7 +2092,7 @@ async function handleMonitoredATC(monitor, product) {
         }
         showToast(`Monitor: Added! → checkout (${currentCount + 1}/${product.qty})`, 'success');
         console.log(`[TCH] monitor ATC (saved): navigating to checkout`);
-        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl }).catch(() => {});
         return;
       }
 
@@ -2086,7 +2108,7 @@ async function handleMonitoredATC(monitor, product) {
       } catch { /* modal didn't appear — item may still have been added */ }
 
       markCartReady();
-      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl });
+      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl }).catch(() => {});
 
       // Extra product trick: visit extra item page before checkout.
       if (settings.addExtraProduct && settings.extraProductTcin) {

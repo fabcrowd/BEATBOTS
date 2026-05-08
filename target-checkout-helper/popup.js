@@ -340,6 +340,9 @@ function gatherSettings() {
       ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
       : 10,
     targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+    errorRetryDelayMs: $('errorRetryDelayMs')
+      ? parseIntInRange($('errorRetryDelayMs').value, 500, 30000, 3500)
+      : 3500,
     imap2faEnabled: !!$('imap2faEnabled')?.checked,
     imapProfile: {
       host: ($('imapHost')?.value || '').trim(),
@@ -550,6 +553,9 @@ function populateFields(data) {
   const tm = $('targetMaxPrice');
   if (tm && typeof data.targetMaxPrice === 'number') tm.value = String(data.targetMaxPrice);
 
+  const errMs = $('errorRetryDelayMs');
+  if (errMs && typeof data.errorRetryDelayMs === 'number') errMs.value = String(data.errorRetryDelayMs);
+
   const i2fa = $('imap2faEnabled');
   if (i2fa) i2fa.checked = !!data.imap2faEnabled;
   const ip = data.imapProfile || {};
@@ -628,7 +634,7 @@ function wireApplyHintReminders() {
     'useSavedPayment', 'autoPlaceOrder', 'preferPickup', 'checkoutSound',
     'discordWebhook', 'webhookSendFailures', 'endlessMode', 'endlessLimit',
     'addExtraProduct', 'extraProductTcin', 'highStockOnly', 'highStockThreshold',
-    'targetMaxPrice', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay',
+    'targetMaxPrice', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay', 'errorRetryDelayMs',
     'dropExpectedAt', 'harvestEnabled', 'harvestPerLoad', 'harvestExpireMin',
     'harvestDontStop', 'harvestApplyNext', 'walmartUseSavedSession',
     'walmartSkipMonitoring', 'walmartMaxPrice', 'wmDropExpectedAt',
@@ -680,6 +686,7 @@ if (hasChromeStorage()) {
       'highStockOnly',
       'highStockThreshold',
       'targetMaxPrice',
+      'errorRetryDelayMs',
       'imap2faEnabled',
       'imapProfile',
     ],
@@ -1162,6 +1169,42 @@ function renderProducts() {
       li.appendChild(oidRow);
     }
 
+    // Per-product flags row — Target only
+    if (!isWalmartProduct) {
+      const flagsRow = document.createElement('div');
+      flagsRow.className = 'product-item-flags';
+
+      const skipLabel = document.createElement('label');
+      skipLabel.className = 'product-flag-label';
+      const skipChk = document.createElement('input');
+      skipChk.type = 'checkbox';
+      skipChk.checked = !!p.skipMonitoring;
+      skipChk.disabled = monitorActive;
+      skipChk.addEventListener('change', () => {
+        products[i].skipMonitoring = skipChk.checked;
+        saveProducts();
+      });
+      skipLabel.appendChild(skipChk);
+      skipLabel.append(' Skip monitor');
+
+      const hypeLabel = document.createElement('label');
+      hypeLabel.className = 'product-flag-label';
+      const hypeChk = document.createElement('input');
+      hypeChk.type = 'checkbox';
+      hypeChk.checked = !!p.hypeMode;
+      hypeChk.disabled = monitorActive;
+      hypeChk.addEventListener('change', () => {
+        products[i].hypeMode = hypeChk.checked;
+        saveProducts();
+      });
+      hypeLabel.appendChild(hypeChk);
+      hypeLabel.append(' Hype mode');
+
+      flagsRow.appendChild(skipLabel);
+      flagsRow.appendChild(hypeLabel);
+      li.appendChild(flagsRow);
+    }
+
     productListEl.appendChild(li);
   });
   // Keep Walmart tab list in sync
@@ -1426,12 +1469,11 @@ function wmFormatDropCountdown(iso) {
   el.textContent = h > 0 ? `${h}h ${m % 60}m until drop` : m > 0 ? `${m}m ${s % 60}s until drop` : `${s}s until drop`;
 }
 
-// Walmart Start/Stop button — mirrors the main toggleMonitor
+// Walmart Start/Stop — only sends walmart.com products to the monitor
 $('wmMonitorBtn')?.addEventListener('click', () => {
-  // Sync drop time from Walmart tab before toggling
   const wmDrop = $('wmDropExpectedAt')?.value;
   if (wmDrop && dropExpectedAtIn) dropExpectedAtIn.value = wmDrop;
-  toggleMonitor();
+  toggleMonitor(/walmart\.com/i);
 });
 
 function updateWmMonitorBtn() {
@@ -1476,7 +1518,7 @@ $('popoutBtn')?.addEventListener('click', () => {
   });
 });
 
-async function toggleMonitor() {
+async function toggleMonitor(retailerFilter) {
   if (!hasChromeStorage()) {
     showToast('Monitoring needs the real extension popup');
     return;
@@ -1490,12 +1532,18 @@ async function toggleMonitor() {
     monitorStatusEl.classList.remove('is-live');
     showToast('Monitoring stopped');
   } else {
-    if (!products.length) return;
+    const filtered = retailerFilter
+      ? products.filter(p => retailerFilter.test(p.url))
+      : products;
+    if (!filtered.length) {
+      showToast('No matching products to monitor');
+      return;
+    }
     // Persist current UI state before starting so settings survive popup close/reopen.
     await autoSaveToggle().catch(() => {});
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
-      products,
+      products: filtered,
       refreshInterval: parseInt(refreshIntervalIn.value, 10) || 1,
       dropExpectedAt: readDropExpectedAtValue(),
       walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
@@ -1505,6 +1553,9 @@ async function toggleMonitor() {
         : 10,
       targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
       walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
+      errorRetryDelayMs: $('errorRetryDelayMs')
+        ? parseIntInRange($('errorRetryDelayMs').value, 500, 30000, 3500)
+        : 3500,
     });
     monitorActive = true;
     updateMonitorUI();
