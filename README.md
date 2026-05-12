@@ -11,6 +11,82 @@ This repo now contains two systems that work together:
 
 ---
 
+## Quick Start — App + Extension Together
+
+### Prerequisites
+
+- Node.js 18+
+- Chrome browser
+- A Target account with a saved shipping address and saved payment card
+
+### Step 1: Install & launch the desktop app
+
+```bash
+cd beatbots-app
+npm install
+npm run electron:dev
+```
+
+The BEATBOTS window opens.
+
+### Step 2: Load the Chrome extension
+
+1. Open Chrome → `chrome://extensions`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked** → select the `target-checkout-helper/` folder
+4. Pin it to your toolbar (puzzle piece → pin)
+
+### Step 3: Configure the desktop app
+
+Do these in order inside the BEATBOTS window:
+
+**Settings** — Set Discord webhook (optional), leave WebSocket port at 9235, click Sync Now for NTP.
+
+**Profiles** — Click **+ New Profile** → fill in your name, shipping address, and card details → Save.
+
+**Accounts** — Click **+ New Account** → enter your Target email and password → Save → click **Login** on the row to authenticate.
+
+**Products** — Click **+ New Group** → name it, set retailer to Target → Save. Then click **+ TCIN** for each product and enter the TCIN number (the `A-XXXXXXXX` from the Target URL), a name, and quantity.
+
+**Tasks** — Click **+ New Task**:
+- Mode: **Checkout**
+- Select your Profile, Account, and Product Group
+- Set the **Drop expected at** time
+- Advanced: toggle Auto place order, max price, checkout sound as needed
+- Save
+
+### Step 4: Turn on cookie harvesting in the extension
+
+1. Click the extension icon → toggle **ON**
+2. Under Cookie harvest: check **Harvesting on**, set harvests per page load to **3**, check **Apply next snapshot before checkout**
+3. Browse 3-4 Target product pages to build the pool — watch "Snapshots ready" climb to 5+
+
+### Step 5: Verify the connection
+
+In the BEATBOTS app → **Settings** → Extension bridge section: it should show **1 connected**. The Dashboard should show Login/ATC cookie counts climbing as the extension sends harvests.
+
+### Step 6: Start the task
+
+Go to **Tasks** → click **Start** on your task. The app monitors Target's API, and when stock appears it runs a full API checkout using the extension-fed cookies.
+
+### What each piece does during a drop
+
+| Component | Job |
+|---|---|
+| Chrome extension | Harvests Shape cookies from your real Target browsing → sends to app via WebSocket |
+| Desktop app monitor | Polls RedSky inventory API (250ms near drop time) |
+| Desktop app checkout engine | Fires HTTP requests to Target's cart/checkout API using pooled cookies |
+| Puppeteer harvester (optional) | Backup cookie source in a separate Chrome instance |
+
+### If something goes wrong
+
+- **No cookies in pool** → browse a Target page in Chrome, click Harvest Now in the extension
+- **Extension not connected** → check that both sides use port 9235, reload the extension from `chrome://extensions`
+- **Session stale** → sign into Target again in Chrome, or re-Login the account in the app
+- **Shape blocked (409/429)** → the app auto-retries with a fresh cookie from the pool
+
+---
+
 ## What Changed and Why
 
 ### Background
