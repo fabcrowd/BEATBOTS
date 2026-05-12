@@ -148,6 +148,85 @@ section('Drop polling logic (mocked clock)');
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: 'not-a-date' }) === 500, 'bg invalid drop string');
 }
 
+// ── Boundary edges ─────────────────────────────────────────────────────────────
+
+section('Boundary edge cases');
+
+{
+  // Exactly at 10m pre-drop boundary — inclusive upper bound, must be in-window.
+  const now = DROP_MS - 10 * 60 * 1000;
+  const { computeBackgroundPollSleepMs, getDropAwarePollSeconds, isInDropTensionWindow,
+          getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 250, '10m boundary: bg sleep 250ms');
+  assert(getDropAwarePollSeconds(mon, 2) === 1, '10m boundary: content poll capped at 1s');
+  assert(isInDropTensionWindow(mon) === true, '10m boundary: tension window true');
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 2 * 60 * 1000, '10m boundary: keepalive 2m');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 20 * 1000, '10m boundary: burst dedup 20s');
+}
+
+{
+  // Exactly at 45m pre-drop — strictly >45m returns 2000; at 45m returns base 500.
+  const now = DROP_MS - 45 * 60 * 1000;
+  const { computeBackgroundPollSleepMs, getHarvestKeepaliveMinIntervalMs } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 500, '45m boundary: bg base 500 (not >45m)');
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 3 * 60 * 1000, '45m boundary: keepalive 3m (within 45m)');
+}
+
+{
+  // Exactly at 3m post-drop — inclusive upper bound, must still be in grace window.
+  const now = DROP_MS + 3 * 60 * 1000;
+  const { computeBackgroundPollSleepMs, getDropAwarePollSeconds, isInDropTensionWindow,
+          getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 250, '3m post-drop: bg sleep 250ms (grace)');
+  assert(getDropAwarePollSeconds(mon, 2) === 1, '3m post-drop: content poll capped (grace)');
+  assert(isInDropTensionWindow(mon) === true, '3m post-drop: tension window true (grace)');
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 2 * 60 * 1000, '3m post-drop: keepalive 2m (grace)');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 20 * 1000, '3m post-drop: burst dedup 20s (grace)');
+}
+
+{
+  // 5m post-drop — past grace, should use relaxed defaults.
+  const now = DROP_MS + 5 * 60 * 1000;
+  const { computeBackgroundPollSleepMs, isInDropTensionWindow,
+          getHarvestKeepaliveMinIntervalMs, getHarvestBurstSameUrlDedupMs } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 500, '5m post-drop: bg base after grace ends');
+  assert(isInDropTensionWindow(mon) === false, '5m post-drop: tension window false after grace');
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 15 * 60 * 1000, '5m post-drop: keepalive 15m');
+  assert(getHarvestBurstSameUrlDedupMs(mon) === 120 * 1000, '5m post-drop: burst dedup 120s');
+}
+
+{
+  // Exactly 30m pre-drop — between 10m and 45m windows.
+  const now = DROP_MS - 30 * 60 * 1000;
+  const { computeBackgroundPollSleepMs, getDropAwarePollSeconds,
+          getHarvestKeepaliveMinIntervalMs } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 500, '30m boundary: bg base 500 (mid window)');
+  assert(getDropAwarePollSeconds(mon, 1) === 1, '30m boundary: content keeps user interval');
+  assert(getHarvestKeepaliveMinIntervalMs(mon) === 3 * 60 * 1000, '30m boundary: keepalive 3m');
+}
+
+{
+  // Malformed / null monitor — must not throw, must return base defaults.
+  const { computeBackgroundPollSleepMs, getDropAwarePollSeconds } = loadHelpers(DROP_MS);
+  assert(computeBackgroundPollSleepMs(null) === 500, 'null monitor: bg base 500');
+  assert(computeBackgroundPollSleepMs(undefined) === 500, 'undefined monitor: bg base 500');
+  assert(getDropAwarePollSeconds(null, 1) === 1, 'null monitor: content base interval');
+  assert(computeBackgroundPollSleepMs({ dropExpectedAt: null }) === 500, 'null drop time: bg base');
+  assert(computeBackgroundPollSleepMs({ dropExpectedAt: 12345 }) === 500, 'numeric drop time: bg base');
+}
+
+{
+  // Negative baseSec in getDropAwarePollSeconds — must clamp to 0.25.
+  const { getDropAwarePollSeconds } = loadHelpers(DROP_MS);
+  assert(getDropAwarePollSeconds({}, -5) === 0.25, 'negative baseSec clamped to 0.25');
+  assert(getDropAwarePollSeconds({}, 0) === 1, 'zero baseSec falls back to default 1 (0 is falsy in || 1)');
+}
+
 section('Effective poll rates (reference)');
 console.log('Background loop (approx checks/min if each cycle is one fetch):');
 console.log('  250ms sleep → ~240 cycles/min (aggressive window)');

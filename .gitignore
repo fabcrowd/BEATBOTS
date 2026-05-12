@@ -1,6 +1,18 @@
 .claude/
 *.pem
 .tools/
+
+# Chrome extension native host
 scripts/browser-smoke/node_modules/
 target-checkout-helper/native-host/node_modules/
 target-checkout-helper/native-host/com.tch.imapbridge.json
+
+# Desktop app build artifacts
+beatbots-app/node_modules/
+beatbots-app/dist/
+beatbots-app/dist-electron/
+beatbots-app/release/
+beatbots-app/build/icon-*.png
+beatbots-app/build/icon.png
+beatbots-app/build/icon.ico
+beatbots-app/build/icon.icns
