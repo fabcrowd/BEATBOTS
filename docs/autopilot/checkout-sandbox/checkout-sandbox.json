@@ -1,0 +1,364 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "checkout-sandbox",
+  "description": "Automated checkout rehearsal in isolated Chrome — extension smoke (CI) plus optional Target product→review rehearsal",
+  "goals": [
+    "npm run test:extension green in scripts/browser-smoke (ephemeral profile)",
+    "checkout-rehearsal.mjs reaches review or documents blockedReason",
+    "Never auto place order; autoPlaceOrder false in rehearsal",
+    "Autopilot-verifiable with bash scripts/verify.sh"
+  ],
+  "nonGoals": [
+    "Walmart checkout rehearsal",
+    "Mock Target.com HTTP sandbox",
+    "Auto place order or real purchases",
+    "Secrets or passwords in scripts or task JSON",
+    "Headed Chrome in default cloud CI without Xvfb"
+  ],
+  "technicalNotes": "Headed Playwright Chromium required. Load target-checkout-helper/ unpacked via launch-util.mjs. Read .cursor/skills/extension-e2e-test/SKILL.md for Puppeteer patterns. Rehearsal env: TCH_PRODUCT_URL, TCH_PROFILE_DIR, TCH_REHEARSAL_TIMEOUT_MS, TCH_MANUAL_WAIT_SECS.",
+  "_tdd": true,
+  "_priority_order": [
+    "1. browser-smoke deps and test:extension (CI gate)",
+    "2. Rehearsal hardening and blockedReason codes",
+    "3. signin-step unit coverage for checkout paths",
+    "4. Optional live rehearsal run",
+    "5. verify.sh and notes summary"
+  ],
+  "_step_size": "One logical change per commit. Quality over speed.",
+  "requirements": [
+    {
+      "id": "1",
+      "category": "integration",
+      "priority": "high",
+      "description": "Install browser-smoke dependencies and Playwright Chromium for extension sandbox",
+      "testType": "integration",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "scripts/browser-smoke/package.json",
+          "scripts/browser-smoke/launch-util.mjs",
+          "scripts/extension-smoke.mjs"
+        ],
+        "relatedTests": [
+          "scripts/extension-smoke.mjs"
+        ],
+        "patterns": [
+          "cd scripts/browser-smoke && npm install",
+          "npm run install-chromium maps to playwright install chromium",
+          "Ephemeral profile via launchWithExtension profilePrefix"
+        ],
+        "targetFiles": {
+          "modify": [
+            "docs/autopilot/checkout-sandbox/checkout-sandbox-notes.md"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "scripts/browser-smoke/node_modules exists after npm install",
+        "playwright chromium executable path resolves without error",
+        "Document one-time setup commands in checkout-sandbox-notes.md"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Run npm install in browser-smoke; fail with clear message if playwright chromium missing",
+          "file": "scripts/browser-smoke/package.json",
+          "passes": false
+        },
+        "implement": {
+          "description": "npm install && npx playwright install chromium; log versions in notes",
+          "passes": false
+        },
+        "refactor": {
+          "description": "Add optional scripts/checkout-sandbox-setup.sh wrapper if install steps are duplicated",
+          "passes": false
+        }
+      },
+      "verification": [
+        "cd scripts/browser-smoke && npm install",
+        "cd scripts/browser-smoke && npx playwright install chromium",
+        "node -e \"const {chromium}=require('playwright'); console.log(chromium.executablePath())\""
+      ],
+      "passes": false
+    },
+    {
+      "id": "2",
+      "category": "testing",
+      "priority": "high",
+      "description": "Keep npm run test:extension green (e2e + functional + review-dedup chain)",
+      "dependsOn": ["1"],
+      "testType": "e2e",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "scripts/browser-smoke/extension-e2e.mjs",
+          "scripts/browser-smoke/extension-functional.mjs",
+          "scripts/browser-smoke/review-dedup-simulation.mjs",
+          "scripts/browser-smoke/package.json"
+        ],
+        "relatedTests": [
+          "scripts/browser-smoke/review-dedup-simulation.mjs"
+        ],
+        "patterns": [
+          "test:extension chains three scripts with &&",
+          "Puppeteer headless:false + --load-extension",
+          "extension ID from MV3 service_worker target URL"
+        ],
+        "targetFiles": {
+          "modify": [
+            "scripts/browser-smoke/extension-e2e.mjs",
+            "scripts/browser-smoke/extension-functional.mjs",
+            "scripts/browser-smoke/review-dedup-simulation.mjs"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "extension-e2e.mjs loads popup and sees [TCH] on target.com tab",
+        "extension-functional.mjs passes harvest/debugger/monitor message checks",
+        "review-dedup-simulation.mjs passes dedup and in-flight assertions",
+        "npm run test:extension exits 0 end-to-end",
+        "Ephemeral profile deleted after run (launch-util rmProfileDir)"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Run npm run test:extension; capture first failing script and assertion",
+          "file": "scripts/browser-smoke/package.json",
+          "passes": false
+        },
+        "implement": {
+          "description": "Fix failing browser-smoke script with minimal diff; follow extension-e2e-test skill",
+          "passes": false
+        },
+        "refactor": {
+          "description": "Share launch helpers only if duplication found during fix",
+          "passes": false
+        }
+      },
+      "verification": [
+        "cd scripts/browser-smoke && npm run test:extension"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Harden checkout-rehearsal.mjs: structured blockedReason, safety asserts, failure logging",
+      "dependsOn": ["2"],
+      "testType": "e2e",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "scripts/browser-smoke/checkout-rehearsal.mjs",
+          "scripts/browser-smoke/launch-util.mjs"
+        ],
+        "relatedTests": [],
+        "patterns": [
+          "applyExtensionSettingsFromPopup sets autoPlaceOrder:false",
+          "Pass when lines include [TCH] review reached",
+          "Persistent TCH_PROFILE_DIR default ~/.tch-rehearsal-chrome"
+        ],
+        "targetFiles": {
+          "modify": [
+            "scripts/browser-smoke/checkout-rehearsal.mjs"
+          ],
+          "create": [
+            "scripts/browser-smoke/rehearsal-errors.mjs"
+          ]
+        }
+      },
+      "acceptance": [
+        "Missing TCH_PRODUCT_URL exits with blockedReason missing_product_url",
+        "applyExtensionSettingsFromPopup enforces autoPlaceOrder:false and useSavedPayment:true",
+        "On timeout, stderr includes last 15 [TCH] console lines",
+        "On timeout, exit message includes blockedReason review_timeout (or specific code)",
+        "Playwright chromium missing throws blockedReason no_chromium",
+        "Success prints CHECKOUT REHEARSAL PASS — reached review (no Place Order)"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Add rehearsal-errors.mjs unit test for blockedReason codes and TCH line tail helper",
+          "file": "scripts/browser-smoke/rehearsal-errors.mjs",
+          "passes": false
+        },
+        "implement": {
+          "description": "Extract error helpers; wire checkout-rehearsal.mjs to use structured codes on each exit path",
+          "passes": false
+        },
+        "refactor": {
+          "description": "Document env vars in checkout-sandbox-notes.md Runbook section",
+          "passes": false
+        }
+      },
+      "verification": [
+        "node scripts/browser-smoke/rehearsal-errors.mjs",
+        "node --check scripts/browser-smoke/checkout-rehearsal.mjs"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Extend signin-step-test.mjs for checkout rehearsal step paths (signin vs saved vs unknown)",
+      "dependsOn": [],
+      "testType": "unit",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "target-checkout-helper/core/signinStep.js",
+          "scripts/signin-step-test.mjs",
+          "target-checkout-helper/content.js"
+        ],
+        "relatedTests": [
+          "scripts/signin-step-test.mjs",
+          "scripts/checkout-speed-test.mjs"
+        ],
+        "patterns": [
+          "vm load signinStep.js in signin-step-test.mjs",
+          "resolveCheckoutStep and isGenericContinueButtonText already in signinStep.js"
+        ],
+        "targetFiles": {
+          "modify": [
+            "scripts/signin-step-test.mjs",
+            "target-checkout-helper/core/signinStep.js"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "resolveCheckoutStep prefers signin when hasAuthGate even with shipping fields present",
+        "isGenericContinueButtonText rejects Continue as guest",
+        "shouldAutoSignInOnCheckoutPending true for unknown step with credentials",
+        "node scripts/signin-step-test.mjs exits 0",
+        "node scripts/checkout-speed-test.mjs still passes"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Add failing assertions for any rehearsal-critical signinStep gaps found in code review",
+          "file": "scripts/signin-step-test.mjs",
+          "passes": false
+        },
+        "implement": {
+          "description": "Implement minimal signinStep.js changes if tests fail; otherwise mark tests passes true",
+          "passes": false
+        },
+        "refactor": {
+          "description": "Remove duplicate guest/continue logic in content.js if any new helper extracted",
+          "passes": false
+        }
+      },
+      "verification": [
+        "node scripts/signin-step-test.mjs",
+        "node scripts/checkout-speed-test.mjs"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Run checkout rehearsal when TCH_PRODUCT_URL set; otherwise mark stuck with blockedReason",
+      "dependsOn": ["3"],
+      "testType": "e2e",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "scripts/browser-smoke/checkout-rehearsal.mjs"
+        ],
+        "relatedTests": [],
+        "patterns": [
+          "Optional local tier — not required in cloud without display",
+          "TCH_MANUAL_WAIT_SECS for sign-in before product navigation"
+        ],
+        "targetFiles": {
+          "modify": [
+            "docs/autopilot/checkout-sandbox/checkout-sandbox-notes.md"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "If TCH_PRODUCT_URL unset: set stuck:true blockedReason missing_product_url in task JSON notes (no false pass)",
+        "If Chromium/display unavailable: stuck:true blockedReason no_chromium or no_display",
+        "If rehearsal runs: log product URL, profile dir, and outcome in checkout-sandbox-notes.md",
+        "If rehearsal passes: log checkout_total_to_review timing line when present",
+        "If sign-in wall blocks review: stuck:true blockedReason signin_timeout with last [TCH] lines"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Attempt npm run checkout-rehearsal when env allows; record outcome in notes",
+          "file": "scripts/browser-smoke/checkout-rehearsal.mjs",
+          "passes": false
+        },
+        "implement": {
+          "description": "Fix extension bugs found during rehearsal; re-run until review or document stuck",
+          "passes": false
+        },
+        "refactor": {
+          "description": "None unless rehearsal exposed duplicate checkout logic",
+          "passes": false
+        }
+      },
+      "verification": [],
+      "passes": false
+    },
+    {
+      "id": "6",
+      "category": "integration",
+      "priority": "high",
+      "description": "Full quality gate: verify.sh green and checkout-sandbox summary committed",
+      "dependsOn": ["2", "4", "5"],
+      "testType": "integration",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "scripts/verify.sh",
+          "orchestrator/autopilot.py",
+          "docs/autopilot/checkout-sandbox/checkout-sandbox.md"
+        ],
+        "relatedTests": [
+          "scripts/test-autopilot-cursor.sh"
+        ],
+        "patterns": [
+          "bash scripts/verify.sh wraps syntax + signin + checkout-speed + integration",
+          "python -m orchestrator autopilot complete <id>"
+        ],
+        "targetFiles": {
+          "modify": [
+            "docs/autopilot/checkout-sandbox/checkout-sandbox-notes.md",
+            "tasks/NEXT_TASK.md"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "bash scripts/verify.sh exits 0",
+        "checkout-sandbox-notes.md has dated summary: passed, stuck, skipped tiers",
+        "python -m orchestrator autopilot status shows all non-stuck requirements passes true",
+        "tasks/NEXT_TASK.md may point to checkout-sandbox when active"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Run bash scripts/verify.sh before claiming feature done",
+          "file": "scripts/verify.sh",
+          "passes": false
+        },
+        "implement": {
+          "description": "Fix any verify failures from sandbox work",
+          "passes": false
+        },
+        "refactor": {
+          "description": "Write final summary section in checkout-sandbox-notes.md",
+          "passes": false
+        }
+      },
+      "verification": [
+        "bash scripts/verify.sh",
+        "python -m orchestrator autopilot status"
+      ],
+      "passes": false
+    }
+  ]
+}
