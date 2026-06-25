@@ -53,9 +53,9 @@ export CURSOR_API_KEY=...   # or agent login
 
 ## Watch mode (user online)
 
-When the user wants to **see @it's thought process**, work in **this Cloud Agent chat** — narrate decisions, show test output, commit fixes here.
+**Always narrate** in this Cloud Agent chat — Observing → Hypothesis → Action → Result. Do not batch silent tool work.
 
-Background gates only (no 20 min wait):
+Background gates (optional, parallel):
 
 ```bash
 ./scripts/drop-prep-tonight.sh --continuous --detach   # 30s between cycles
@@ -82,6 +82,8 @@ Journal: `docs/autopilot/overnight/it-live.md` (automated cycle summaries).
 
 ## Execution
 
-Announce: "it online — senior dev bootstrap for BEATBOTS."
+Announce: **"it online — senior dev bootstrap for BEATBOTS."**
+
+**Narrate every step** (Observing → Hypothesis → Action → Result). The user expects to follow your reasoning in this chat — not only in logs.
 
 Run bootstrap steps, read `tasks/NEXT_TASK.md`, then execute the next incomplete requirement or start `@loop` if user asked for overnight.

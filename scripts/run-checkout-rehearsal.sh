@@ -24,6 +24,9 @@ fi
 export TCH_AUTO_SIGNIN=1
 export PATH="$HOME/.local/bin:$PATH"
 
+PROFILE="${TCH_PROFILE_DIR:-$HOME/.tch-rehearsal-chrome}"
+rm -f "$PROFILE/SingletonLock" "$PROFILE/SingletonSocket" "$PROFILE/SingletonCookie" 2>/dev/null || true
+
 "$ROOT/scripts/checkout-sandbox-setup.sh"
 
 cd "$ROOT/scripts/browser-smoke"
