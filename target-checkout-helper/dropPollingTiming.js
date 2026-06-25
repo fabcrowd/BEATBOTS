@@ -12,7 +12,7 @@ function computeBackgroundPollSleepMs(monitor) {
   const now = Date.now();
   const until = t - now;
   const afterDrop = now - t;
-  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
   const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
   if (inPrewindow || inGrace) return 250;
   if (until > 45 * 60 * 1000) return 2000;
@@ -28,7 +28,7 @@ function isInDropTensionWindow(monitor) {
   const now = Date.now();
   const until = t - now;
   const afterDrop = now - t;
-  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
   const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
   return inPrewindow || inGrace;
 }
@@ -42,7 +42,7 @@ function getDropAwarePollSeconds(monitor, baseSec) {
   const now = Date.now();
   const until = t - now;
   const afterDrop = now - t;
-  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
   const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
   if (inPrewindow || inGrace) return Math.min(b, 1);
   if (until > 30 * 60 * 1000) return Math.max(b, 3);
@@ -65,7 +65,7 @@ function getHarvestKeepaliveMinIntervalMs(monitor) {
   const now = Date.now();
   const until = t - now;
   const afterDrop = now - t;
-  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
   const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
   if (inPrewindow || inGrace) return 2 * 60 * 1000;
   if (until > 0 && until <= 45 * 60 * 1000) return 3 * 60 * 1000;
@@ -101,7 +101,7 @@ function getHarvestBurstSameUrlDedupMs(monitor) {
   const now = Date.now();
   const until = t - now;
   const afterDrop = now - t;
-  const inPrewindow = until > 0 && until <= 10 * 60 * 1000;
+  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
   const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
   if (inPrewindow || inGrace) return 20 * 1000;
   if (until > 0 && until <= 45 * 60 * 1000) return 45 * 1000;

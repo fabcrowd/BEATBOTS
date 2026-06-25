@@ -2,21 +2,33 @@
 
 **Boss agent:** `@it` (senior developer — read `.cursor/skills/senior-singulr-dev/SKILL.md`)
 
-## Active task
+## Active task — tonight's ~4am drop
 
-`docs/autopilot/checkout-sandbox/checkout-sandbox.json` — checkout sandbox (browser smoke + optional rehearsal)
+`docs/autopilot/overnight/drop-prep-4am.json`
 
 ```bash
-python -m orchestrator autopilot use docs/autopilot/checkout-sandbox/checkout-sandbox.json
+python -m orchestrator autopilot use docs/autopilot/overnight/drop-prep-4am.json
 python -m orchestrator autopilot status
 ```
 
-## Local rehearsal (optional tier)
+## Overnight debug (no PC babysitting)
 
 ```bash
-export TCH_PRODUCT_URL="https://www.target.com/p/…"
-export TCH_MANUAL_WAIT_SECS=60
-cd scripts/browser-smoke && npm run checkout-rehearsal
+./scripts/drop-prep-tonight.sh --detach
+tmux attach -t drop-prep-tonight   # optional watch
+```
+
+Single cycle:
+
+```bash
+node scripts/drop-prep-cycle.mjs
+```
+
+## Live rehearsal (optional — needs credentials on host)
+
+```bash
+cp scripts/browser-smoke/.env.rehearsal.example scripts/browser-smoke/.env.rehearsal
+# fill TCH_TARGET_EMAIL + TCH_TARGET_PASSWORD
 ```
 
 ## Quality gate

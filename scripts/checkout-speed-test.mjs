@@ -74,7 +74,15 @@ section('Drop polling logic (mocked clock)');
 }
 
 {
-  // 4 minutes after drop → outside grace → base background sleep
+  // At exact drop instant → aggressive window
+  const now = DROP_MS;
+  const { computeBackgroundPollSleepMs, isInDropTensionWindow } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 250, 'bg sleep 250 at drop instant');
+  assert(isInDropTensionWindow(mon) === true, 'tension window true at drop instant');
+}
+
+{
   const now = DROP_MS + 4 * 60 * 1000;
   const { computeBackgroundPollSleepMs } = loadHelpers(now);
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: dropIso }) === 500, 'bg base after grace ends');

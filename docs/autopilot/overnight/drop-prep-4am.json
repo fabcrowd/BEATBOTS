@@ -1,0 +1,136 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "drop-prep-4am",
+  "description": "Overnight debugging before ~4am Target drop — no user on PC required for Node/browser-smoke tier",
+  "goals": [
+    "All verify.sh and browser-smoke gates green every cycle",
+    "Checkout/sign-in/monitor bug fixes with tests",
+    "Document blocked live-rehearsal if credentials absent on host",
+    "Ready for drop: polling math verified, extension smoke PASS"
+  ],
+  "nonGoals": [
+    "Live purchase or auto place order",
+    "Walmart drop prep",
+    "Require user at keyboard during cycles"
+  ],
+  "technicalNotes": "Boss agent: @it. Drop time via TCH_DROP_EXPECTED_AT (ISO). Cycles: scripts/drop-prep-cycle.mjs. Live Target rehearsal only if scripts/browser-smoke/.env.rehearsal exists on host. Set CURSOR_API_KEY for nested agent batches in loop.sh.",
+  "_tdd": true,
+  "_step_size": "One fix per commit when agent batch runs; cycle logs always append.",
+  "requirements": [
+    {
+      "id": "1",
+      "category": "testing",
+      "priority": "high",
+      "description": "Baseline gate: bash scripts/verify.sh exits 0",
+      "recurring": true,
+      "verification": [
+        "bash scripts/verify.sh"
+      ],
+      "acceptance": [
+        "verify.sh ALL PASSED each cycle"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "testing",
+      "priority": "high",
+      "description": "Extension smoke: xvfb-run npm run test:extension in browser-smoke",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "verification": [
+        "cd scripts/browser-smoke && xvfb-run -a npm run test:extension"
+      ],
+      "acceptance": [
+        "E2E + functional + review-dedup PASS"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "testing",
+      "priority": "high",
+      "description": "Penetration suite: node scripts/browser-smoke/untested-areas-test.mjs",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "verification": [
+        "node scripts/browser-smoke/untested-areas-test.mjs"
+      ],
+      "acceptance": [
+        "All R01-R12 style tests pass"
+      ],
+      "passes": true
+    },
+    {
+      "id": "4",
+      "category": "functional",
+      "priority": "high",
+      "description": "Bug hunt: checkout sign-in + drop tension (content.js, signinStep.js)",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "acceptance": [
+        "Review checkout pending + drop window toast paths",
+        "Fix bugs with signin-step or checkout-speed tests",
+        "Log file:line in drop-prep-notes.md"
+      ],
+      "passes": true
+    },
+    {
+      "id": "5",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Bug hunt: background monitor + harvest keepalive near drop (background.js)",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "acceptance": [
+        "Review computeBackgroundPollSleepMs / getHarvestKeepaliveMinIntervalMs wiring",
+        "Fix bugs; node --check green",
+        "Note findings in drop-prep-notes.md"
+      ],
+      "passes": true
+    },
+    {
+      "id": "6",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Optional live rehearsal if .env.rehearsal on host; else stuck with blockedReason",
+      "recurring": true,
+      "dependsOn": [
+        "2"
+      ],
+      "verification": [],
+      "acceptance": [
+        "If .env.rehearsal exists: npm run checkout-rehearsal or document failure code",
+        "If missing: stuck true blockedReason missing_credentials (expected on cloud)"
+      ],
+      "passes": false,
+      "stuck": true,
+      "blockedReason": "missing_credentials — add scripts/browser-smoke/.env.rehearsal on host for live rehearsal"
+    },
+    {
+      "id": "7",
+      "category": "docs",
+      "priority": "low",
+      "description": "Pre-drop summary in drop-prep-notes.md before TCH_DROP_EXPECTED_AT",
+      "recurring": true,
+      "dependsOn": [
+        "4",
+        "5",
+        "6"
+      ],
+      "acceptance": [
+        "Notes list cycle timestamps, pass/fail gates, fixes committed",
+        "Reminder: one Target tab, clear cart, extension ON before drop"
+      ],
+      "passes": true
+    }
+  ]
+}

@@ -1133,20 +1133,23 @@ function getCheckoutStep(useSavedPayment = false) {
 
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
+function maybeShowDropWindowTip(monitor) {
+  if (!monitor?.active || typeof isInDropTensionWindow !== 'function') return;
+  if (!isInDropTensionWindow(monitor)) return;
+  if (sessionStorage.getItem(DROP_WINDOW_TIP_KEY) === '1') return;
+  sessionStorage.setItem(DROP_WINDOW_TIP_KEY, '1');
+  showToast(
+    'Drop window: clear Target cart first, use one Target tab, avoid toggling the extension in the last minute.',
+    'persistent'
+  );
+}
+
 async function handleProductPage(settings) {
   console.log('[TCH] handleProductPage');
   prefetchCheckout();
   try {
     const { monitor: monDrop } = await chrome.storage.local.get('monitor');
-    if (monDrop?.active && isInDropTensionWindow(monDrop)) {
-      if (sessionStorage.getItem(DROP_WINDOW_TIP_KEY) !== '1') {
-        sessionStorage.setItem(DROP_WINDOW_TIP_KEY, '1');
-        showToast(
-          'Drop window: clear Target cart first, use one Target tab, avoid toggling the extension in the last minute.',
-          'persistent'
-        );
-      }
-    }
+    maybeShowDropWindowTip(monDrop);
   } catch {}
   const fromRetryNavigation = consumeRetryNavigationMark();
   if (!fromRetryNavigation) clearCheckoutRetryState();
@@ -2040,6 +2043,7 @@ async function streamingStockCheck(url, timeoutMs = 8000, options = null) {
 
 async function handleMonitoredATC(monitor, product) {
   console.log('[TCH] monitor ATC for', product.url);
+  maybeShowDropWindowTip(monitor);
   rememberProductUrl(product.url);
   const normUrl = normalizeProductUrl(product.url);
   const currentCount = monitor.counts?.[normUrl] || 0;

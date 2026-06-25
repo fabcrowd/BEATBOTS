@@ -51,6 +51,11 @@ Extension auto sign-in at `target.com/login`, then product → review. Default p
 - **Req 5:** **stuck** — `TCH_PRODUCT_URL` unset on cloud agent; `blockedReason: missing_product_url` (run locally with product URL)
 - **Req 6:** `bash scripts/verify.sh` — ALL PASSED
 
+### 2026-06-25 — Automated sign-in rehearsal
+
+- **Change:** `checkout-rehearsal.mjs` requires `TCH_TARGET_EMAIL`/`TCH_TARGET_PASSWORD`; extension `autoSignIn` at `/login`
+- **Run:** `./scripts/run-checkout-rehearsal.sh` with `scripts/browser-smoke/.env.rehearsal` (gitignored)
+
 ### Template (agent fills per session)
 
 - **Date:**
