@@ -264,48 +264,53 @@ async function signInCdpClick(el) {
 
 // Waits for the password field or a 2FA/OTP prompt after the email step (SPA transition).
 async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
-  return new Promise(resolve => {
+  const handlePasswordOrOtp = async (observer) => {
+    const otpInput = document.querySelector(
+      'input[autocomplete="one-time-code"],input[inputmode="numeric"][maxlength="6"],' +
+      'input[name*="otp"],input[name*="code"],input[id*="otp"],input[id*="verif"]'
+    );
+    if (otpInput) {
+      if (observer) observer.disconnect();
+      console.log('[TCH] auto sign-in: 2FA prompt — polling Gmail for OTP');
+      showToast('2FA detected — checking Gmail for code…', 'persistent');
+
+      const otpListener = async (msg) => {
+        if (msg.type === 'OTP_FOUND') {
+          chrome.runtime.onMessage.removeListener(otpListener);
+          showToast('OTP received — submitting…', 'persistent');
+          await sleep(300);
+          await signInClickAndType(otpInput, msg.code);
+          await sleep(200);
+          const btn = document.querySelector('button[type="submit"],[data-test="account-signin-button"]');
+          if (btn) await signInCdpClick(btn);
+        } else if (msg.type === 'OTP_TIMEOUT') {
+          chrome.runtime.onMessage.removeListener(otpListener);
+          showToast('Gmail OTP timed out — enter code manually', 'persistent');
+        }
+      };
+      chrome.runtime.onMessage.addListener(otpListener);
+
+      chrome.runtime.sendMessage({ type: 'START_OTP_WATCH', startMs: Date.now() })
+        .catch(() => showToast('Gmail not configured — enter code manually', 'persistent'));
+
+      return true;
+    }
+
+    const passInput = document.querySelector('input[id="password"],input[type="password"]');
+    if (passInput) {
+      if (observer) observer.disconnect();
+      await sleep(400);
+      await handleSignInPage(settings);
+      return true;
+    }
+    return false;
+  };
+
+  if (await handlePasswordOrOtp(null)) return;
+
+  return new Promise((resolve) => {
     const obs = new MutationObserver(async (_, observer) => {
-      // OTP field — start Gmail polling instead of blocking automation.
-      const otpInput = document.querySelector(
-        'input[autocomplete="one-time-code"],input[inputmode="numeric"][maxlength="6"],' +
-        'input[name*="otp"],input[name*="code"],input[id*="otp"],input[id*="verif"]'
-      );
-      if (otpInput) {
-        observer.disconnect();
-        console.log('[TCH] auto sign-in: 2FA prompt — polling Gmail for OTP');
-        showToast('2FA detected — checking Gmail for code…', 'persistent');
-
-        const otpListener = async (msg) => {
-          if (msg.type === 'OTP_FOUND') {
-            chrome.runtime.onMessage.removeListener(otpListener);
-            showToast('OTP received — submitting…', 'persistent');
-            await sleep(300);
-            await signInClickAndType(otpInput, msg.code);
-            await sleep(200);
-            const btn = document.querySelector('button[type="submit"],[data-test="account-signin-button"]');
-            if (btn) await signInCdpClick(btn);
-          } else if (msg.type === 'OTP_TIMEOUT') {
-            chrome.runtime.onMessage.removeListener(otpListener);
-            showToast('Gmail OTP timed out — enter code manually', 'persistent');
-          }
-        };
-        chrome.runtime.onMessage.addListener(otpListener);
-
-        chrome.runtime.sendMessage({ type: 'START_OTP_WATCH', startMs: Date.now() })
-          .catch(() => showToast('Gmail not configured — enter code manually', 'persistent'));
-
-        resolve();
-        return;
-      }
-
-      const passInput = document.querySelector('input[id="password"],input[type="password"]');
-      if (passInput) {
-        observer.disconnect();
-        await sleep(400);
-        await handleSignInPage(settings);
-        resolve();
-      }
+      if (await handlePasswordOrOtp(observer)) resolve();
     });
     obs.observe(document.body, { childList: true, subtree: true });
     setTimeout(() => {
@@ -438,7 +443,7 @@ function tryGuestCheckoutClick() {
       const raw = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.normalizeButtonText)
         ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
         : b.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
-      return raw.includes(needle) && !b.disabled;
+      return raw.includes(needle) && !b.disabled && isVisible(b);
     });
     if (el) {
       el.click();
@@ -1010,14 +1015,19 @@ function showToast(message, type = 'info') {
 }
 
 function findContinueButton(enabledOnly = false) {
-  const patterns = ['save & continue', 'save and continue', 'continue', 'next'];
-  // Exclude navigation/commerce links that start with the same words.
-  const blockedRe = /shopping|browsing|browse|exploring|reading/i;
   const buttons = Array.from(document.querySelectorAll('button'));
   return buttons.find((button) => {
     if (enabledOnly && button.disabled) return false;
     const text = button.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.isGenericContinueButtonText) {
+      return TCH_SIGNIN_STEP.isGenericContinueButtonText(text);
+    }
+    const patterns = ['save & continue', 'save and continue', 'continue', 'next'];
+    const blockedRe = /shopping|browsing|browse|exploring|reading/i;
     if (blockedRe.test(text)) return false;
+    if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesGuestCheckoutText(text)) {
+      return false;
+    }
     return patterns.some((pattern) => text === pattern || text.startsWith(pattern));
   }) || null;
 }
@@ -1101,13 +1111,23 @@ function getPageType() {
 }
 
 function getCheckoutStep(useSavedPayment = false) {
-  if (document.querySelector(SEL.placeOrder) || findByText('place order')) return 'review';
-  if (document.querySelector(SEL.cardNumber)) return 'payment';
-  if (['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
-    .some(s => document.querySelector(s))) return 'shipping';
-  // When using saved payment, a pre-populated step shows a Continue button with no form fields.
-  if (useSavedPayment && findContinueButton(true)) return 'saved';
-  if (hasCheckoutAuthGate()) return 'signin';
+  const opts = {
+    hasPlaceOrder: !!(document.querySelector(SEL.placeOrder) || findByText('place order')),
+    hasAuthGate: hasCheckoutAuthGate(),
+    hasCardNumber: !!document.querySelector(SEL.cardNumber),
+    hasShippingFields: ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
+      .some((s) => document.querySelector(s)),
+    useSavedPayment,
+    hasEnabledContinueButton: !!findContinueButton(true),
+  };
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.resolveCheckoutStep) {
+    return TCH_SIGNIN_STEP.resolveCheckoutStep(opts);
+  }
+  if (opts.hasPlaceOrder) return 'review';
+  if (opts.hasAuthGate) return 'signin';
+  if (opts.hasCardNumber) return 'payment';
+  if (opts.hasShippingFields) return 'shipping';
+  if (useSavedPayment && opts.hasEnabledContinueButton) return 'saved';
   return 'unknown';
 }
 
@@ -1342,10 +1362,13 @@ async function handleCheckoutPendingStep(settings, step) {
     try { sessionStorage.setItem(GUEST_CHECKOUT_ATTEMPT_KEY, '1'); } catch {}
     showToast('Guest checkout…');
     await sleep(600);
-  } else if (step === 'signin' && !hasCredentials) {
+  } else if (step === 'signin' && !hasCredentials && !attemptGuest) {
     showToast('Sign in or choose guest checkout — this tab will not auto-refresh.', 'persistent');
   }
-  if (step === 'signin' && settings.autoSignIn && settings.targetEmail && settings.targetPassword) {
+  const autoSignIn = typeof TCH_SIGNIN_STEP !== 'undefined'
+    ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
+    : step === 'signin' && hasCredentials;
+  if (autoSignIn) {
     // Auto sign-in: give the checkout auth gate time to render its form then fill it.
     await sleep(800);
     showToast('Auto sign-in: checking form…', 'persistent');
@@ -1374,6 +1397,7 @@ function watchForCheckoutStep(settings, options = {}) {
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') return;
+    try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
     handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {

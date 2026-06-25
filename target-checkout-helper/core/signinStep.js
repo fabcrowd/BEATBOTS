@@ -62,6 +62,55 @@
   }
 
   /**
+   * Continue/save buttons on checkout — excludes guest-checkout labels.
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function isGenericContinueButtonText(text) {
+    var norm = normalizeButtonText(text);
+    if (matchesGuestCheckoutText(text)) return false;
+    if (/shopping|browsing|browse|exploring|reading/i.test(norm)) return false;
+    var patterns = ['save & continue', 'save and continue', 'continue', 'next'];
+    for (var i = 0; i < patterns.length; i++) {
+      var p = patterns[i];
+      if (norm === p || norm.indexOf(p) === 0) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Pure checkout step resolver (DOM signals collected by content.js).
+   * @param {{
+   *   hasPlaceOrder?: boolean,
+   *   hasAuthGate?: boolean,
+   *   hasCardNumber?: boolean,
+   *   hasShippingFields?: boolean,
+   *   useSavedPayment?: boolean,
+   *   hasEnabledContinueButton?: boolean,
+   * }} opts
+   * @returns {'review'|'signin'|'payment'|'shipping'|'saved'|'unknown'}
+   */
+  function resolveCheckoutStep(opts) {
+    opts = opts || {};
+    if (opts.hasPlaceOrder) return 'review';
+    if (opts.hasAuthGate) return 'signin';
+    if (opts.hasCardNumber) return 'payment';
+    if (opts.hasShippingFields) return 'shipping';
+    if (opts.useSavedPayment && opts.hasEnabledContinueButton) return 'saved';
+    return 'unknown';
+  }
+
+  /**
+   * @param {'signin'|'unknown'|string} step
+   * @param {boolean} hasCredentials
+   * @returns {boolean}
+   */
+  function shouldAutoSignInOnCheckoutPending(step, hasCredentials) {
+    if (!hasCredentials) return false;
+    return step === 'signin' || step === 'unknown';
+  }
+
+  /**
    * @param {{ autoSignIn?: boolean, hasCredentials?: boolean, alreadyTried?: boolean }} opts
    * @returns {boolean}
    */
@@ -90,6 +139,9 @@
     classifyWalmartLoginPath: classifyWalmartLoginPath,
     shouldRedirectToWalmartLogin: shouldRedirectToWalmartLogin,
     matchesGuestCheckoutText: matchesGuestCheckoutText,
+    isGenericContinueButtonText: isGenericContinueButtonText,
+    resolveCheckoutStep: resolveCheckoutStep,
+    shouldAutoSignInOnCheckoutPending: shouldAutoSignInOnCheckoutPending,
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
     formatLoginStatusLabel: formatLoginStatusLabel,

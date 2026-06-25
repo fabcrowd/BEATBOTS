@@ -63,6 +63,31 @@ assert(typeof S.WALMART_LOGIN_WAIT_MESSAGE === 'string' && S.WALMART_LOGIN_WAIT_
 
 assert(Array.isArray(S.GUEST_BUTTON_NEEDLES) && S.GUEST_BUTTON_NEEDLES.length >= 4, 'needles exported');
 
+assert(!S.isGenericContinueButtonText('Continue as guest'), 'guest is not generic continue');
+assert(S.isGenericContinueButtonText('Continue'), 'plain continue matches');
+assert(S.isGenericContinueButtonText('Save & continue'), 'save and continue matches');
+
+assert(
+  S.resolveCheckoutStep({ hasAuthGate: true, hasShippingFields: true, useSavedPayment: true, hasEnabledContinueButton: true }) === 'signin',
+  'auth gate before shipping/saved'
+);
+assert(
+  S.resolveCheckoutStep({ hasPlaceOrder: true, hasAuthGate: true }) === 'review',
+  'review before signin'
+);
+assert(
+  S.resolveCheckoutStep({ useSavedPayment: true, hasEnabledContinueButton: true }) === 'saved',
+  'saved when continue present'
+);
+assert(S.resolveCheckoutStep({}) === 'unknown', 'empty signals unknown');
+
+assert(S.shouldAutoSignInOnCheckoutPending('unknown', true), 'auto signin on unknown with creds');
+assert(S.shouldAutoSignInOnCheckoutPending('signin', true), 'auto signin on signin with creds');
+assert(!S.shouldAutoSignInOnCheckoutPending('unknown', false), 'no auto signin without creds');
+assert(!S.shouldAutoSignInOnCheckoutPending('shipping', true), 'no auto signin on shipping');
+
+assert(S.shouldAttemptGuest({ autoSignIn: true, hasCredentials: false, alreadyTried: false }), 'guest when auto signin but incomplete creds');
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);
