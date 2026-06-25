@@ -15,13 +15,15 @@ Get an API key: [Cursor Settings → API](https://cursor.com/settings).
 
 ## Start tonight
 
-**Background (recommended):**
+**One command:**
 
 ```bash
 cd /path/to/BEATBOTS
 export CURSOR_API_KEY=...
-./scripts/autopilot-overnight.sh --detach
+./scripts/loop.sh --detach
 ```
+
+Or in Cursor: **`@loop`**
 
 Attach in the morning:
 
@@ -32,7 +34,7 @@ tmux attach -t autopilot-overnight
 **Foreground:**
 
 ```bash
-./scripts/autopilot-overnight.sh --max-hours 8
+./scripts/loop.sh --foreground
 ```
 
 ## What it does

@@ -21,15 +21,17 @@ autopilot-cursor docs/autopilot/user-login/user-login.json
 
 ```bash
 export CURSOR_API_KEY=...
-./scripts/autopilot-overnight.sh --detach   # tmux background, 8h max
-# attach: tmux attach -t autopilot-overnight
-# logs:   docs/autopilot/overnight/logs/
+./scripts/loop.sh --detach          # one command — recommended
+# equivalent: ./scripts/autopilot-overnight.sh --detach
+tmux attach -t autopilot-overnight
 ```
+
+In Cursor chat: **`@loop`**
 
 Foreground:
 
 ```bash
-./scripts/autopilot-overnight.sh --max-hours 8
+./scripts/loop.sh --foreground
 ```
 
 Before each run, `scripts/refresh-overnight-tasks.mjs` resets recurring audit requirements and verifies baselines. Task file: `docs/autopilot/overnight/repo-health.json`.
@@ -59,5 +61,6 @@ bash scripts/autopilot-syntax-check.sh
 | `@prd` | Write PRD markdown |
 | `@tasks` | PRD → task JSON |
 | `@autopilot` | Execute task file (in-chat loop) |
+| `@loop` | **Tonight's overnight loop** (repo debug/improve) |
 
 Files live in `.cursor/commands/`.

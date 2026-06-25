@@ -15,10 +15,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TASK_FILE="docs/autopilot/overnight/repo-health.json"
-FEATURE_DIR="docs/autopilot/overnight"
+TASK_FILE="${AUTOPILOT_LOOP_TASK_FILE:-docs/autopilot/overnight/repo-health.json}"
+FEATURE_DIR="$(dirname "$TASK_FILE")"
 LOG_DIR="$FEATURE_DIR/logs"
-NOTES_FILE="$FEATURE_DIR/overnight-notes.md"
+NOTES_FILE="$FEATURE_DIR/$(basename "$TASK_FILE" .json)-notes.md"
+if [[ ! -f "$NOTES_FILE" && "$FEATURE_DIR" == *overnight* ]]; then
+  NOTES_FILE="$FEATURE_DIR/overnight-notes.md"
+fi
 MAX_HOURS=8
 DETACH=false
 DRY_RUN=false

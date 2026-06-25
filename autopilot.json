@@ -64,7 +64,8 @@
     "runner": "scripts/autopilot-cursor/run.sh",
     "overnight": {
       "taskFile": "docs/autopilot/overnight/repo-health.json",
-      "script": "scripts/autopilot-overnight.sh",
+      "script": "scripts/loop.sh",
+      "legacyScript": "scripts/autopilot-overnight.sh",
       "maxHours": 8,
       "promptTemplate": "scripts/autopilot-cursor/session-prompt-overnight.md"
     }

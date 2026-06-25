@@ -100,12 +100,14 @@ else
 fi
 
 # 10. Overnight automation
-if [[ -x scripts/autopilot-overnight.sh ]] \
+if [[ -x scripts/loop.sh ]] \
+  && [[ -x scripts/autopilot-overnight.sh ]] \
+  && [[ -f .cursor/commands/loop.md ]] \
   && [[ -f docs/autopilot/overnight/repo-health.json ]] \
   && node scripts/refresh-overnight-tasks.mjs >/dev/null 2>&1; then
-  pass "overnight automation scaffold"
+  pass "overnight /loop automation"
 else
-  fail "overnight automation scaffold"
+  fail "overnight /loop automation"
 fi
 
 echo ""
