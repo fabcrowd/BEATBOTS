@@ -9,4 +9,6 @@
 - [ ] Update memories + open PR
 
 ## Review
-(pending)
+- Baseline `npm run test:extension` green after merging prior branch.
+- MON-2: Target `monitorBtn` now filters `target.com` (parity with Walmart tab); functional test asserts shared `monitorActive` and per-retailer `START_MONITOR` product lists.
+- Post-change suite green; `test-scope.mjs` next: MON-3 (missing).
