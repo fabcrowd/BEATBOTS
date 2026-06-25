@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/autopilot.schema.json",
+  "version": "1.0.0",
+  "project": {
+    "type": "nodejs",
+    "conventions": {
+      "testFilePattern": "*.mjs",
+      "testDirectory": "scripts",
+      "sourceDirectory": "target-checkout-helper"
+    }
+  },
+  "feedbackLoops": {
+    "typecheck": {
+      "command": null,
+      "enabled": false
+    },
+    "tests": {
+      "command": "node scripts/checkout-speed-test.mjs",
+      "enabled": true
+    },
+    "lint": {
+      "command": "bash scripts/autopilot-syntax-check.sh",
+      "enabled": true
+    }
+  },
+  "iterations": {
+    "tasks": 15,
+    "tests": 10,
+    "lint": 15,
+    "entropy": 10,
+    "command": 10
+  },
+  "server": {
+    "type": "github",
+    "owner": "fabcrowd",
+    "repo": "BEATBOTS",
+    "mcp": null
+  },
+  "codebase": {
+    "patterns": [
+      "Chrome Extension MV3",
+      "Vanilla JavaScript",
+      "Target.com checkout automation",
+      "Walmart.com checkout automation"
+    ],
+    "architecture": "Pure client-side Chrome extension (service worker + content scripts + popup). Optional Node native messaging host for Walmart IMAP 2FA. No build step for the extension bundle.",
+    "dependencies": [
+      "chrome.storage",
+      "chrome.cookies",
+      "chrome.debugger",
+      "playwright/puppeteer for browser-smoke tests"
+    ]
+  },
+  "analytics": {
+    "enabled": true,
+    "directory": "docs/autopilot/analytics",
+    "thrashingThreshold": 3
+  }
+}
