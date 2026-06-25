@@ -18,13 +18,18 @@
  *   TCH_REHEARSAL_TIMEOUT_MS — max wait for review (default: 420000 = 7 min)
  *   TCH_MANUAL_WAIT_SECS — skip Enter; wait N seconds after opening account (default: 0 = readline)
  */
-import assert from 'node:assert/strict';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchWithExtension, rmProfileDir } from './launch-util.mjs';
+import {
+  BLOCKED_REASON,
+  exitRehearsal,
+  formatRehearsalFail,
+  tailTchLines,
+} from './rehearsal-errors.mjs';
 
 const PRODUCT_URL = process.env.TCH_PRODUCT_URL?.trim();
 const PROFILE_DIR =
@@ -34,6 +39,7 @@ const MAX_MS = Number(process.env.TCH_REHEARSAL_TIMEOUT_MS || '420000');
 
 let browser;
 let userDataDir;
+let tchLines = [];
 
 async function waitForReady() {
   const secs = Number(process.env.TCH_MANUAL_WAIT_SECS || '0');
@@ -80,32 +86,62 @@ async function applyExtensionSettingsFromPopup(page, extensionId) {
           const err = chrome.runtime.lastError;
           if (err) reject(new Error(err.message));
           else {
-            chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: true }, () =>
-              resolve()
-            );
+            chrome.storage.local.get(['autoPlaceOrder', 'useSavedPayment', 'enabled'], (data) => {
+              if (data.autoPlaceOrder !== false || data.useSavedPayment !== true || data.enabled !== true) {
+                reject(new Error('popup settings safety check failed'));
+                return;
+              }
+              chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: true }, () => resolve());
+            });
           }
         });
       })
   );
 }
 
+function classifyRehearsalFailure(lines) {
+  const joined = lines.join('\n').toLowerCase();
+  if (joined.includes('checkout step: signin') || joined.includes('sign in')) {
+    return BLOCKED_REASON.SIGNIN_TIMEOUT;
+  }
+  if (joined.includes('atc button not found') || joined.includes('out of stock')) {
+    return BLOCKED_REASON.OOS_OR_ATC_FAILED;
+  }
+  return BLOCKED_REASON.REVIEW_TIMEOUT;
+}
+
 async function main() {
   if (!PRODUCT_URL || !/^https:\/\/(www\.)?target\.com\//i.test(PRODUCT_URL)) {
-    console.error(
+    exitRehearsal(
+      BLOCKED_REASON.MISSING_PRODUCT_URL,
       'Set TCH_PRODUCT_URL to a full Target product URL, e.g.\n' +
-        '  $env:TCH_PRODUCT_URL="https://www.target.com/p/some-item/-/A-12345678"\n' +
-        'Pick an in-stock / purchasable SKU you are willing to take to review (you will not auto-place).'
+        '  TCH_PRODUCT_URL="https://www.target.com/p/some-item/-/A-12345678"'
     );
-    process.exit(1);
   }
 
   fs.mkdirSync(PROFILE_DIR, { recursive: true });
   userDataDir = PROFILE_DIR;
 
-  const launched = await launchWithExtension({
-    userDataDir: PROFILE_DIR,
-    timeout: 120000,
-  });
+  let launched;
+  try {
+    launched = await launchWithExtension({
+      userDataDir: PROFILE_DIR,
+      timeout: 120000,
+    });
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (/chromium|executable|playwright/i.test(msg)) {
+      exitRehearsal(
+        BLOCKED_REASON.NO_CHROMIUM,
+        `${msg}\nRun: cd scripts/browser-smoke && npx playwright install chromium`
+      );
+    }
+    if (/display|x11|headed|launch/i.test(msg)) {
+      exitRehearsal(BLOCKED_REASON.NO_DISPLAY, msg);
+    }
+    throw e;
+  }
+
   browser = launched.browser;
   const { extensionId, TIMEOUT } = launched;
 
@@ -127,7 +163,7 @@ async function main() {
   await popup.close();
 
   const shop = await browser.newPage();
-  const lines = [];
+  tchLines = [];
   const cdp = await shop.createCDPSession();
   await cdp.send('Runtime.enable');
   cdp.on('Runtime.consoleAPICalled', (ev) => {
@@ -137,7 +173,7 @@ async function main() {
       return a.description || '';
     });
     const text = parts.join(' ');
-    if (text.includes('[TCH]')) lines.push(text);
+    if (text.includes('[TCH]')) tchLines.push(text);
   });
 
   console.log('\nNavigating to product (extension will drive toward review)...\n');
@@ -145,34 +181,40 @@ async function main() {
 
   const deadline = Date.now() + MAX_MS;
   while (Date.now() < deadline) {
-    if (lines.some((l) => l.includes('[TCH] review reached'))) break;
+    if (tchLines.some((l) => l.includes('[TCH] review reached'))) break;
     await new Promise((r) => setTimeout(r, 1500));
   }
 
-  assert.ok(
-    lines.some((l) => l.includes('[TCH] review reached')),
-    `Timed out waiting for [TCH] review reached (${MAX_MS}ms). Last lines:\n${lines.slice(-15).join('\n')}`
-  );
+  if (!tchLines.some((l) => l.includes('[TCH] review reached'))) {
+    const code = classifyRehearsalFailure(tchLines);
+    exitRehearsal(
+      code,
+      `Timed out waiting for [TCH] review reached (${MAX_MS}ms).`,
+      tchLines
+    );
+  }
 
   const url = shop.url();
   console.log('\nCHECKOUT REHEARSAL PASS — reached review (no Place Order).');
   console.log('Final URL:', url);
-  if (lines.some((l) => l.includes('checkout_total_to_review'))) {
-    const timing = lines.filter((l) => l.includes('checkout_total_to_review')).pop();
+  if (tchLines.some((l) => l.includes('checkout_total_to_review'))) {
+    const timing = tchLines.filter((l) => l.includes('checkout_total_to_review')).pop();
     console.log('Timing:', timing);
   }
 }
 
 main()
   .catch((e) => {
-    console.error('\nCHECKOUT REHEARSAL FAIL:', e.message || e);
+    const msg = String(e?.message || e);
+    console.error('\nCHECKOUT REHEARSAL FAIL');
+    console.error(formatRehearsalFail(classifyRehearsalFailure(tchLines), msg, tchLines));
     process.exit(1);
   })
   .finally(async () => {
     if (browser) await browser.close().catch(() => {});
     if (process.env.TCH_DELETE_PROFILE === '1') {
       await rmProfileDir(userDataDir);
-    } else {
+    } else if (userDataDir) {
       console.log('\nProfile kept at:', userDataDir, '(set TCH_DELETE_PROFILE=1 to remove)');
     }
   });

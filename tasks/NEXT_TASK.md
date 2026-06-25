@@ -4,33 +4,24 @@
 
 ## Active task
 
-`docs/autopilot/overnight/repo-health.json` — overnight repo health (debug + improve Chrome extension)
-
-Set or switch:
+`docs/autopilot/checkout-sandbox/checkout-sandbox.json` — checkout sandbox (browser smoke + optional rehearsal)
 
 ```bash
-python -m orchestrator autopilot use docs/autopilot/overnight/repo-health.json
+python -m orchestrator autopilot use docs/autopilot/checkout-sandbox/checkout-sandbox.json
 python -m orchestrator autopilot status
-python -m orchestrator autopilot next
 ```
 
-## If no assignment here
-
-1. Read `docs/autopilot/README.md`
-2. Pick the next shippable slice (incomplete feature under `docs/autopilot/`, or refresh overnight queue)
-3. Run `bash scripts/verify.sh` before and after work
-
-## Overnight (unattended)
+## Local rehearsal (optional tier)
 
 ```bash
-export CURSOR_API_KEY=...
-./scripts/loop.sh --detach
+export TCH_PRODUCT_URL="https://www.target.com/p/…"
+export TCH_MANUAL_WAIT_SECS=60
+cd scripts/browser-smoke && npm run checkout-rehearsal
 ```
-
-Or in Cursor chat: `@it` then `@loop`
 
 ## Quality gate
 
 ```bash
 bash scripts/verify.sh
+cd scripts/browser-smoke && xvfb-run -a npm run test:extension
 ```

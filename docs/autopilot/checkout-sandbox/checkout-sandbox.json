@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
   "name": "checkout-sandbox",
-  "description": "Automated checkout rehearsal in isolated Chrome — extension smoke (CI) plus optional Target product→review rehearsal",
+  "description": "Automated checkout rehearsal in isolated Chrome \u2014 extension smoke (CI) plus optional Target product\u2192review rehearsal",
   "goals": [
     "npm run test:extension green in scripts/browser-smoke (ephemeral profile)",
     "checkout-rehearsal.mjs reaches review or documents blockedReason",
@@ -63,15 +63,15 @@
         "test": {
           "description": "Run npm install in browser-smoke; fail with clear message if playwright chromium missing",
           "file": "scripts/browser-smoke/package.json",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "npm install && npx playwright install chromium; log versions in notes",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Add optional scripts/checkout-sandbox-setup.sh wrapper if install steps are duplicated",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
@@ -79,14 +79,16 @@
         "cd scripts/browser-smoke && npx playwright install chromium",
         "node -e \"const {chromium}=require('playwright'); console.log(chromium.executablePath())\""
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2",
       "category": "testing",
       "priority": "high",
       "description": "Keep npm run test:extension green (e2e + functional + review-dedup chain)",
-      "dependsOn": ["1"],
+      "dependsOn": [
+        "1"
+      ],
       "testType": "e2e",
       "codeAnalysis": {
         "approach": "extend",
@@ -124,28 +126,30 @@
         "test": {
           "description": "Run npm run test:extension; capture first failing script and assertion",
           "file": "scripts/browser-smoke/package.json",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Fix failing browser-smoke script with minimal diff; follow extension-e2e-test skill",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Share launch helpers only if duplication found during fix",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "cd scripts/browser-smoke && npm run test:extension"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3",
       "category": "functional",
       "priority": "medium",
       "description": "Harden checkout-rehearsal.mjs: structured blockedReason, safety asserts, failure logging",
-      "dependsOn": ["2"],
+      "dependsOn": [
+        "2"
+      ],
       "testType": "e2e",
       "codeAnalysis": {
         "approach": "extend",
@@ -174,28 +178,28 @@
         "On timeout, stderr includes last 15 [TCH] console lines",
         "On timeout, exit message includes blockedReason review_timeout (or specific code)",
         "Playwright chromium missing throws blockedReason no_chromium",
-        "Success prints CHECKOUT REHEARSAL PASS — reached review (no Place Order)"
+        "Success prints CHECKOUT REHEARSAL PASS \u2014 reached review (no Place Order)"
       ],
       "tdd": {
         "test": {
           "description": "Add rehearsal-errors.mjs unit test for blockedReason codes and TCH line tail helper",
           "file": "scripts/browser-smoke/rehearsal-errors.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Extract error helpers; wire checkout-rehearsal.mjs to use structured codes on each exit path",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Document env vars in checkout-sandbox-notes.md Runbook section",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "node scripts/browser-smoke/rehearsal-errors.mjs",
         "node --check scripts/browser-smoke/checkout-rehearsal.mjs"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4",
@@ -238,29 +242,31 @@
         "test": {
           "description": "Add failing assertions for any rehearsal-critical signinStep gaps found in code review",
           "file": "scripts/signin-step-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Implement minimal signinStep.js changes if tests fail; otherwise mark tests passes true",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Remove duplicate guest/continue logic in content.js if any new helper extracted",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "node scripts/signin-step-test.mjs",
         "node scripts/checkout-speed-test.mjs"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5",
       "category": "testing",
       "priority": "medium",
       "description": "Run checkout rehearsal when TCH_PRODUCT_URL set; otherwise mark stuck with blockedReason",
-      "dependsOn": ["3"],
+      "dependsOn": [
+        "3"
+      ],
       "testType": "e2e",
       "codeAnalysis": {
         "approach": "extend",
@@ -269,7 +275,7 @@
         ],
         "relatedTests": [],
         "patterns": [
-          "Optional local tier — not required in cloud without display",
+          "Optional local tier \u2014 not required in cloud without display",
           "TCH_MANUAL_WAIT_SECS for sign-in before product navigation"
         ],
         "targetFiles": {
@@ -302,14 +308,20 @@
         }
       },
       "verification": [],
-      "passes": false
+      "passes": false,
+      "stuck": true,
+      "blockedReason": "missing_product_url \u2014 TCH_PRODUCT_URL not set on cloud agent; run npm run checkout-rehearsal locally"
     },
     {
       "id": "6",
       "category": "integration",
       "priority": "high",
       "description": "Full quality gate: verify.sh green and checkout-sandbox summary committed",
-      "dependsOn": ["2", "4", "5"],
+      "dependsOn": [
+        "2",
+        "4",
+        "5"
+      ],
       "testType": "integration",
       "codeAnalysis": {
         "approach": "extend",
@@ -343,22 +355,22 @@
         "test": {
           "description": "Run bash scripts/verify.sh before claiming feature done",
           "file": "scripts/verify.sh",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Fix any verify failures from sandbox work",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Write final summary section in checkout-sandbox-notes.md",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "bash scripts/verify.sh",
         "python -m orchestrator autopilot status"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

@@ -39,6 +39,16 @@ cd scripts/browser-smoke && npm run checkout-rehearsal
 
 ## Run log
 
+### 2026-06-25 — Autopilot session (@it)
+
+- **Branch:** cursor/senior-dev-it-4bbd
+- **Req 1:** `scripts/checkout-sandbox-setup.sh` added; npm install + playwright chromium OK
+- **Req 2:** `extension-e2e.mjs` — wait for `#tabMain` click before title assert; `xvfb-run npm run test:extension` PASS
+- **Req 3:** `rehearsal-errors.mjs` + structured `blockedReason` in `checkout-rehearsal.mjs`
+- **Req 4:** signin-step tests already cover resolveCheckoutStep / shouldAutoSignInOnCheckoutPending — PASS
+- **Req 5:** **stuck** — `TCH_PRODUCT_URL` unset on cloud agent; `blockedReason: missing_product_url` (run locally with product URL)
+- **Req 6:** `bash scripts/verify.sh` — ALL PASSED
+
 ### Template (agent fills per session)
 
 - **Date:**
