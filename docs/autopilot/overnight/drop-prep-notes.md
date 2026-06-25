@@ -62,6 +62,16 @@ Cloud VM without this file: rehearsal stays `stuck: missing_credentials` (expect
 - Fixed: `redskyErrorStreak` reset on `stopMonitor()` (`background.js:1564`).
 - Fixed: drop instant (`until === 0`) included in tension band (`dropPollingTiming.js`).
 
+### Bug hunt 2026-06-26 (@it full orchestration)
+
+**Subagents:** `debug` (sign-in race), `explore` (DOM map), `generalPurpose` (checkout auth selectors).
+
+**Shipped:** `autoSignInInFlight`, checkout modal Continue/password-only/signed-in paths, rehearsal DOM probe + screenshots.
+
+**Req 6:** stuck `target_checkout_auth_modal` — login PASS; checkout email+Continue modal; password step blocked on cloud (Target "Something went wrong").
+
+**Before drop:** manual sign-in on your PC recommended.
+
 ### Cycle 2026-06-25T23:00:14.556Z
 
 - **verify.sh:** PASS
