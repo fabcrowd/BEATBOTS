@@ -1041,14 +1041,27 @@ async function _wmInit() {
       document.querySelector('[data-automation-id="account-greeting"]') ||
       Array.from(document.querySelectorAll('a')).some(a => /\/account\/logout|sign-out/i.test(a.href || ''))
     );
-    if (!isLoggedIn && !/\/account\/login/i.test(location.pathname)) {
+    const onLoginPage = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.classifyWalmartLoginPath
+      ? TCH_SIGNIN_STEP.classifyWalmartLoginPath(location.pathname)
+      : /^\/account\/login/i.test(location.pathname);
+    const shouldRedirect = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldRedirectToWalmartLogin
+      ? TCH_SIGNIN_STEP.shouldRedirectToWalmartLogin({
+          useSavedSession,
+          isLoggedIn,
+          path: location.pathname,
+        })
+      : !isLoggedIn && !onLoginPage;
+    if (shouldRedirect) {
       wmShowToast('Use Saved Session is OFF — redirecting to Walmart login…');
       window.location.href = 'https://www.walmart.com/account/login';
       wmInitInFlight = false;
       return;
     }
-    if (/\/account\/login/i.test(location.pathname)) {
-      wmShowToast('Walmart login — complete captcha if shown; 2FA can be filled from email when enabled.', 'persistent');
+    if (onLoginPage) {
+      const waitMsg = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.WALMART_LOGIN_WAIT_MESSAGE)
+        ? TCH_SIGNIN_STEP.WALMART_LOGIN_WAIT_MESSAGE
+        : 'Walmart login — complete captcha if shown; 2FA can be filled from email when enabled.';
+      wmShowToast(waitMsg, 'persistent');
       void wmPollLoginImap2FA({
         imap2faEnabled: !!data.imap2faEnabled,
         imapProfile: data.imapProfile || {},

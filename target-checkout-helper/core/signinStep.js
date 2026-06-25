@@ -14,6 +14,9 @@
     login: { ok: 'Yes', fail: 'Not logged in', unknown: 'Open a Target tab', checking: 'Checking…' },
   };
 
+  var WALMART_LOGIN_WAIT_MESSAGE =
+    'Walmart login — complete captcha if shown; 2FA can be filled from email when enabled.';
+
   function normalizeButtonText(text) {
     return String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
   }
@@ -24,6 +27,26 @@
    */
   function classifyPathAsSignin(path) {
     return /^\/(?:account\/)?(?:login|signin)/i.test(path || '');
+  }
+
+  /**
+   * @param {string} path - URL pathname
+   * @returns {boolean}
+   */
+  function classifyWalmartLoginPath(path) {
+    return /^\/account\/login/i.test(path || '');
+  }
+
+  /**
+   * @param {{ useSavedSession?: boolean, isLoggedIn?: boolean, path?: string }} opts
+   * @returns {boolean}
+   */
+  function shouldRedirectToWalmartLogin(opts) {
+    opts = opts || {};
+    if (opts.useSavedSession !== false) return false;
+    if (opts.isLoggedIn) return false;
+    if (classifyWalmartLoginPath(opts.path)) return false;
+    return true;
   }
 
   /**
@@ -62,7 +85,10 @@
 
   root.TCH_SIGNIN_STEP = {
     GUEST_BUTTON_NEEDLES: GUEST_BUTTON_NEEDLES,
+    WALMART_LOGIN_WAIT_MESSAGE: WALMART_LOGIN_WAIT_MESSAGE,
     classifyPathAsSignin: classifyPathAsSignin,
+    classifyWalmartLoginPath: classifyWalmartLoginPath,
+    shouldRedirectToWalmartLogin: shouldRedirectToWalmartLogin,
     matchesGuestCheckoutText: matchesGuestCheckoutText,
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,

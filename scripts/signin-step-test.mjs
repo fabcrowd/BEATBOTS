@@ -45,6 +45,22 @@ assert(S.formatLoginStatusLabel('checking') === 'Checking…', 'checking label')
 assert(S.formatLoginStatusLabel('ok') === 'Yes', 'ok label');
 assert(S.formatLoginStatusLabel('fail') === 'Not logged in', 'fail label');
 
+assert(S.classifyWalmartLoginPath('/account/login'), 'walmart login path');
+assert(!S.classifyWalmartLoginPath('/ip/123456'), 'walmart product not login');
+assert(
+  S.shouldRedirectToWalmartLogin({ useSavedSession: false, isLoggedIn: false, path: '/ip/1' }),
+  'redirect when saved session off and logged out'
+);
+assert(
+  !S.shouldRedirectToWalmartLogin({ useSavedSession: false, isLoggedIn: false, path: '/account/login' }),
+  'no redirect when already on login'
+);
+assert(
+  !S.shouldRedirectToWalmartLogin({ useSavedSession: true, isLoggedIn: false, path: '/ip/1' }),
+  'no redirect when saved session on'
+);
+assert(typeof S.WALMART_LOGIN_WAIT_MESSAGE === 'string' && S.WALMART_LOGIN_WAIT_MESSAGE.length > 10, 'walmart message');
+
 assert(Array.isArray(S.GUEST_BUTTON_NEEDLES) && S.GUEST_BUTTON_NEEDLES.length >= 4, 'needles exported');
 
 if (process.exitCode === 1) {
