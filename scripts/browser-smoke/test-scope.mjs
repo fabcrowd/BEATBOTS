@@ -254,7 +254,6 @@ export function validateExtensionSuite() {
   }
 }
 
-import { fileURLToPath } from 'node:url';
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   validateExtensionSuite();
