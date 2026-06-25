@@ -92,6 +92,7 @@ assert(S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 4
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 1000, retryCount: 0 }), 'no retry before interval');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 15 }), 'stop at max retries');
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
+assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');

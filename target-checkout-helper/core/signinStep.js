@@ -135,6 +135,7 @@
    */
   function shouldRetryCheckoutPending(opts) {
     opts = opts || {};
+    if (opts.signInInFlight) return false;
     var step = opts.step;
     if (step !== 'signin' && step !== 'unknown') return false;
     var maxRetries = opts.maxRetries != null ? opts.maxRetries : 15;

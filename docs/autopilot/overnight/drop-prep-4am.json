@@ -113,7 +113,7 @@
       ],
       "passes": false,
       "stuck": true,
-      "blockedReason": "missing_credentials — add scripts/browser-smoke/.env.rehearsal on host for live rehearsal"
+      "blockedReason": "target_checkout_auth_modal — cloud rehearsal reaches new checkout sign-in UI (email+Continue) but password step never appears; Target may show 'Something went wrong' under automation. Manual sign-in on your PC before drop still works."
     },
     {
       "id": "7",

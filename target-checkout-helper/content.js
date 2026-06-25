@@ -174,31 +174,72 @@ function stopHarvestRecurringTick() {
  * after session recovery reloads a tab that lands on the login page.
  * No-ops silently when autoSignIn is false or credentials are missing.
  */
-async function handleSignInPage(settings) {
+async function handleSignInPage(settings, opts = {}) {
   if (!settings.autoSignIn || !settings.targetEmail || !settings.targetPassword) return;
-
+  const nested = !!opts.nested;
+  if (!nested) {
+    if (autoSignInInFlight) {
+      console.log('[TCH] auto sign-in: already in flight — skip');
+      return;
+    }
+    autoSignInInFlight = true;
+  }
+  try {
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
-  const emailInput = (
-    document.querySelector('input[id="username"]') ||
-    document.querySelector('input[autocomplete="username"]') ||
-    document.querySelector('input[type="email"]')
-  );
-  const passInput = (
-    document.querySelector('input[id="password"]') ||
-    document.querySelector('input[type="password"]')
-  );
-  const submitBtn = (
-    document.querySelector('[data-test="account-signin-button"]') ||
-    document.querySelector('button[type="submit"]')
-  );
+  const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
+
+  if (getPageType() === 'checkout') {
+    if (isCheckoutSignedInConfirm()) {
+      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+      if (await tryCheckoutSignedInContinue()) return;
+    }
+    if (isCheckoutPasswordOnlyReauth() && passInput) {
+      console.log('[TCH] auto sign-in: checkout password-only re-auth');
+      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+      const loginBtn = document.querySelector('button#login, [data-test="account-signin-button"]') || submitBtn;
+      if (!loginBtn) return;
+      await sleep(300);
+      await signInClickAndType(passInput, settings.targetPassword);
+      await sleep(Math.floor(Math.random() * 200) + 200);
+      await signInCdpClick(loginBtn);
+      return;
+    }
+  }
 
   if (!submitBtn) {
     console.log('[TCH] auto sign-in: no submit button found — will wait for DOM');
     return;
   }
 
+  let emailStepDone = false;
+  try { emailStepDone = sessionStorage.getItem(SIGNIN_EMAIL_STEP_KEY) === '1'; } catch {}
+
+  if (!emailInput && getPageType() === 'checkout') {
+    const root = getCheckoutAuthRoot() || document;
+    emailInput = Array.from(root.querySelectorAll('input')).find((el) => {
+      if (!isVisible(el)) return false;
+      const t = (el.type || 'text').toLowerCase();
+      return t !== 'hidden' && t !== 'checkbox' && t !== 'submit' && t !== 'password';
+    }) || null;
+  }
+
+  if (emailStepDone && !passInput && emailInput && !String(emailInput.value || '').trim()) {
+    try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+    emailStepDone = false;
+  }
+
+  if (emailStepDone && !passInput) {
+    console.log('[TCH] auto sign-in: email already submitted — waiting for password step');
+    await waitForSignInPasswordStep(settings, 25000);
+    return;
+  }
+
   // Step 1: email field only visible — Target's two-step login flow.
   if (emailInput && !passInput) {
+    if (getPageType() === 'checkout' && (isCheckoutSignedInConfirm() || looksLoggedInOnTarget())) {
+      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+      if (await tryCheckoutSignedInContinue()) return;
+    }
     console.log('[TCH] auto sign-in: step 1 — filling email via CDP');
     showToast('Auto sign-in: entering email…', 'persistent');
     await sleep(300);
@@ -206,6 +247,7 @@ async function handleSignInPage(settings) {
     await sleep(Math.floor(Math.random() * 200) + 300);
     showToast('Auto sign-in: continuing to password…');
     await signInCdpClick(submitBtn);
+    try { sessionStorage.setItem(SIGNIN_EMAIL_STEP_KEY, '1'); } catch {}
     await waitForSignInPasswordStep(settings);
     return;
   }
@@ -227,6 +269,9 @@ async function handleSignInPage(settings) {
   }
 
   console.log('[TCH] auto sign-in: login form not found — will wait for DOM');
+  } finally {
+    if (!nested) autoSignInInFlight = false;
+  }
 }
 
 // CDP helpers used by handleSignInPage and waitForSignInPasswordStep.
@@ -296,11 +341,12 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
       return true;
     }
 
-    const passInput = document.querySelector('input[id="password"],input[type="password"]');
+    const passInput = Array.from((getCheckoutAuthRoot() || document).querySelectorAll('input[id="password"],input[type="password"]'))
+      .find((el) => isVisible(el));
     if (passInput) {
       if (observer) observer.disconnect();
       await sleep(400);
-      await handleSignInPage(settings);
+      await handleSignInPage(settings, { nested: true });
       return true;
     }
     return false;
@@ -316,6 +362,9 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
     setTimeout(() => {
       obs.disconnect();
       console.log('[TCH] auto sign-in: timed out waiting for password step');
+      if (getPageType() === 'checkout' && (looksLoggedInOnTarget() || isCheckoutSignedInConfirm())) {
+        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+      }
       resolve();
     }, timeoutMs);
   });
@@ -412,6 +461,126 @@ function isVisible(el) {
   const st = getComputedStyle(el);
   if (st.visibility === 'hidden' || st.display === 'none') return false;
   return true;
+}
+
+function looksLoggedInOnTarget() {
+  if (document.querySelector(
+    '[data-test="accountNav-greeting"], [data-test="account-greeting"], ' +
+    '[data-test="accountUserName"], [data-test="signOut"], ' +
+    'a[data-test*="signout" i], a[href*="/account/logout"]'
+  )) return true;
+  const body = (document.body?.innerText || '').slice(0, 14000);
+  return /\bSign out\b/i.test(body) || /\bSign Out\b/i.test(body) || /\bHi,?\s+\w/i.test(body)
+    || /signed in as|welcome back|checking out as/i.test(body);
+}
+
+function getCheckoutAuthRoot() {
+  if (getPageType() !== 'checkout') return null;
+  const modal = document.querySelector('[data-test="authModal"], [data-test="loginModal"]');
+  if (modal && isVisible(modal)) return modal;
+  return Array.from(document.querySelectorAll('[role="dialog"]')).find((d) => {
+    if (!isVisible(d)) return false;
+    const tx = (d.innerText || '').toLowerCase();
+    return tx.includes('sign in') || tx.includes('account') || tx.includes('checkout');
+  }) || null;
+}
+
+function isCheckoutPasswordOnlyReauth() {
+  const root = getCheckoutAuthRoot() || document;
+  const pass = root.querySelector('input#password, input[type="password"]');
+  const user = root.querySelector('input#username, input[type="email"]');
+  return isVisible(pass) && (!user || !isVisible(user) || user.readOnly || user.disabled);
+}
+
+function isCheckoutSignedInConfirm() {
+  if (getPageType() !== 'checkout') return false;
+  if (isCheckoutPasswordOnlyReauth()) return false;
+  const root = getCheckoutAuthRoot();
+  const scope = root || document;
+  const tx = (scope.innerText || '').toLowerCase();
+  if (/signed in as|welcome back|use this account|checking out as/.test(tx)) return true;
+  if (scope.querySelector('[data-test="accountUserName"], [data-test="account-greeting"]')) return true;
+  const email = scope.querySelector('input#username, input[type="email"]');
+  if (email && isVisible(email) && (email.readOnly || email.disabled)) return true;
+  if (email && isVisible(email) && !scope.querySelector('input#password, input[type="password"]')) {
+    if (/sign in or create account|create account/.test(tx)) return false;
+    if (looksLoggedInOnTarget()) return true;
+  }
+  return false;
+}
+
+async function tryCheckoutSignedInContinue() {
+  const root = getCheckoutAuthRoot();
+  const scope = root || document;
+  const needles = [
+    'continue to checkout', 'use this account', 'continue with this account',
+    'continue with your account', 'verify and continue', 'continue',
+  ];
+  const candidates = Array.from(scope.querySelectorAll('button, [role="button"], a[href]'));
+  for (const needle of needles) {
+    const el = candidates.find((b) => {
+      if (!isVisible(b) || b.disabled) return false;
+      const raw = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.normalizeButtonText)
+        ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
+        : (b.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesGuestCheckoutText?.(raw)) return false;
+      return raw === needle || raw.includes(needle);
+    });
+    if (el) {
+      console.log('[TCH] checkout auth: clicking signed-in continue —', needle);
+      await signInCdpClick(el);
+      return true;
+    }
+  }
+  for (const sel of ['button#login', '[data-test="account-signin-button"]', '[data-test="continue-button"]']) {
+    const btn = scope.querySelector(sel);
+    if (btn && isVisible(btn) && !btn.disabled) {
+      console.log('[TCH] checkout auth: clicking', sel);
+      await signInCdpClick(btn);
+      return true;
+    }
+  }
+  return false;
+}
+
+function findVisibleSignInInputs() {
+  const root = getPageType() === 'checkout' ? (getCheckoutAuthRoot() || document) : document;
+  const emailSels = [
+    'input[id="username"]', 'input[autocomplete="username"]', 'input[type="email"]',
+    'input[type="tel"]', 'input[inputmode="email"]',
+    'input[placeholder*="email" i]', 'input[placeholder*="mobile" i]',
+    'input[aria-label*="email" i]', 'input[aria-label*="phone" i]',
+  ];
+  const passSels = ['input[id="password"]', 'input[type="password"]'];
+  let emailInput = null;
+  for (const sel of emailSels) {
+    const el = root.querySelector(sel);
+    if (isVisible(el)) { emailInput = el; break; }
+  }
+  let passInput = null;
+  for (const sel of passSels) {
+    const el = root.querySelector(sel);
+    if (isVisible(el)) { passInput = el; break; }
+  }
+  let submitBtn = null;
+  if (getPageType() === 'checkout') {
+    const continueBtn = Array.from(root.querySelectorAll('button, [role="button"]')).find((b) => {
+      if (!isVisible(b) || b.disabled) return false;
+      const raw = (b.textContent || '').trim().toLowerCase();
+      return raw === 'continue';
+    });
+    if (continueBtn) submitBtn = continueBtn;
+  }
+  if (!submitBtn) {
+    const submitSels = getPageType() === 'checkout'
+      ? ['button#login', '[data-test="account-signin-button"]', 'button[type="submit"]']
+      : ['[data-test="account-signin-button"]', 'button[type="submit"]'];
+    for (const sel of submitSels) {
+      const el = root.querySelector(sel);
+      if (isVisible(el) && !el.disabled) { submitBtn = el; break; }
+    }
+  }
+  return { emailInput, passInput, submitBtn };
 }
 
 /** Target often shows sign-in / guest choice before shipping — not "unknown" checkout. */
@@ -1316,6 +1485,8 @@ let lastReviewAt = 0;
 /** Prevents concurrent handleReviewStep runs for the same URL (e.g. payment .then + watcher). */
 let reviewStepInFlight = false;
 let reviewStepInFlightKey = '';
+/** Prevents concurrent handleSignInPage from checkout pending retries during email→password transition. */
+let autoSignInInFlight = false;
 
 function markCheckoutFlow(step) {
   if (checkoutFlowStart === null) {
@@ -1350,6 +1521,7 @@ async function handleCheckoutPage(settings) {
 
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
 const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
+const SIGNIN_EMAIL_STEP_KEY = 'tch:signInEmailStepDone';
 const PENDING_RETRY_INTERVAL_MS = 3000;
 const PENDING_MAX_RETRIES = 15;
 
@@ -1374,6 +1546,16 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
+    if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
+      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+      if (await tryCheckoutSignedInContinue()) {
+        showToast('Checkout: continuing with signed-in account…', 'persistent');
+        await sleep(800);
+        return;
+      }
+      console.log('[TCH] auto sign-in: session looks logged in — waiting for checkout to advance');
+      return;
+    }
     if (!options.silent) {
       await sleep(800);
       showToast('Auto sign-in: checking form…', 'persistent');
@@ -1411,6 +1593,7 @@ function watchForCheckoutStep(settings, options = {}) {
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
+      if (autoSignInInFlight) return;
       const shouldRetry = typeof TCH_SIGNIN_STEP !== 'undefined'
         ? TCH_SIGNIN_STEP.shouldRetryCheckoutPending({
           step,
@@ -1419,6 +1602,7 @@ function watchForCheckoutStep(settings, options = {}) {
           retryCount: pendingRetryCount,
           intervalMs: PENDING_RETRY_INTERVAL_MS,
           maxRetries: PENDING_MAX_RETRIES,
+          signInInFlight: autoSignInInFlight,
         })
         : Date.now() - lastPendingRetryMs >= PENDING_RETRY_INTERVAL_MS
           && pendingRetryCount < PENDING_MAX_RETRIES;
@@ -1430,6 +1614,7 @@ function watchForCheckoutStep(settings, options = {}) {
       return;
     }
     try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
+    try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
     handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {

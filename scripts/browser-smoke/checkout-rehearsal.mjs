@@ -42,6 +42,37 @@ const SIGNIN_MS = Number(process.env.TCH_SIGNIN_TIMEOUT_MS || '120000');
 let browser;
 let userDataDir;
 let tchLines = [];
+let activeShopPage = null;
+
+async function captureFailureDebug(page, reason) {
+  if (!page) return;
+  try {
+    const probe = await page.evaluate(() => ({
+      url: location.href,
+      title: document.title,
+      body: (document.body?.innerText || '').slice(0, 1200),
+      dialogs: [...document.querySelectorAll('[role="dialog"]')].map((d) => (d.innerText || '').slice(0, 300)),
+    }));
+    console.error('\nDOM probe:', JSON.stringify(probe, null, 2));
+  } catch (e) {
+    console.error('DOM probe failed:', e?.message || e);
+  }
+  try {
+    const dir = process.env.TCH_REHEARSAL_SCREENSHOT_DIR?.trim()
+      || path.join(PROFILE_DIR, 'rehearsal-failures');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${reason}-${Date.now()}.png`);
+    await page.screenshot({ path: file, fullPage: true });
+    console.error('Screenshot saved:', file);
+  } catch (e) {
+    console.error('Screenshot failed:', e?.message || e);
+  }
+}
+
+async function failRehearsal(code, message, tchLinesArg = tchLines) {
+  await captureFailureDebug(activeShopPage, code);
+  exitRehearsal(code, message, tchLinesArg);
+}
 
 function attachTchConsole(page) {
   tchLines = [];
@@ -125,12 +156,14 @@ async function main() {
   try {
     await ensureTargetSignedIn(signInPage, SIGNIN_MS, tchLines);
   } catch (e) {
-    exitRehearsal(BLOCKED_REASON.SIGNIN_TIMEOUT, String(e.message || e), tchLines);
+    await failRehearsal(BLOCKED_REASON.SIGNIN_TIMEOUT, String(e.message || e), tchLines);
   }
-  await signInPage.close();
 
-  const shop = await browser.newPage();
-  await attachTchConsole(shop);
+  const shop = signInPage;
+  activeShopPage = shop;
+  console.log('\nWarming checkout session…\n');
+  await shop.goto('https://www.target.com/checkout', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 5000));
 
   console.log('\nNavigating to product (extension drives toward review)...\n');
   await shop.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
@@ -142,7 +175,7 @@ async function main() {
   }
 
   if (!tchLines.some((l) => l.includes('[TCH] review reached'))) {
-    exitRehearsal(
+    await failRehearsal(
       classifyRehearsalFailure(tchLines),
       `Timed out waiting for [TCH] review reached (${MAX_MS}ms).`,
       tchLines

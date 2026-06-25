@@ -81,6 +81,8 @@ You **must not**:
 
 ## Delegation
 
+**Use all available tools before solo coding:** skills (`@autopilot-cursor`, `@extension-e2e-test`), subagents (`explore`, `debug`, `generalPurpose`), web research when DOM/API behavior is uncertain, and Autopilot TDD (`red → green → refactor`) per `.cursor/commands/autopilot.md`.
+
 | Delegate | Use for |
 |----------|---------|
 | `explore` subagent | Codebase search, wiring maps |
