@@ -822,7 +822,7 @@ async function runBackgroundPoll() {
           const currentTab = await chrome.tabs.get(tabId);
           if (isInCheckoutFlow(currentTab?.url)) {
             console.log(`[TCH bg] Tab ${tabId} already in checkout flow (${currentTab.url}) — not navigating`);
-            break;
+            continue;
           }
         } catch { /* tab closed — fall through to create new one */ }
       }
@@ -983,9 +983,7 @@ async function maybeRestartEndlessMonitor() {
     monitor.dropExpectedAt,
     monitor.skipMonitoring,
     {
-      highStockOnly: !!monitor.highStockOnly,
-      highStockThreshold: Number(monitor.highStockThreshold) || 10,
-      targetMaxPrice: Number(monitor.targetMaxPrice) || 0,
+      ...startMonitorOptsFromStored(monitor),
       resetEndlessSuccessCount: false,
     }
   );
@@ -1488,6 +1486,16 @@ function notifyTargetTabsMonitorChanged() {
 }
 
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
+
+function startMonitorOptsFromStored(monitor) {
+  return {
+    highStockOnly: !!monitor.highStockOnly,
+    highStockThreshold: Number(monitor.highStockThreshold) || 10,
+    targetMaxPrice: Number(monitor.targetMaxPrice) || 0,
+    walmartMaxPrice: Number(monitor.walmartMaxPrice) || 0,
+    errorRetryDelayMs: Number(monitor.errorRetryDelayMs) || 3500,
+  };
+}
 
 async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonitoring, opts = {}) {
   const {

@@ -2013,7 +2013,10 @@ async function handleMonitoredATC(monitor, product) {
         showToast('Hype mode: no cookie snapshots in pool — waiting for harvest…', 'persistent');
         return;
       }
-    } catch { /* no-op if SW is inactive */ }
+    } catch {
+      showToast('Hype mode: extension busy — waiting for harvest status…', 'persistent');
+      return;
+    }
   }
 
   // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
