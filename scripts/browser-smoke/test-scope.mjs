@@ -30,8 +30,8 @@ export const JOURNEYS = {
     retailer: 'core',
     summary: 'Only one retailer monitor active — START_MONITOR filters by retailer tab',
     impl: ['target-checkout-helper/popup.js (toggleMonitor retailerFilter)'],
-    coverage: 'weak',
-    tests: [],
+    coverage: 'strong',
+    tests: ['extension-functional.mjs'],
   },
   'MON-3': {
     id: 'MON-3',
@@ -205,7 +205,7 @@ export const INVARIANTS = {
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2'],
-  'extension-functional.mjs': ['MON-1', 'TGT-1', 'TGT-2'],
+  'extension-functional.mjs': ['MON-1', 'MON-2', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
 };
 
