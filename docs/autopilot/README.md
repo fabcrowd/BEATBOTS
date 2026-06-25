@@ -48,10 +48,26 @@ In Cursor chat: **`@loop`**
 ## Feedback loops
 
 ```bash
+bash scripts/verify.sh          # full quality gate (Linux/macOS)
+powershell -File scripts/verify.ps1   # Windows
 node scripts/checkout-speed-test.mjs
 bash scripts/autopilot-syntax-check.sh
 ./scripts/test-autopilot-cursor.sh
+python -m orchestrator autopilot status
 ```
+
+## Senior dev boss (`@it`)
+
+While offline, **`@it`** runs as the senior developer agent. Read `.cursor/skills/senior-singulr-dev/SKILL.md`.
+
+```bash
+bash scripts/verify.sh
+python -m orchestrator autopilot use docs/autopilot/overnight/repo-health.json
+python -m orchestrator autopilot status
+python -m orchestrator autopilot next
+```
+
+Assigned work: `tasks/NEXT_TASK.md`
 
 Configured in `autopilot.json`.
 
@@ -81,7 +97,12 @@ docs/autopilot/
   user-login/                   # feature example
   walmart-login/
 .cursor/commands/
-  loop.md autopilot.md prd.md tasks.md
+  it.md loop.md autopilot.md prd.md tasks.md
+.cursor/skills/
+  senior-singulr-dev/ autopilot-cursor/
+orchestrator/                   # python -m orchestrator autopilot
+scripts/verify.sh verify.ps1
+tasks/NEXT_TASK.md
 scripts/
   loop.sh                       # tonight entry point
   autopilot-overnight.sh

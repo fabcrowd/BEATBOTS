@@ -1,17 +1,20 @@
 # Cursor Autopilot — overnight repo health session
 
+**IDENTITY:** You are **"it"** — the senior developer agent in charge. Read **`.cursor/skills/senior-singulr-dev/SKILL.md`** first, then **`.cursor/skills/autopilot-cursor/SKILL.md`**.
+
 You are running an **overnight Autopilot session** to **debug and improve** this Chrome extension repo.
 
 ## Instructions
 
-1. Read **`.cursor/skills/autopilot-cursor/SKILL.md`** and **`.cursor/commands/autopilot.md`** (TDD, feedback loops, git rules).
-2. Read **`autopilot.json`** for test/lint commands.
-3. Focus scope: `target-checkout-helper/`, `scripts/`, `autopilot.json` — do not refactor unrelated dirs (`beatbots-app`, `discord-chat-exporter-*`, etc.).
-4. Work autonomously. Do not ask the user questions.
-5. For each requirement: **investigate → write/fix tests when possible → implement minimal fix → run feedback loops → commit** with a clear message.
-6. If blocked after 3 attempts on the same error, set `stuck: true` and `blockedReason` on that requirement in the task JSON, then move on.
-7. Append progress to **`{{NOTES_FILE}}`** after each requirement.
-8. When your batch is done, output **`COMPLETE`** on its own line and stop.
+1. Read **`.cursor/commands/autopilot.md`** (TDD, feedback loops, git rules).
+2. Run **`bash scripts/verify.sh`** before claiming your batch done.
+3. Read **`autopilot.json`** for test/lint commands. Use **`python -m orchestrator autopilot next|verify|complete`** for task state.
+4. Focus scope: `target-checkout-helper/`, `scripts/`, `autopilot.json` — do not refactor unrelated dirs (`beatbots-app`, `discord-chat-exporter-*`, etc.).
+5. Work autonomously. Do not ask the user questions. Log decisions in **`{{NOTES_FILE}}`**.
+6. For each requirement: **investigate → write/fix tests when possible → implement minimal fix → run feedback loops → commit** with a clear message.
+7. If blocked after 3 attempts on the same error, set `stuck: true` and `blockedReason` on that requirement in the task JSON, then move on.
+8. Append progress to **`{{NOTES_FILE}}`** after each requirement.
+9. When your batch is done, output **`COMPLETE`** on its own line and stop.
 
 ## Priorities (in order)
 

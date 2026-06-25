@@ -2,6 +2,8 @@
 
 > **Cursor mapping:** `autopilot tasks.json` from [Gens-ai/autopilot](https://github.com/Gens-ai/autopilot) — fresh `agent` session per requirement, state in JSON + notes, not in chat memory.
 
+> **Boss agent:** `@it` — senior developer persona (`.cursor/skills/senior-singulr-dev/SKILL.md`). Overnight sessions run as "it".
+
 Start tonight's **unattended debug & improve** loop for this repo.
 
 ## When to use
@@ -31,10 +33,12 @@ Start tonight's **unattended debug & improve** loop for this repo.
 
 ## Phase 0: Pre-flight
 
-1. **Config:** Read `autopilot.json`. If missing, run equivalent of `@autopilot-init --force`.
-2. **Tools:** `agent`, `jq`, `node` must be available. `CURSOR_API_KEY` or `agent login` required for live overnight runs.
-3. **Parallel runs:** Check `docs/autopilot/*/run.pid`. If another loop is running, tell user to stop it first (`@autopilot stop` logic).
-4. **Scope:** `target-checkout-helper/` and `scripts/` only — not `beatbots-app`, Discord exporter, research folders.
+1. Read **`.cursor/skills/senior-singulr-dev/SKILL.md`** — you are **"it"** for this loop.
+2. **Config:** Read `autopilot.json`. If missing, run equivalent of `@autopilot-init --force`.
+3. **Tools:** `agent`, `jq`, `node`, `python3` must be available. `CURSOR_API_KEY` or `agent login` required for live overnight runs.
+4. **Quality gate:** `bash scripts/verify.sh` must pass before starting overnight (or fix failures first).
+5. **Parallel runs:** Check `docs/autopilot/*/run.pid`. If another loop is running, tell user to stop it first (`@autopilot stop` logic).
+6. **Scope:** `target-checkout-helper/` and `scripts/` only — not `beatbots-app`, Discord exporter, research folders.
 
 ## Phase 1: Refresh tonight's task queue
 

@@ -10,6 +10,14 @@ fail() { echo "FAIL: $1"; FAIL=1; }
 
 cd "$ROOT"
 
+# Remove stale autopilot lock if the owning process is gone
+if [[ -f .autopilot/command.pid ]]; then
+  OLD_PID=$(cat .autopilot/command.pid 2>/dev/null || true)
+  if [[ -z "$OLD_PID" ]] || ! kill -0 "$OLD_PID" 2>/dev/null; then
+    rm -f .autopilot/command.pid
+  fi
+fi
+
 # 1. Install + binaries
 if "$ROOT/scripts/install-autopilot-cursor.sh" >/dev/null 2>&1 \
   && command -v autopilot-cursor >/dev/null \
@@ -28,7 +36,7 @@ else
 fi
 
 # 3. Cursor commands
-for f in autopilot.md prd.md tasks.md autopilot-init.md; do
+for f in autopilot.md prd.md tasks.md autopilot-init.md it.md loop.md; do
   if [[ -f ".cursor/commands/$f" ]]; then
     pass ".cursor/commands/$f exists"
   else
@@ -71,7 +79,8 @@ else
 fi
 
 # 7. Dry-run would use agent (not claude) for incomplete work
-TMP=$(mktemp)
+mkdir -p .autopilot
+TMP=".autopilot/test-incomplete-task.json"
 jq '.requirements[0].passes = false' docs/autopilot/user-login/user-login.json > "$TMP"
 OUT2=$(autopilot-cursor "$TMP" --dry-run 2>&1 || true)
 rm -f "$TMP"
@@ -99,15 +108,40 @@ else
   fail "signinStep.js extension wiring"
 fi
 
-# 10. Overnight automation
+# 10. Overnight automation (do not run refresh here — it verifies via test-autopilot-cursor)
 if [[ -x scripts/loop.sh ]] \
   && [[ -x scripts/autopilot-overnight.sh ]] \
   && [[ -f .cursor/commands/loop.md ]] \
   && [[ -f docs/autopilot/overnight/repo-health.json ]] \
-  && node scripts/refresh-overnight-tasks.mjs >/dev/null 2>&1; then
+  && node --check scripts/refresh-overnight-tasks.mjs >/dev/null 2>&1; then
   pass "overnight /loop automation"
 else
   fail "overnight /loop automation"
+fi
+
+# 11. Senior dev "it" + orchestrator
+if [[ -f .cursor/skills/senior-singulr-dev/SKILL.md ]] \
+  && [[ -f .cursor/commands/it.md ]] \
+  && [[ -f tasks/NEXT_TASK.md ]] \
+  && [[ -x scripts/verify.sh ]] \
+  && [[ -f scripts/verify.ps1 ]] \
+  && [[ -f orchestrator/autopilot.py ]]; then
+  pass "senior dev it skill and orchestrator"
+else
+  fail "senior dev it skill and orchestrator"
+fi
+
+if python3 -m orchestrator autopilot use docs/autopilot/overnight/repo-health.json >/dev/null 2>&1 \
+  && python3 -m orchestrator autopilot status >/dev/null 2>&1; then
+  pass "orchestrator autopilot CLI"
+else
+  fail "orchestrator autopilot CLI"
+fi
+
+if grep -q 'senior-singulr-dev' scripts/autopilot-cursor/session-prompt-overnight.md; then
+  pass "overnight prompt wired to it"
+else
+  fail "overnight prompt wired to it"
 fi
 
 echo ""

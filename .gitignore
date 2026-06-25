@@ -18,6 +18,9 @@ beatbots-app/build/icon.ico
 beatbots-app/build/icon.icns
 
 # Autopilot runner
+.autopilot/active-task.json
+__pycache__/
+*.py[cod]
 docs/autopilot/**/run.pid
 docs/autopilot/**/stop-signal
 docs/autopilot/overnight/logs/*.log

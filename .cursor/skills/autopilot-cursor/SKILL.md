@@ -48,15 +48,18 @@ Before each run, `scripts/refresh-overnight-tasks.mjs` resets recurring audit re
 ## Feedback loops (this repo)
 
 ```bash
+bash scripts/verify.sh          # full quality gate
 node scripts/checkout-speed-test.mjs
 bash scripts/autopilot-syntax-check.sh
 ./scripts/test-autopilot-cursor.sh
+python -m orchestrator autopilot status
 ```
 
 ## Commands
 
 | Cursor | Purpose |
 |--------|---------|
+| `@it` | **Senior dev boss** — offline bootstrap, product decisions |
 | `@autopilot-init` | Initialize `autopilot.json` |
 | `@prd` | Write PRD markdown |
 | `@tasks` | PRD → task JSON |
