@@ -99,6 +99,15 @@ else
   fail "signinStep.js extension wiring"
 fi
 
+# 10. Overnight automation
+if [[ -x scripts/autopilot-overnight.sh ]] \
+  && [[ -f docs/autopilot/overnight/repo-health.json ]] \
+  && node scripts/refresh-overnight-tasks.mjs >/dev/null 2>&1; then
+  pass "overnight automation scaffold"
+else
+  fail "overnight automation scaffold"
+fi
+
 echo ""
 if [[ "$FAIL" -eq 0 ]]; then
   echo "All autopilot-cursor integration checks passed."

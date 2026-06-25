@@ -20,3 +20,4 @@ beatbots-app/build/icon.icns
 # Autopilot runner
 docs/autopilot/**/run.pid
 docs/autopilot/**/stop-signal
+docs/autopilot/overnight/logs/*.log

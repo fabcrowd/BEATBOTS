@@ -1,0 +1,257 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "repo-health",
+  "description": "Overnight debug and improvement pass for the Chrome extension",
+  "goals": [
+    "All Node feedback loops pass",
+    "Critical checkout/monitor bugs fixed with tests",
+    "Documented overnight summary"
+  ],
+  "nonGoals": [
+    "Unrelated monorepo packages",
+    "Auto-push to GitHub",
+    "Live retailer purchases"
+  ],
+  "technicalNotes": "Use TDD where possible. Scope: target-checkout-helper/ and scripts/. Read .cursor/skills/autopilot-cursor/SKILL.md.",
+  "_tdd": true,
+  "_step_size": "One requirement per commit minimum.",
+  "requirements": [
+    {
+      "id": "1",
+      "category": "testing",
+      "priority": "high",
+      "description": "Fix any failing Node feedback loops (checkout-speed-test, signin-step-test, syntax-check)",
+      "recurring": false,
+      "verification": [
+        "node scripts/checkout-speed-test.mjs",
+        "bash scripts/autopilot-syntax-check.sh"
+      ],
+      "acceptance": [
+        "node scripts/checkout-speed-test.mjs exits 0",
+        "bash scripts/autopilot-syntax-check.sh exits 0"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Run feedback loops and capture failures",
+          "passes": true
+        },
+        "implement": {
+          "description": "Fix root cause of any failure",
+          "passes": true
+        },
+        "refactor": {
+          "passes": true
+        }
+      },
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "testing",
+      "priority": "high",
+      "description": "Keep autopilot-cursor integration test script passing",
+      "recurring": false,
+      "dependsOn": [
+        "1"
+      ],
+      "verification": [
+        "./scripts/test-autopilot-cursor.sh"
+      ],
+      "acceptance": [
+        "./scripts/test-autopilot-cursor.sh exits 0"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Run test-autopilot-cursor.sh",
+          "passes": true
+        },
+        "implement": {
+          "description": "Fix wiring if broken",
+          "passes": true
+        },
+        "refactor": {
+          "passes": true
+        }
+      },
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "high",
+      "description": "Bug hunt: Target checkout and sign-in flow (content.js) — fix issues, add Node tests if needed",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "acceptance": [
+        "Review content.js checkout/signin/guest paths for logic bugs",
+        "Any fix has a test in scripts/ or passes existing loops",
+        "Findings noted in overnight-notes.md"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Identify failing scenario or code smell with file:line",
+          "passes": false
+        },
+        "implement": {
+          "description": "Minimal fix",
+          "passes": false
+        },
+        "refactor": {
+          "passes": false
+        }
+      },
+      "passes": false
+    },
+    {
+      "id": "4",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Bug hunt: background monitor, harvest, and 401 session recovery (background.js, cookieHarvest.js)",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "acceptance": [
+        "Review background.js poll/harvest/401 paths",
+        "Fix bugs found; keep node --check green",
+        "Note findings in overnight-notes.md"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Document issue with reproduction steps in notes",
+          "passes": false
+        },
+        "implement": {
+          "description": "Fix with surgical diff",
+          "passes": false
+        },
+        "refactor": {
+          "passes": false
+        }
+      },
+      "passes": false
+    },
+    {
+      "id": "5",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Bug hunt: Walmart ATC, queue, and login (walmart-content.js)",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "acceptance": [
+        "Review wmDirectAtc, queue wait, login guard",
+        "Fix bugs; extend signin-step tests if logic extracted",
+        "Note findings in overnight-notes.md"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Identify issue in walmart flow",
+          "passes": false
+        },
+        "implement": {
+          "description": "Fix",
+          "passes": false
+        },
+        "refactor": {
+          "passes": false
+        }
+      },
+      "passes": false
+    },
+    {
+      "id": "6",
+      "category": "entropy",
+      "priority": "low",
+      "description": "Entropy: deduplicate shared Target/Walmart patterns into core/ with tests staying green",
+      "recurring": true,
+      "dependsOn": [
+        "3",
+        "5"
+      ],
+      "acceptance": [
+        "One concrete dedup or dead-code removal",
+        "All feedback loops still pass"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Identify duplication",
+          "passes": false
+        },
+        "implement": {
+          "description": "Extract or remove",
+          "passes": false
+        },
+        "refactor": {
+          "passes": false
+        }
+      },
+      "passes": false
+    },
+    {
+      "id": "7",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Optional: run browser-smoke extension tests; fix failures or mark stuck with blockedReason",
+      "recurring": true,
+      "dependsOn": [
+        "1"
+      ],
+      "verification": [],
+      "acceptance": [
+        "Attempt: cd scripts/browser-smoke && npm run test:extension",
+        "If Chromium/Chrome unavailable, set stuck:true with blockedReason env note",
+        "If tests fail, fix or document in overnight-notes.md"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Run browser-smoke",
+          "passes": false
+        },
+        "implement": {
+          "description": "Fix or mark stuck",
+          "passes": false
+        },
+        "refactor": {
+          "passes": false
+        }
+      },
+      "passes": false
+    },
+    {
+      "id": "8",
+      "category": "docs",
+      "priority": "low",
+      "description": "Write overnight summary to overnight-notes.md and commit all session work",
+      "recurring": true,
+      "dependsOn": [
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "acceptance": [
+        "overnight-notes.md has dated summary: fixed, stuck, skipped",
+        "git log shows commits on overnight branch"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Collect session outcomes",
+          "passes": false
+        },
+        "implement": {
+          "description": "Write summary and commit",
+          "passes": false
+        },
+        "refactor": {
+          "passes": false
+        }
+      },
+      "passes": false
+    }
+  ]
+}

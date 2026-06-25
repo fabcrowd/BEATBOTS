@@ -466,7 +466,7 @@ build_session_prompt() {
     local notes_file="$2"
     local state_dir="$3"
     local feature_name="$4"
-    local template="$SCRIPT_DIR/session-prompt.md"
+    local template="${AUTOPILOT_PROMPT_TEMPLATE:-$SCRIPT_DIR/session-prompt.md}"
     if [[ ! -f "$template" ]]; then
         echo "Follow .cursor/commands/autopilot.md. Task: $task_line"
         return

@@ -17,6 +17,25 @@ export CURSOR_API_KEY=...   # or: agent login
 autopilot-cursor docs/autopilot/user-login/user-login.json
 ```
 
+## Overnight unattended (debug & improve while you sleep)
+
+```bash
+export CURSOR_API_KEY=...
+./scripts/autopilot-overnight.sh --detach   # tmux background, 8h max
+# attach: tmux attach -t autopilot-overnight
+# logs:   docs/autopilot/overnight/logs/
+```
+
+Foreground:
+
+```bash
+./scripts/autopilot-overnight.sh --max-hours 8
+```
+
+Before each run, `scripts/refresh-overnight-tasks.mjs` resets recurring audit requirements and verifies baselines. Task file: `docs/autopilot/overnight/repo-health.json`.
+
+**Requirements:** machine stays on, terminal/tmux open, `CURSOR_API_KEY` or `agent login`, Cursor CLI installed.
+
 ## In Cursor chat
 
 1. Read `.cursor/commands/autopilot.md` for the full TDD spec
@@ -29,6 +48,7 @@ autopilot-cursor docs/autopilot/user-login/user-login.json
 ```bash
 node scripts/checkout-speed-test.mjs
 bash scripts/autopilot-syntax-check.sh
+./scripts/test-autopilot-cursor.sh
 ```
 
 ## Commands
