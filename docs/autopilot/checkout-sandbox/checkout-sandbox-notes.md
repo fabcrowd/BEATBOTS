@@ -16,20 +16,22 @@ npx playwright install chromium
 cd scripts/browser-smoke && npm run test:extension
 ```
 
-## Rehearsal tier (optional / local)
+## Automated rehearsal (default)
 
 ```bash
-export TCH_PRODUCT_URL="https://www.target.com/p/…"
-export TCH_MANUAL_WAIT_SECS=60   # sign in + check popup if profile is new
-cd scripts/browser-smoke && npm run checkout-rehearsal
+cp scripts/browser-smoke/.env.rehearsal.example scripts/browser-smoke/.env.rehearsal
+# Edit: TCH_TARGET_EMAIL, TCH_TARGET_PASSWORD (never commit .env.rehearsal)
+
+./scripts/run-checkout-rehearsal.sh
 ```
 
-**Safety:** extension ON, Use saved payment ON, **Auto place order OFF**.
+Extension auto sign-in at `target.com/login`, then product → review. Default product: Scotch tape `A-13330690`.
 
 ## blockedReason codes
 
 | Code | Meaning |
 |------|---------|
+| `missing_product_url` | Invalid `TCH_PRODUCT_URL` |
 | `missing_credentials` | `TCH_TARGET_EMAIL` / `TCH_TARGET_PASSWORD` not set |
 | `no_chromium` | Playwright Chromium not installed |
 | `no_display` | Headed Chrome unavailable (cloud VM) |
