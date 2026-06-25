@@ -8,8 +8,11 @@ Run automated debugging cycles until after the drop. User may be offline.
 
 ```bash
 export TCH_DROP_EXPECTED_AT="2026-06-26T08:00:00.000Z"   # adjust for your timezone
-./scripts/drop-prep-tonight.sh --detach
+./scripts/drop-prep-tonight.sh --continuous --detach    # 30s cycles (watch mode)
+# or: ./scripts/drop-prep-tonight.sh --fast --detach    # 90s cycles
 ```
+
+**Watch @it think:** stay in this Cloud Agent chat — code fixes and reasoning appear here. `docs/autopilot/overnight/it-live.md` logs automated gate cycles.
 
 Or single cycle now:
 

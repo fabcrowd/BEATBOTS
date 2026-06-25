@@ -122,6 +122,31 @@
   }
 
   /**
+   * Throttled retry while checkout watcher stays on sign-in or loading shell.
+   * @param {{
+   *   step?: string,
+   *   lastAttemptMs?: number,
+   *   nowMs?: number,
+   *   retryCount?: number,
+   *   intervalMs?: number,
+   *   maxRetries?: number,
+   * }} opts
+   * @returns {boolean}
+   */
+  function shouldRetryCheckoutPending(opts) {
+    opts = opts || {};
+    var step = opts.step;
+    if (step !== 'signin' && step !== 'unknown') return false;
+    var maxRetries = opts.maxRetries != null ? opts.maxRetries : 15;
+    var retryCount = opts.retryCount || 0;
+    if (retryCount >= maxRetries) return false;
+    var intervalMs = opts.intervalMs != null ? opts.intervalMs : 3000;
+    var lastAttemptMs = opts.lastAttemptMs || 0;
+    var nowMs = opts.nowMs != null ? opts.nowMs : Date.now();
+    return nowMs - lastAttemptMs >= intervalMs;
+  }
+
+  /**
    * @param {'ok'|'fail'|'unknown'|'checking'} state
    * @param {string} [labelKey]
    * @returns {string}
@@ -144,6 +169,7 @@
     shouldAutoSignInOnCheckoutPending: shouldAutoSignInOnCheckoutPending,
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
+    shouldRetryCheckoutPending: shouldRetryCheckoutPending,
     formatLoginStatusLabel: formatLoginStatusLabel,
     LOGIN_STATUS_LABELS: LOGIN_STATUS_LABELS,
   };

@@ -14,7 +14,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const TASK_FILE = path.join(ROOT, 'docs/autopilot/overnight/drop-prep-4am.json');
 const NOTES = path.join(ROOT, 'docs/autopilot/overnight/drop-prep-notes.md');
+const LIVE = path.join(ROOT, 'docs/autopilot/overnight/it-live.md');
 const ENV_REHEARSAL = path.join(ROOT, 'scripts/browser-smoke/.env.rehearsal');
+
+function appendLive(lines) {
+  const block = `\n## ${new Date().toISOString()} (@it cycle)\n\n${lines.join('\n')}\n`;
+  fs.appendFileSync(LIVE, block);
+}
 
 function run(cmd, opts = {}) {
   const r = spawnSync('bash', ['-lc', cmd], {
@@ -68,6 +74,11 @@ results.push(`- **dropExpectedAt env:** ${dropAt}`);
 results.push(`- **cycle:** ${allOk ? 'ALL GATES GREEN' : 'FAILURES — see above'}`);
 
 appendNote(results);
+appendLive([
+  '**Thought process:** automated gate cycle — verify extension paths before drop.',
+  ...results,
+  allOk ? '**Next:** keep cycling; boss agent works in Cloud Agent chat for code fixes.' : '**Next:** investigate failures above.',
+]);
 
 if (fs.existsSync(TASK_FILE)) {
   const data = JSON.parse(fs.readFileSync(TASK_FILE, 'utf8'));

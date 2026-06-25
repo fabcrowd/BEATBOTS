@@ -1350,8 +1350,10 @@ async function handleCheckoutPage(settings) {
 
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
 const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
+const PENDING_RETRY_INTERVAL_MS = 3000;
+const PENDING_MAX_RETRIES = 15;
 
-async function handleCheckoutPendingStep(settings, step) {
+async function runCheckoutPendingActions(settings, step, options = {}) {
   console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
   const hasCredentials = !!(settings.autoSignIn && settings.targetEmail && settings.targetPassword);
   let alreadyTried = false;
@@ -1365,20 +1367,27 @@ async function handleCheckoutPendingStep(settings, step) {
     try { sessionStorage.setItem(GUEST_CHECKOUT_ATTEMPT_KEY, '1'); } catch {}
     showToast('Guest checkout…');
     await sleep(600);
-  } else if (step === 'signin' && !hasCredentials && !attemptGuest) {
+  } else if (step === 'signin' && !hasCredentials && !attemptGuest && !options.silent) {
     showToast('Sign in or choose guest checkout — this tab will not auto-refresh.', 'persistent');
   }
   const autoSignIn = typeof TCH_SIGNIN_STEP !== 'undefined'
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
-    // Auto sign-in: give the checkout auth gate time to render its form then fill it.
-    await sleep(800);
-    showToast('Auto sign-in: checking form…', 'persistent');
+    if (!options.silent) {
+      await sleep(800);
+      showToast('Auto sign-in: checking form…', 'persistent');
+    } else {
+      await sleep(400);
+    }
     await handleSignInPage(settings);
-  } else if (step === 'signin' && !hasCredentials && !attemptGuest) {
+  } else if (step === 'signin' && !hasCredentials && !attemptGuest && !options.silent) {
     showToast('Sign in if you see a prompt — this tab will not auto-refresh. We continue when forms load.', 'persistent');
   }
+}
+
+async function handleCheckoutPendingStep(settings, step) {
+  await runCheckoutPendingActions(settings, step);
   watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });
 }
 
@@ -1397,9 +1406,29 @@ function watchForCheckoutStep(settings, options = {}) {
   }
 
   let handled = false;
+  let pendingRetryCount = 0;
+  let lastPendingRetryMs = 0;
   const runStep = async (step) => {
     if (handled) return;
-    if (step === 'unknown' || step === 'signin') return;
+    if (step === 'unknown' || step === 'signin') {
+      const shouldRetry = typeof TCH_SIGNIN_STEP !== 'undefined'
+        ? TCH_SIGNIN_STEP.shouldRetryCheckoutPending({
+          step,
+          lastAttemptMs: lastPendingRetryMs,
+          nowMs: Date.now(),
+          retryCount: pendingRetryCount,
+          intervalMs: PENDING_RETRY_INTERVAL_MS,
+          maxRetries: PENDING_MAX_RETRIES,
+        })
+        : Date.now() - lastPendingRetryMs >= PENDING_RETRY_INTERVAL_MS
+          && pendingRetryCount < PENDING_MAX_RETRIES;
+      if (shouldRetry) {
+        lastPendingRetryMs = Date.now();
+        pendingRetryCount++;
+        await runCheckoutPendingActions(settings, step, { silent: pendingRetryCount > 1 });
+      }
+      return;
+    }
     try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
     handled = true;
     markCheckoutFlow(`${step}_detected`);

@@ -53,6 +53,8 @@ Cloud VM without this file: rehearsal stays `stuck: missing_credentials` (expect
 - Fixed: drop-window toast never shown on monitored product pages — extracted `maybeShowDropWindowTip()` and call from `handleMonitoredATC` + `handleProductPage` (`content.js:1136-1146`, `2044`).
 - Deferred (needs integration test): one-shot sign-in/guest on `signin`/`unknown` without watcher retry (`content.js:1399`).
 
+**Update 2026-06-25:** Implemented throttled pending retry — `shouldRetryCheckoutPending` in `signinStep.js`, watcher re-runs `runCheckoutPendingActions` every 3s (max 15) while step stays `signin`/`unknown`.
+
 **Req 5 — background monitor + harvest (`background.js`, `dropPollingTiming.js`)**
 - Fixed: batch RedSky 401/403 no longer fans out per-TCIN fallbacks that inflated `redskyErrorStreak` (`background.js:557-560`).
 - Fixed: keep aggressive poll sleep in drop tension even when `hadApiError` (`background.js:877-880`).
@@ -76,4 +78,13 @@ Cloud VM without this file: rehearsal stays `stuck: missing_credentials` (expect
 - **untested-areas:** PASS
 - **checkout-rehearsal:** SKIP (no .env.rehearsal on host)
 - **dropExpectedAt env:** (set TCH_DROP_EXPECTED_AT)
+- **cycle:** ALL GATES GREEN
+
+### Cycle 2026-06-25T23:04:33.549Z
+
+- **verify.sh:** PASS
+- **test:extension:** PASS
+- **untested-areas:** PASS
+- **checkout-rehearsal:** SKIP (no .env.rehearsal on host)
+- **dropExpectedAt env:** 2026-06-26T08:00:07.992Z
 - **cycle:** ALL GATES GREEN

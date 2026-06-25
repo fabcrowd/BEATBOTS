@@ -51,6 +51,19 @@ export CURSOR_API_KEY=...   # or agent login
 
 `@loop` uses the same queue; `@it` is the persona driving each session.
 
+## Watch mode (user online)
+
+When the user wants to **see @it's thought process**, work in **this Cloud Agent chat** — narrate decisions, show test output, commit fixes here.
+
+Background gates only (no 20 min wait):
+
+```bash
+./scripts/drop-prep-tonight.sh --continuous --detach   # 30s between cycles
+./scripts/drop-prep-tonight.sh --fast --detach         # 90s between cycles
+```
+
+Journal: `docs/autopilot/overnight/it-live.md` (automated cycle summaries).
+
 ## Per-requirement loop
 
 1. `python -m orchestrator autopilot next` — pick work

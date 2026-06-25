@@ -15,6 +15,23 @@ MAX_HOURS="${TCH_DROP_MAX_HOURS:-8}"
 TASK_FILE="docs/autopilot/overnight/drop-prep-4am.json"
 LOG_DIR="$ROOT/docs/autopilot/overnight/logs"
 STOP_FILE="$ROOT/docs/autopilot/overnight/stop-signal"
+LIVE_JOURNAL="$ROOT/docs/autopilot/overnight/it-live.md"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --detach) DETACH=true; shift ;;
+    --foreground) DETACH=false; shift ;;
+    --fast) CYCLE_SECS=90; shift ;;
+    --continuous) CYCLE_SECS=30; shift ;;
+    --help|-h)
+      sed -n '2,14p' "$0"
+      echo "  --fast         cycle every 90s (default for watch mode)"
+      echo "  --continuous   cycle every 30s"
+      exit 0
+      ;;
+    *) shift ;;
+  esac
+done
 
 # Default: next 4:00 in TCH_DROP_TZ (override with TCH_DROP_EXPECTED_AT)
 export TCH_DROP_EXPECTED_AT="${TCH_DROP_EXPECTED_AT:-$(node -e "
@@ -38,18 +55,6 @@ for (let i = 0; i < 2880; i++) {
 }
 console.log('2026-06-26T08:00:00.000Z');
 " 2>/dev/null || echo "2026-06-26T08:00:00.000Z")}"
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --detach) DETACH=true; shift ;;
-    --foreground) DETACH=false; shift ;;
-    --help|-h)
-      sed -n '2,12p' "$0"
-      exit 0
-      ;;
-    *) shift ;;
-  esac
-done
 
 run_loop() {
   cd "$ROOT"
@@ -102,8 +107,7 @@ run_loop() {
 if [[ "$DETACH" == true ]]; then
   SESSION="drop-prep-tonight"
   if tmux -f /exec-daemon/tmux.portal.conf has-session -t "$SESSION" 2>/dev/null; then
-    echo "tmux session $SESSION already running"
-    exit 0
+    tmux -f /exec-daemon/tmux.portal.conf kill-session -t "$SESSION"
   fi
   tmux -f /exec-daemon/tmux.portal.conf new-session -d -s "$SESSION" -c "$ROOT" -- "${SHELL:-bash}" -lc "
     export TCH_DROP_EXPECTED_AT='$TCH_DROP_EXPECTED_AT'
