@@ -9,6 +9,7 @@ export const BLOCKED_REASON = {
   NO_DISPLAY: 'no_display',
   REVIEW_TIMEOUT: 'review_timeout',
   SIGNIN_TIMEOUT: 'signin_timeout',
+  MISSING_CREDENTIALS: 'missing_credentials',
   OOS_OR_ATC_FAILED: 'oos_or_atc_failed',
 };
 

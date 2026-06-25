@@ -30,7 +30,7 @@ cd scripts/browser-smoke && npm run checkout-rehearsal
 
 | Code | Meaning |
 |------|---------|
-| `missing_product_url` | `TCH_PRODUCT_URL` not set |
+| `missing_credentials` | `TCH_TARGET_EMAIL` / `TCH_TARGET_PASSWORD` not set |
 | `no_chromium` | Playwright Chromium not installed |
 | `no_display` | Headed Chrome unavailable (cloud VM) |
 | `review_timeout` | Did not see `[TCH] review reached` in time |

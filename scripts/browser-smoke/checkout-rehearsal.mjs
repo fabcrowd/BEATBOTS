@@ -1,25 +1,21 @@
 /**
- * Checkout rehearsal (top → review only): loads unpacked extension in Playwright Chromium,
- * uses a **persistent** profile so your Target login stays. You never put passwords in
- * this script — use Target saved address + card (popup: "Use saved payment & address").
+ * Checkout rehearsal (automated): extension auto sign-in + product → review only.
  *
- * Stops when content logs `[TCH] review reached` (Place Order stays manual per extension).
- *
- * Setup once:
- *   1. Sign in to Target in the opened window if the profile is new.
- *   2. When prompted, confirm popup settings: extension ON, **Use saved payment** ON,
- *      **Auto place order** OFF.
- *
- * Required env:
- *   TCH_PRODUCT_URL — in-stock Target product page, e.g. https://www.target.com/p/…
+ * Required env (automated — no manual wait):
+ *   TCH_TARGET_EMAIL
+ *   TCH_TARGET_PASSWORD
  *
  * Optional:
- *   TCH_PROFILE_DIR — Chrome user-data-dir (default: ~/.tch-rehearsal-chrome)
- *   TCH_REHEARSAL_TIMEOUT_MS — max wait for review (default: 420000 = 7 min)
- *   TCH_MANUAL_WAIT_SECS — skip Enter; wait N seconds after opening account (default: 0 = readline)
+ *   TCH_PRODUCT_URL — default: Scotch shipping tape TCIN 13330690
+ *   TCH_PROFILE_DIR — default ~/.tch-rehearsal-chrome
+ *   TCH_REHEARSAL_TIMEOUT_MS — default 420000
+ *   TCH_SIGNIN_TIMEOUT_MS — default 120000
+ *   TCH_MANUAL_WAIT_SECS — only used when credentials missing (legacy manual mode)
+ *
+ * Load secrets from file (gitignored):
+ *   source scripts/browser-smoke/.env.rehearsal
+ *   or: ./scripts/run-checkout-rehearsal.sh
  */
-import readline from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,75 +24,39 @@ import {
   BLOCKED_REASON,
   exitRehearsal,
   formatRehearsalFail,
-  tailTchLines,
 } from './rehearsal-errors.mjs';
+import {
+  DEFAULT_PRODUCT_URL,
+  applyExtensionSettings,
+  ensureTargetSignedIn,
+  getAuthFromEnv,
+} from './rehearsal-auth.mjs';
 
-const PRODUCT_URL = process.env.TCH_PRODUCT_URL?.trim();
+const PRODUCT_URL = (process.env.TCH_PRODUCT_URL || DEFAULT_PRODUCT_URL).trim();
 const PROFILE_DIR =
   process.env.TCH_PROFILE_DIR?.trim() ||
   path.join(os.homedir(), '.tch-rehearsal-chrome');
 const MAX_MS = Number(process.env.TCH_REHEARSAL_TIMEOUT_MS || '420000');
+const SIGNIN_MS = Number(process.env.TCH_SIGNIN_TIMEOUT_MS || '120000');
 
 let browser;
 let userDataDir;
 let tchLines = [];
 
-async function waitForReady() {
-  const secs = Number(process.env.TCH_MANUAL_WAIT_SECS || '0');
-  if (secs > 0) {
-    console.log(`\nWaiting ${secs}s — sign in / adjust extension popup if needed.\n`);
-    await new Promise((r) => setTimeout(r, secs * 1000));
-    return;
-  }
-  const rl = readline.createInterface({ input, output });
-  try {
-    await rl.question(
-      '\n>>> In the browser: Target signed in; extension ON; Use saved payment ON; Auto place order OFF.\n>>> Press Enter to start the product → checkout → review run...\n'
-    );
-  } finally {
-    rl.close();
-  }
-}
-
-async function applyExtensionSettingsFromPopup(page, extensionId) {
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 120000,
+function attachTchConsole(page) {
+  tchLines = [];
+  return page.createCDPSession().then(async (cdp) => {
+    await cdp.send('Runtime.enable');
+    cdp.on('Runtime.consoleAPICalled', (ev) => {
+      const parts = (ev.args || []).map((a) => {
+        if (a.value !== undefined) return String(a.value);
+        if (a.unserializableValue) return String(a.unserializableValue);
+        return a.description || '';
+      });
+      const text = parts.join(' ');
+      if (text.includes('[TCH]')) tchLines.push(text);
+    });
   });
-  await page.evaluate(
-    () =>
-      new Promise((resolve, reject) => {
-        const next = {
-          enabled: true,
-          useSavedPayment: true,
-          autoPlaceOrder: false,
-          retryPolicy: { maxAttempts: 8, delaySec: 2 },
-          shipping: {},
-          payment: {},
-          harvestConfig: {
-            harvestingEnabled: false,
-            harvestsPerPageLoad: 1,
-            expirationMinutes: 3,
-            removalOrder: 'lifo',
-            dontStopHarvesting: false,
-            applyNextBeforeCheckout: false,
-          },
-        };
-        chrome.storage.local.set(next, () => {
-          const err = chrome.runtime.lastError;
-          if (err) reject(new Error(err.message));
-          else {
-            chrome.storage.local.get(['autoPlaceOrder', 'useSavedPayment', 'enabled'], (data) => {
-              if (data.autoPlaceOrder !== false || data.useSavedPayment !== true || data.enabled !== true) {
-                reject(new Error('popup settings safety check failed'));
-                return;
-              }
-              chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED', enabled: true }, () => resolve());
-            });
-          }
-        });
-      })
-  );
 }
 
 function classifyRehearsalFailure(lines) {
@@ -111,12 +71,18 @@ function classifyRehearsalFailure(lines) {
 }
 
 async function main() {
-  if (!PRODUCT_URL || !/^https:\/\/(www\.)?target\.com\//i.test(PRODUCT_URL)) {
+  const auth = getAuthFromEnv();
+  if (!auth.automated || !auth.email || !auth.password) {
     exitRehearsal(
-      BLOCKED_REASON.MISSING_PRODUCT_URL,
-      'Set TCH_PRODUCT_URL to a full Target product URL, e.g.\n' +
-        '  TCH_PRODUCT_URL="https://www.target.com/p/some-item/-/A-12345678"'
+      BLOCKED_REASON.MISSING_CREDENTIALS,
+      'Automated rehearsal requires TCH_TARGET_EMAIL and TCH_TARGET_PASSWORD.\n' +
+        '  Create scripts/browser-smoke/.env.rehearsal (see .env.rehearsal.example)\n' +
+        '  Or: ./scripts/run-checkout-rehearsal.sh'
     );
+  }
+
+  if (!PRODUCT_URL || !/^https:\/\/(www\.)?target\.com\//i.test(PRODUCT_URL)) {
+    exitRehearsal(BLOCKED_REASON.MISSING_PRODUCT_URL, 'Invalid TCH_PRODUCT_URL');
   }
 
   fs.mkdirSync(PROFILE_DIR, { recursive: true });
@@ -148,35 +114,25 @@ async function main() {
   console.log('\nPersistent profile:', PROFILE_DIR);
   console.log('Extension ID:', extensionId);
   console.log('Product URL:', PRODUCT_URL);
-
-  const warm = await browser.newPage();
-  await warm.goto('https://www.target.com/account', {
-    waitUntil: 'domcontentloaded',
-    timeout: TIMEOUT,
-  });
-  await warm.close();
-
-  await waitForReady();
+  console.log('Auto sign-in:', auth.email.replace(/(.).+(@.*)/, '$1***$2'));
 
   const popup = await browser.newPage();
-  await applyExtensionSettingsFromPopup(popup, extensionId);
+  await applyExtensionSettings(popup, extensionId, auth);
   await popup.close();
 
-  const shop = await browser.newPage();
-  tchLines = [];
-  const cdp = await shop.createCDPSession();
-  await cdp.send('Runtime.enable');
-  cdp.on('Runtime.consoleAPICalled', (ev) => {
-    const parts = (ev.args || []).map((a) => {
-      if (a.value !== undefined) return String(a.value);
-      if (a.unserializableValue) return String(a.unserializableValue);
-      return a.description || '';
-    });
-    const text = parts.join(' ');
-    if (text.includes('[TCH]')) tchLines.push(text);
-  });
+  const signInPage = await browser.newPage();
+  await attachTchConsole(signInPage);
+  try {
+    await ensureTargetSignedIn(signInPage, SIGNIN_MS, tchLines);
+  } catch (e) {
+    exitRehearsal(BLOCKED_REASON.SIGNIN_TIMEOUT, String(e.message || e), tchLines);
+  }
+  await signInPage.close();
 
-  console.log('\nNavigating to product (extension will drive toward review)...\n');
+  const shop = await browser.newPage();
+  await attachTchConsole(shop);
+
+  console.log('\nNavigating to product (extension drives toward review)...\n');
   await shop.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
 
   const deadline = Date.now() + MAX_MS;
@@ -186,21 +142,17 @@ async function main() {
   }
 
   if (!tchLines.some((l) => l.includes('[TCH] review reached'))) {
-    const code = classifyRehearsalFailure(tchLines);
     exitRehearsal(
-      code,
+      classifyRehearsalFailure(tchLines),
       `Timed out waiting for [TCH] review reached (${MAX_MS}ms).`,
       tchLines
     );
   }
 
-  const url = shop.url();
   console.log('\nCHECKOUT REHEARSAL PASS — reached review (no Place Order).');
-  console.log('Final URL:', url);
-  if (tchLines.some((l) => l.includes('checkout_total_to_review'))) {
-    const timing = tchLines.filter((l) => l.includes('checkout_total_to_review')).pop();
-    console.log('Timing:', timing);
-  }
+  console.log('Final URL:', shop.url());
+  const timing = tchLines.filter((l) => l.includes('checkout_total_to_review')).pop();
+  if (timing) console.log('Timing:', timing);
 }
 
 main()
