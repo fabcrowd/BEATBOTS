@@ -55,5 +55,12 @@
     "enabled": true,
     "directory": "docs/autopilot/analytics",
     "thrashingThreshold": 3
+  },
+  "runtime": {
+    "provider": "cursor",
+    "cli": "agent",
+    "cliFlags": ["-p", "--force"],
+    "commandsDir": ".cursor/commands",
+    "runner": "scripts/autopilot-cursor/run.sh"
   }
 }

@@ -429,11 +429,15 @@ function hasCheckoutAuthGate() {
 }
 
 function tryGuestCheckoutClick() {
-  const needles = ['continue as guest', 'checkout as guest', 'guest checkout', 'continue as a guest'];
+  const needles = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.GUEST_BUTTON_NEEDLES)
+    ? TCH_SIGNIN_STEP.GUEST_BUTTON_NEEDLES
+    : ['continue as guest', 'checkout as guest', 'guest checkout', 'continue as a guest'];
   const candidates = Array.from(document.querySelectorAll('button, a[href], [role="button"]'));
   for (const needle of needles) {
     const el = candidates.find((b) => {
-      const raw = b.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+      const raw = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.normalizeButtonText)
+        ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
+        : b.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
       return raw.includes(needle) && !b.disabled;
     });
     if (el) {
@@ -1092,7 +1096,7 @@ function getPageType() {
   if (/^\/cart/.test(path))                           return 'cart';
   if (/^\/checkout/.test(path))                       return 'checkout';
   if (/^\/co-thankyou/.test(path))                    return 'confirmation';
-  if (/^\/(?:account\/)?(?:login|signin)/i.test(path)) return 'signin';
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.classifyPathAsSignin(path)) return 'signin';
   return 'other';
 }
 
@@ -1322,17 +1326,31 @@ async function handleCheckoutPage(settings) {
 }
 
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
+const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
+
 async function handleCheckoutPendingStep(settings, step) {
   console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
-  if (tryGuestCheckoutClick()) {
+  const hasCredentials = !!(settings.autoSignIn && settings.targetEmail && settings.targetPassword);
+  let alreadyTried = false;
+  try {
+    alreadyTried = sessionStorage.getItem(GUEST_CHECKOUT_ATTEMPT_KEY) === '1';
+  } catch {}
+  const attemptGuest = typeof TCH_SIGNIN_STEP !== 'undefined'
+    ? TCH_SIGNIN_STEP.shouldAttemptGuest({ autoSignIn: !!settings.autoSignIn, hasCredentials, alreadyTried })
+    : !hasCredentials && !alreadyTried;
+  if (attemptGuest && tryGuestCheckoutClick()) {
+    try { sessionStorage.setItem(GUEST_CHECKOUT_ATTEMPT_KEY, '1'); } catch {}
     showToast('Guest checkout…');
     await sleep(600);
+  } else if (step === 'signin' && !hasCredentials) {
+    showToast('Sign in or choose guest checkout — this tab will not auto-refresh.', 'persistent');
   }
   if (step === 'signin' && settings.autoSignIn && settings.targetEmail && settings.targetPassword) {
     // Auto sign-in: give the checkout auth gate time to render its form then fill it.
     await sleep(800);
+    showToast('Auto sign-in: checking form…', 'persistent');
     await handleSignInPage(settings);
-  } else {
+  } else if (step === 'signin' && !hasCredentials && !attemptGuest) {
     showToast('Sign in if you see a prompt — this tab will not auto-refresh. We continue when forms load.', 'persistent');
   }
   watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });

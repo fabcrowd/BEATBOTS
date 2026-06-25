@@ -1,38 +1,46 @@
-# Autopilot: user-login feature
+# Autopilot (Cursor)
 
-Setup for [Gens-ai/autopilot](https://github.com/Gens-ai/autopilot) on this repo.
+This project uses **[Gens-ai/autopilot](https://github.com/Gens-ai/autopilot)** with the **Cursor Agent** runtime — not Claude Code.
 
-## Installed (one-time)
+## Install
 
 ```bash
-git clone https://github.com/Gens-ai/autopilot.git /tmp/autopilot-repo
-/tmp/autopilot-repo/install.sh
+./scripts/install-autopilot-cursor.sh
 export PATH="$HOME/.local/bin:$PATH"
-npm install -g @anthropic-ai/claude-code --prefix ~/.local   # if needed
+curl -fsS https://cursor.com/install | bash   # if agent CLI missing
+export CURSOR_API_KEY=...                      # or: agent login
 ```
 
-## Project config
+## Workflow
 
-- `autopilot.json` — feedback loops: `node scripts/checkout-speed-test.mjs`, `bash scripts/autopilot-syntax-check.sh`
-- PRD: `user-login.md`
-- Tasks: `user-login.json` (4 requirements, TDD)
+| Step | Cursor |
+|------|--------|
+| Init | `@autopilot-init` or edit `autopilot.json` |
+| PRD | `@prd add feature description` |
+| Tasks | `@tasks docs/autopilot/feature/feature.md` |
+| Run loop | `autopilot-cursor docs/autopilot/feature/feature.json` |
+| In-chat TDD | `@autopilot docs/autopilot/feature/feature.json` |
 
-## Run (local machine with Claude Code login)
+## Files
+
+- `.cursor/commands/` — `@autopilot`, `@prd`, `@tasks` prompts (from Gens-ai/autopilot)
+- `scripts/autopilot-cursor/run.sh` — fresh `agent -p --force` session per requirement
+- `autopilot.json` — feedback loops + `"runtime": { "provider": "cursor" }`
+
+## user-login feature
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-claude login                                    # one-time
-claude --dangerously-skip-permissions
-/sandbox                                        # optional, inside Claude Code
-autopilot docs/autopilot/user-login/user-login.json
+autopilot-cursor docs/autopilot/user-login/user-login.json
+autopilot-cursor docs/autopilot/user-login/user-login.json --dry-run
 ```
 
-Dry-run (no Claude sessions):
+Feedback loops:
 
 ```bash
-autopilot docs/autopilot/user-login/user-login.json --dry-run
+node scripts/checkout-speed-test.mjs
+bash scripts/autopilot-syntax-check.sh
 ```
 
-## Cloud agent note
+## Claude Code (not used here)
 
-This environment has Autopilot and Claude Code CLI installed, but `claude login` is not configured, so the wrapper cannot invoke `/autopilot` sessions until credentials are added on a trusted machine.
+The upstream `autopilot` command targets Claude Code (`claude` CLI + `~/.claude/hooks`). This repo uses `autopilot-cursor` instead.

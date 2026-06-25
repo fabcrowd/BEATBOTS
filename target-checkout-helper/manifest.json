@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.target.com/*"],
-      "js": ["dropPollingTiming.js", "core/hosts.js", "core/jigAddress.js", "content.js"],
+      "js": ["dropPollingTiming.js", "core/hosts.js", "core/jigAddress.js", "core/signinStep.js", "content.js"],
       "run_at": "document_end"
     },
     {

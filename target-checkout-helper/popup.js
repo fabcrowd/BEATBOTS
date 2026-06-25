@@ -65,17 +65,24 @@ function updateHarvestOrderLabels() {
 }
 
 const ACCT_LABELS = {
-  login:   { ok: 'Yes',  fail: 'Not logged in', unknown: 'Open a Target tab' },
+  login:   { ok: 'Yes',  fail: 'Not logged in', unknown: 'Open a Target tab', checking: 'Checking…' },
   address: { ok: 'Saved', fail: 'None',          unknown: '—' },
   payment: { ok: 'Saved', fail: 'None',          unknown: '—' },
 };
+
+function acctLabelFor(state, labelKey) {
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && labelKey === 'login') {
+    return TCH_SIGNIN_STEP.formatLoginStatusLabel(state, labelKey);
+  }
+  return ACCT_LABELS[labelKey]?.[state] ?? (state === 'checking' ? 'Checking…' : '—');
+}
 
 function setAcctItem(dotId, valId, state, labelKey) {
   const dot = $(dotId);
   const val = $(valId);
   if (dot) dot.className = `acct-dot acct-dot-${state}`;
   if (val) {
-    val.textContent = ACCT_LABELS[labelKey]?.[state] ?? (state === 'checking' ? '…' : '—');
+    val.textContent = acctLabelFor(state, labelKey);
     val.className = `acct-item-val acct-val-${state}`;
   }
 }

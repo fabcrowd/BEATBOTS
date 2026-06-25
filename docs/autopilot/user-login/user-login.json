@@ -64,29 +64,31 @@
         "test": {
           "description": "Create scripts/signin-step-test.mjs loading signinStep.js via vm and asserting path classification and guest text matching",
           "file": "scripts/signin-step-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Create core/signinStep.js, register in manifest before content.js, refactor content.js to use it",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Remove duplicated guest needle strings from content.js",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "node scripts/signin-step-test.mjs passes",
         "node --check target-checkout-helper/core/signinStep.js passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2",
       "category": "functional",
       "priority": "high",
       "description": "Attempt guest checkout once when sign-in gate shows and auto sign-in is unavailable",
-      "dependsOn": ["1"],
+      "dependsOn": [
+        "1"
+      ],
       "testType": "unit",
       "codeAnalysis": {
         "approach": "extend",
@@ -119,29 +121,31 @@
         "test": {
           "description": "Add shouldAttemptGuest and pickGuestButton tests to signin-step-test.mjs",
           "file": "scripts/signin-step-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Add tryGuestCheckoutOnce in content.js sign-in branch using core helpers",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Consolidate sign-in branch timing with existing checkout step watch",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "node scripts/signin-step-test.mjs passes",
         "No performRetryNavigation reload on /checkout"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3",
       "category": "ui",
       "priority": "medium",
       "description": "Improve popup login status labels and sign-in waiting toasts",
-      "dependsOn": ["2"],
+      "dependsOn": [
+        "2"
+      ],
       "testType": "unit",
       "codeAnalysis": {
         "approach": "extend",
@@ -172,29 +176,31 @@
         "test": {
           "description": "Add formatLoginStatusLabel helper test in signin-step-test.mjs or small popup helper test",
           "file": "scripts/signin-step-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Update popup.js status strings and content.js toast messages per acceptance",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Share status label strings between popup and tests",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "node --check popup.js and content.js pass",
         "node scripts/signin-step-test.mjs passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4",
       "category": "testing",
       "priority": "medium",
       "description": "Wire signin-step-test into checkout-speed-test runner",
-      "dependsOn": ["3"],
+      "dependsOn": [
+        "3"
+      ],
       "testType": "unit",
       "codeAnalysis": {
         "approach": "extend",
@@ -223,22 +229,22 @@
         "test": {
           "description": "Add failing integration hook in checkout-speed-test that expects signin-step-test to run",
           "file": "scripts/checkout-speed-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Import/spawn signin-step-test from checkout-speed-test.mjs",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Print combined summary line for all Node extension tests",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "node scripts/checkout-speed-test.mjs exits 0",
         "bash scripts/autopilot-syntax-check.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }
