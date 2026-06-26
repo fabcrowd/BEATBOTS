@@ -6,7 +6,7 @@
 //   3. Token is a JWT, store in Account record, re-use for all API calls
 //   4. On 401 from any cart/checkout endpoint: re-login
 
-import { getById, getWhere, upsert } from '../storage/db'
+import { getById, getWhere, getAll, upsert } from '../storage/db'
 import { Account, ImapProfile } from '../../shared/types'
 import { EventEmitter } from 'events'
 import { adjustedNow } from '../utils/drop-timing'
@@ -426,6 +426,29 @@ function imapEscape(s: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
+}
+
+/** Poll configured IMAP profiles for a Target OTP (extension WS bridge). */
+export async function readOtpFromConfiguredImap(
+  opts: { targetEmail?: string; timeoutMs?: number } = {}
+): Promise<string | null> {
+  const profiles = getAll<ImapProfile>('imap_profiles')
+  if (!profiles.length) return null
+
+  const profile = profiles[0]
+  const deadline = Date.now() + (opts.timeoutMs ?? 90_000)
+  const targetEmail = opts.targetEmail || profile.user
+
+  while (Date.now() < deadline) {
+    try {
+      const otp = await pollImapForOtp(profile, targetEmail)
+      if (otp) return otp
+    } catch (e) {
+      console.warn('[SessionManager] IMAP OTP poll error:', e)
+    }
+    await sleep(3000)
+  }
+  return null
 }
 
 // Singleton

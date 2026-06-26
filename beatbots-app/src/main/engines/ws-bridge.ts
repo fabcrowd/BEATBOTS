@@ -1,8 +1,9 @@
 import { WebSocketServer, WebSocket } from 'ws'
-import { addCookie } from '../models/cookie-pool'
+import { addCookie, consumeCookie, getPoolStatus, onPoolChange } from '../models/cookie-pool'
 import { CookieKind } from '../../shared/types'
 import { BrowserWindow } from 'electron'
 import { IPC } from '../../shared/types'
+import { readOtpFromConfiguredImap } from './session-manager'
 
 // ─── WebSocket bridge between the Chrome extension and Electron ───────────────
 // Extension connects, sends harvested cookies with a simple JSON protocol.
@@ -12,6 +13,7 @@ export class WsBridge {
   private clients = new Set<WebSocket>()
   private port: number
   private mainWindow: BrowserWindow | null = null
+  private poolListenerRegistered = false
 
   constructor(port = 9235) {
     this.port = port
@@ -24,6 +26,11 @@ export class WsBridge {
   start(): void {
     if (this.wss) return
 
+    if (!this.poolListenerRegistered) {
+      onPoolChange(() => this.broadcastPoolStatus())
+      this.poolListenerRegistered = true
+    }
+
     this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port })
 
     this.wss.on('connection', (ws: WebSocket) => {
@@ -31,7 +38,7 @@ export class WsBridge {
       this.clients.add(ws)
 
       ws.on('message', (raw) => {
-        this.handleMessage(raw.toString())
+        this.handleMessage(ws, raw.toString())
       })
 
       ws.on('close', () => {
@@ -44,8 +51,13 @@ export class WsBridge {
         this.clients.delete(ws)
       })
 
-      // Send initial handshake
-      ws.send(JSON.stringify({ type: 'hello', source: 'beatbots', version: '1.0.0' }))
+      ws.send(JSON.stringify({
+        type: 'hello',
+        source: 'beatbots',
+        version: '1.0.0',
+        port: this.port,
+      }))
+      this.sendPoolStatus(ws)
     })
 
     this.wss.on('error', (err: any) => {
@@ -78,7 +90,7 @@ export class WsBridge {
     return this.clients.size
   }
 
-  private handleMessage(raw: string): void {
+  private handleMessage(ws: WebSocket, raw: string): void {
     let msg: any
     try {
       msg = JSON.parse(raw)
@@ -89,8 +101,6 @@ export class WsBridge {
 
     switch (msg.type) {
       case 'cookie_harvest': {
-        // Extension sends:
-        // { type: 'cookie_harvest', kind: 'atc'|'login', cookies: {...}, shapeHeaders: {...}, proxy?: string }
         const kind: CookieKind = msg.kind === 'login' ? 'login' : 'atc'
         if (msg.cookies && typeof msg.cookies === 'object') {
           addCookie(kind, msg.cookies, msg.shapeHeaders ?? {}, {
@@ -103,8 +113,32 @@ export class WsBridge {
         break
       }
 
+      case 'pool_status_request': {
+        this.sendPoolStatus(ws, msg.requestId)
+        break
+      }
+
+      case 'consume_atc_request': {
+        const cookie = consumeCookie('atc')
+        ws.send(JSON.stringify({
+          type: 'consume_atc',
+          requestId: msg.requestId ?? null,
+          ok: !!cookie,
+          cookies: cookie?.cookies ?? {},
+          shapeHeaders: cookie?.shapeHeaders ?? {},
+        }))
+        break
+      }
+
+      case 'otp_watch_request': {
+        const requestId = msg.requestId ?? null
+        const targetEmail = typeof msg.targetEmail === 'string' ? msg.targetEmail : undefined
+        void this.handleOtpWatch(ws, requestId, targetEmail)
+        break
+      }
+
       case 'ping': {
-        this.broadcast({ type: 'pong' })
+        ws.send(JSON.stringify({ type: 'pong', requestId: msg.requestId ?? null }))
         break
       }
 
@@ -122,9 +156,42 @@ export class WsBridge {
     }
   }
 
+  private sendPoolStatus(ws: WebSocket, requestId?: string): void {
+    if (ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({
+      type: 'pool_status',
+      requestId: requestId ?? null,
+      ...getPoolStatus(),
+    }))
+  }
+
+  broadcastPoolStatus(): void {
+    const status = getPoolStatus()
+    this.broadcast({ type: 'pool_status', requestId: null, ...status })
+  }
+
   private pushPoolUpdate(): void {
+    this.broadcastPoolStatus()
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(IPC.PUSH_POOL_UPDATE)
+    }
+  }
+
+  private async handleOtpWatch(ws: WebSocket, requestId: string | null, targetEmail?: string): Promise<void> {
+    const send = (payload: object) => {
+      if (ws.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ requestId, ...payload }))
+    }
+    try {
+      const code = await readOtpFromConfiguredImap({ targetEmail, timeoutMs: 90_000 })
+      if (code) {
+        console.log('[WSBridge] OTP found via IMAP for extension')
+        send({ type: 'otp_found', ok: true, code })
+      } else {
+        send({ type: 'otp_found', ok: false, reason: 'timeout' })
+      }
+    } catch (e: any) {
+      send({ type: 'otp_found', ok: false, reason: e?.message || 'error' })
     }
   }
 }
