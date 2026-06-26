@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Target Checkout Helper",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Automates Target.com and Walmart.com checkout steps — Add to Cart through Order Review. You place the final order.",
   "permissions": ["storage", "tabs", "alarms", "debugger", "declarativeNetRequest", "nativeMessaging"],
   "declarative_net_request": {
