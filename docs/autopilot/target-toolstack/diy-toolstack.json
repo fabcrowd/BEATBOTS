@@ -1,0 +1,112 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "diy-toolstack",
+  "description": "Build free Target toolstack by wiring beatbots-app + extension (no AYCD)",
+  "goals": [
+    "Wire Shape pool extension ↔ beatbots-app",
+    "Unified OTP via app IMAP",
+    "Profile sync; document Chrome-profile multi-account"
+  ],
+  "nonGoals": [
+    "AYCD subscription or AutoSolve clone",
+    "Traffic/SEO farming",
+    "Paid captcha APIs",
+    "Full TabSentry UI clone"
+  ],
+  "technicalNotes": "Concept: docs/autopilot/target-toolstack/TARGET-DIY-TOOLSTACK.md. Scope beatbots-app/ + target-checkout-helper/ + scripts/.",
+  "_tdd": true,
+  "requirements": [
+    {
+      "id": "1",
+      "category": "testing",
+      "priority": "high",
+      "description": "Baseline verify.sh green",
+      "verification": ["bash scripts/verify.sh"],
+      "acceptance": ["verify.sh ALL PASSED"],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "docs",
+      "priority": "high",
+      "description": "DIY toolstack concept doc complete",
+      "dependsOn": ["1"],
+      "acceptance": ["TARGET-DIY-TOOLSTACK.md maps AYCD → build phases"],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "high",
+      "description": "Phase 1: WS Shape pool depth visible in extension popup",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "App WS sends pool count on change",
+        "Popup shows beatbots pool status when connected",
+        "diy-toolstack-notes.md updated"
+      ],
+      "passes": true
+    },
+    {
+      "id": "4",
+      "category": "functional",
+      "priority": "high",
+      "description": "Phase 1: Extension can request app Shape cookie before monitor ATC",
+      "dependsOn": ["3"],
+      "acceptance": [
+        "HARVEST_APPLY or new message pulls from app pool when WS connected",
+        "Hype mode uses app cookie when available",
+        "beatbots-app unit test or manual test steps in notes"
+      ],
+      "passes": true
+    },
+    {
+      "id": "5",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Phase 2: OTP via app IMAP when WS connected",
+      "dependsOn": ["3"],
+      "acceptance": [
+        "START_OTP_WATCH can delegate to app session-manager",
+        "Gmail OAuth fallback when app offline",
+        "Document setup in diy-toolstack-notes.md"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Phase 3: Profile sync app → extension storage",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "IPC export profile JSON",
+        "Extension SETTINGS_UPDATED or import handler",
+        "jigIndex preserved"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7",
+      "category": "docs",
+      "priority": "medium",
+      "description": "Chrome multi-profile runbook (free TabSentry)",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "CHROME-PROFILES-RUNBOOK.md",
+        "2-account example without cookie bleed"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8",
+      "category": "testing",
+      "priority": "high",
+      "description": "Verify + summary",
+      "dependsOn": ["4", "5", "6", "7"],
+      "verification": ["bash scripts/verify.sh"],
+      "acceptance": ["Notes summary; extension smoke if UI touched"],
+      "passes": false
+    }
+  ]
+}
