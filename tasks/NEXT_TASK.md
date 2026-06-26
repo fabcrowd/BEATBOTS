@@ -1,39 +1,30 @@
 # Next task
 
-**Boss agent:** `@it` (senior developer — read `.cursor/skills/senior-singulr-dev/SKILL.md`)
+**Boss agent:** `@it` — **SHIP READY for 10pm** (see `docs/autopilot/overnight/SHIP-10PM.md`)
 
-## Active task — tonight's ~4am drop
+## Ship
 
-`docs/autopilot/overnight/drop-prep-4am.json`
+Merge PR [#17](https://github.com/fabcrowd/BEATBOTS/pull/17) → reload extension in Chrome.
+
+```bash
+bash scripts/verify.sh   # must PASS before you rely on build
+```
+
+## Active task (complete except req 6 stuck)
+
+`docs/autopilot/overnight/drop-prep-4am.json` — 6/7 pass, req 6 stuck (cloud checkout modal)
 
 ```bash
 python -m orchestrator autopilot use docs/autopilot/overnight/drop-prep-4am.json
 python -m orchestrator autopilot status
 ```
 
-## Overnight debug (no PC babysitting)
+## Overnight gates (optional)
 
 ```bash
-./scripts/drop-prep-tonight.sh --detach
-tmux attach -t drop-prep-tonight   # optional watch
+./scripts/drop-prep-tonight.sh --continuous --detach
 ```
 
-Single cycle:
+## Before ~4am drop
 
-```bash
-node scripts/drop-prep-cycle.mjs
-```
-
-## Live rehearsal (optional — needs credentials on host)
-
-```bash
-cp scripts/browser-smoke/.env.rehearsal.example scripts/browser-smoke/.env.rehearsal
-# fill TCH_TARGET_EMAIL + TCH_TARGET_PASSWORD
-```
-
-## Quality gate
-
-```bash
-bash scripts/verify.sh
-cd scripts/browser-smoke && xvfb-run -a npm run test:extension
-```
+One Target tab, clear cart, extension ON, manual sign-in at checkout if prompted, auto place order OFF.
