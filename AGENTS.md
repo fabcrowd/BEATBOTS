@@ -66,6 +66,25 @@ To test the popup UI: click the puzzle-piece icon in the Chrome toolbar, then cl
 
 Run `node scripts/checkout-speed-test.mjs` for drop-polling logic checks.
 
+### BEATBOTS desktop app (`beatbots-app/`)
+
+The repo also ships a second product: the **BEATBOTS** Electron desktop app (Vite + React + TypeScript) under `beatbots-app/`. It has its own `package.json` and **does** require `npm install` (handled by the update script). Standard commands (see `beatbots-app/package.json`):
+- `npm run dev` — single Electron window via `vite-plugin-electron` (renderer hot reload). Prefer this for a clean dev run.
+- `npm run build` — Vite build of renderer + main + preload into `dist/` and `dist-electron/`.
+- `npm run electron:dev` — documented dev command, but it **launches two Electron instances** (one from `vite-plugin-electron`, one from `electronmon`), so you'll see two windows and a `WSBridge` port retry `9235 → 9236`. Use `npm run dev` if you want a single instance.
+- `npm run lint` — **currently broken**: the script targets ESLint 9 but there is no `eslint.config.js` in the repo, so it errors with "couldn't find an eslint.config file". Not an environment issue.
+
+Running the GUI requires an X display (`DISPLAY=:1` is available on the cloud VM). The repeating `bus.cc … Failed to connect to the bus` and `Exiting GPU process` log lines are harmless container noise — the window still renders and is usable (sandbox is already disabled via `webPreferences.sandbox: false`). App data (JSON store) lives at `~/.config/beatbots/beatbots-data`.
+
+### Browser-smoke e2e tests (`scripts/browser-smoke/`)
+
+Puppeteer + Playwright-bundled Chromium drive the **unpacked extension** headed. `npm install` here plus `npm run install-chromium` (both handled by the update script) are required. Commands run from `scripts/browser-smoke/`:
+- `npm run functional` — background messaging + popup toggle/save + Target content script (passes).
+- `npm run smoke` — loads real `target.com` and asserts `[TCH] init` (needs network; passes).
+- `npm run e2e` — **has a stale assertion**: it expects the popup `#appTitle` to be `Target Checkout Helper`, but the current `popup.html` title is `Checkout Helper`, so it fails on that string only. The extension itself loads fine; this is a test/code drift, not an environment problem.
+
+These need an X display (`DISPLAY=:1`); extensions cannot run in headless Chrome.
+
 ### Key caveats
 
 - There is no build step, no `package.json`, and no dependency installation needed.
