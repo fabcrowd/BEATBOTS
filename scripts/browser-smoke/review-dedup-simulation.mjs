@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Mirrors post-fix handleReviewStep: dedup commits only after successful completion;
- * failed Place Order probe does not arm dedup; in-flight blocks concurrent same-URL.
+ * Mirrors post-fix handleReviewStep (TGT-3 dedup + TGT-4 autoPlaceOrder gate) and
+ * wmHandleReview (Walmart manual stop). Offline simulation — no browser required.
  *
  * Run: node scripts/browser-smoke/review-dedup-simulation.mjs
  */
@@ -65,10 +65,71 @@ async function main() {
   reviewStepInFlight = false;
   reviewStepInFlightKey = '';
 
-  console.log('review-dedup-simulation PASS: matches content.js post-fix semantics');
+  console.log('review-dedup-simulation PASS (TGT-3): dedup matches content.js post-fix semantics');
 }
 
-main().catch((e) => {
+/** Mirrors content.js handleReviewStep autoPlaceOrder gate (lines ~1631–1649). */
+function targetReviewAutoPlaceGate(settings, placeOrderBtn) {
+  const clicks = [];
+  if (settings.autoPlaceOrder) {
+    const btn = placeOrderBtn;
+    if (btn && !btn.disabled) {
+      clicks.push('place_order');
+      return { path: 'auto_click', clicks };
+    }
+    return { path: 'auto_blocked', clicks };
+  }
+  return { path: 'manual_stop', clicks, toast: 'Reached review — Place Order remains manual.' };
+}
+
+/** Mirrors walmart-content.js wmHandleReview (lines ~860–872). */
+function walmartReviewAutoPlaceGate(settings, placeOrderBtn, visible) {
+  if (!settings.autoPlaceOrder) {
+    return { path: 'manual_stop', clicks: [], toast: 'Reached review — Place Order remains manual' };
+  }
+  if (placeOrderBtn && visible) {
+    return { path: 'auto_click', clicks: ['place_order'] };
+  }
+  return { path: 'auto_not_found', clicks: [] };
+}
+
+function runTgt4Tests() {
+  const defaultSettings = { autoPlaceOrder: false };
+  const enabledBtn = { disabled: false };
+
+  const manual = targetReviewAutoPlaceGate(defaultSettings, enabledBtn);
+  assert.equal(manual.path, 'manual_stop', 'TGT-4: default settings stop at review');
+  assert.equal(manual.clicks.length, 0, 'TGT-4: default must not click Place Order');
+  assert.ok(manual.toast?.includes('manual'), 'TGT-4: manual toast on default');
+
+  const autoOn = targetReviewAutoPlaceGate({ autoPlaceOrder: true }, enabledBtn);
+  assert.equal(autoOn.path, 'auto_click', 'TGT-4: autoPlaceOrder ON clicks when button enabled');
+  assert.deepEqual(autoOn.clicks, ['place_order']);
+
+  const autoBlocked = targetReviewAutoPlaceGate({ autoPlaceOrder: true }, { disabled: true });
+  assert.equal(autoBlocked.path, 'auto_blocked', 'TGT-4: disabled button blocks auto click');
+  assert.equal(autoBlocked.clicks.length, 0);
+
+  const wmManual = walmartReviewAutoPlaceGate(defaultSettings, enabledBtn, true);
+  assert.equal(wmManual.path, 'manual_stop', 'TGT-4: Walmart default stops at review');
+  assert.equal(wmManual.clicks.length, 0);
+
+  const wmAuto = walmartReviewAutoPlaceGate({ autoPlaceOrder: true }, enabledBtn, true);
+  assert.equal(wmAuto.path, 'auto_click', 'TGT-4: Walmart autoPlaceOrder ON clicks');
+  assert.deepEqual(wmAuto.clicks, ['place_order']);
+
+  const wmHidden = walmartReviewAutoPlaceGate({ autoPlaceOrder: true }, enabledBtn, false);
+  assert.equal(wmHidden.path, 'auto_not_found', 'TGT-4: Walmart hidden button does not click');
+
+  console.log('review-dedup-simulation PASS (TGT-4): autoPlaceOrder gate matches Target + Walmart');
+}
+
+async function mainAll() {
+  await main();
+  runTgt4Tests();
+}
+
+mainAll().catch((e) => {
   console.error('review-dedup-simulation FAIL:', e);
   process.exit(1);
 });

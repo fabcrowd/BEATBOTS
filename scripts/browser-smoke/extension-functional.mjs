@@ -9,6 +9,32 @@ import { launchWithExtension, rmProfileDir } from './launch-util.mjs';
 let browser;
 let userDataDir;
 
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/** Mirrors background.js poll loop skip checks (inQueueUrls / navigationLock). */
+function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return true;
+  if (navigationLock.has(normUrl)) return true;
+  return false;
+}
+
+async function waitForMonitorLocks(popup, check, label, timeoutMs = 35000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    if (check(status)) return status;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error(`MON-3: timeout waiting for ${label}`);
+}
+
 async function sendBg(page, msg) {
   return page.evaluate(
     (m) =>
@@ -92,6 +118,145 @@ async function main() {
   await sendBg(popup, { type: 'STOP_MONITOR' });
   const afterMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.equal(afterMon.active, false, 'STOP_MONITOR should clear active');
+
+  // ─── MON-2: shared monitorActive + retailer-filtered START_MONITOR ───────
+  const MON2_TARGET = 'https://www.target.com/p/overnight-mon2-target';
+  const MON2_WALMART = 'https://www.walmart.com/ip/overnight-mon2-walmart/999';
+
+  await popup.evaluate((url) => {
+    const input = document.getElementById('productUrl');
+    if (!input) throw new Error('no productUrl');
+    input.value = url;
+    document.getElementById('addProductBtn')?.click();
+  }, MON2_TARGET);
+
+  await popup.evaluate(() => {
+    document.getElementById('tabWalmart')?.click();
+  });
+  await popup.waitForSelector('#wmAddProductBtn', { timeout: 5000 });
+  await popup.evaluate((url) => {
+    const input = document.getElementById('wmProductUrl');
+    if (!input) throw new Error('no wmProductUrl');
+    input.value = url;
+    document.getElementById('wmAddProductBtn')?.click();
+  }, MON2_WALMART);
+
+  await popup.evaluate(() => {
+    document.getElementById('wmMonitorBtn')?.click();
+  });
+  await popup.waitForFunction(
+    () => document.getElementById('wmMonitorBtn')?.textContent?.match(/stop/i),
+    { timeout: 8000 }
+  );
+
+  const wmMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(wmMon.active, true, 'MON-2: walmart start sets monitor active');
+  assert.ok(
+    wmMon.products?.length && wmMon.products.every((p) => /walmart\.com/i.test(p.url)),
+    'MON-2: walmart start sends only walmart.com products'
+  );
+  assert.ok(
+    !wmMon.products.some((p) => /target\.com/i.test(p.url)),
+    'MON-2: target URL excluded when starting from Walmart tab'
+  );
+
+  const sharedStopUi = await popup.evaluate(() => ({
+    target: document.getElementById('monitorBtn')?.textContent || '',
+    walmart: document.getElementById('wmMonitorBtn')?.textContent || '',
+  }));
+  assert.match(sharedStopUi.target, /stop/i, 'MON-2: Target button shows Stop while monitor active');
+  assert.match(sharedStopUi.walmart, /stop/i, 'MON-2: Walmart button shows Stop while monitor active');
+
+  await popup.evaluate(() => {
+    document.getElementById('tabMain')?.click();
+    document.getElementById('monitorBtn')?.click();
+  });
+  await popup.waitForFunction(
+    () => !document.getElementById('monitorBtn')?.textContent?.match(/stop/i),
+    { timeout: 8000 }
+  );
+  const stopped = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(stopped.active, false, 'MON-2: stop from Target tab clears shared monitor');
+
+  await popup.evaluate(() => {
+    document.getElementById('monitorBtn')?.click();
+  });
+  await popup.waitForFunction(
+    () => document.getElementById('monitorBtn')?.textContent?.match(/stop/i),
+    { timeout: 8000 }
+  );
+
+  const tgtMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(tgtMon.active, true, 'MON-2: target start sets monitor active');
+  assert.ok(
+    tgtMon.products?.length && tgtMon.products.every((p) => /target\.com/i.test(p.url)),
+    'MON-2: target start sends only target.com products'
+  );
+  assert.ok(
+    !tgtMon.products.some((p) => /walmart\.com/i.test(p.url)),
+    'MON-2: walmart URL excluded when starting from Target tab'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+
+  // ─── MON-3: navigationLock + inQueueUrls skip poll re-navigation ───────────
+  const MON3_WM = 'https://www.walmart.com/ip/Test-Mon3-Product/987654321';
+  const MON3_NORM = normalizeProductUrl(MON3_WM);
+
+  {
+    const inQ = new Set();
+    const navL = new Set();
+    assert.equal(pollWouldSkipNavigation(MON3_NORM, inQ, navL), false);
+    navL.add(MON3_NORM);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'MON-3: navigationLock blocks poll navigate'
+    );
+    navL.delete(MON3_NORM);
+    inQ.add(MON3_NORM);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'MON-3: inQueueUrls blocks poll navigate'
+    );
+  }
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: MON3_WM, name: 'MON-3 test', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  const withNavLock = await waitForMonitorLocks(
+    popup,
+    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(MON3_NORM),
+    'navigationLock after poll navigate'
+  );
+  assert.ok(withNavLock.navigationLock.includes(MON3_NORM), 'MON-3: poll sets navigationLock');
+
+  await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
+  const inQueue = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(inQueue.inQueueUrls?.includes(MON3_NORM), 'MON-3: WALMART_IN_QUEUE adds inQueueUrls');
+
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: MON3_WM });
+  const afterNavFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterNavFail.navigationLock?.includes(MON3_NORM),
+    'MON-3: WALMART_NAV_FAILED clears navigationLock'
+  );
+  assert.ok(
+    afterNavFail.inQueueUrls?.includes(MON3_NORM),
+    'MON-3: WALMART_NAV_FAILED must not clear inQueueUrls (WM-5)'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  const mon3Cleared = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon3Cleared.active, false, 'MON-3: STOP_MONITOR clears active');
+  assert.ok(!mon3Cleared.inQueueUrls?.length, 'MON-3: STOP_MONITOR clears inQueueUrls');
+  assert.ok(!mon3Cleared.navigationLock?.length, 'MON-3: STOP_MONITOR clears navigationLock');
 
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
