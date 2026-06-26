@@ -131,6 +131,7 @@ async function refreshHarvestStatus() {
   try {
     const s = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
     const c = $('harvestCountText');
+    const bp = $('beatbotsPoolText');
     const n = $('harvestNextText');
     const w = $('harvestSessionWarn');
     const hw = $('harvestHiddenWarn');
@@ -142,6 +143,22 @@ async function refreshHarvestStatus() {
         if (count < 10) c.classList.add('harvest-count-low');
         else if (count < 30) c.classList.add('harvest-count-mid');
         else c.classList.add('harvest-count-ok');
+      }
+    }
+    if (bp && s) {
+      const bb = s.beatbots || {};
+      const pool = bb.pool || {};
+      if (!bb.connected) {
+        bp.textContent = 'BEATBOTS app: offline (extension-only harvest)';
+        bp.className = 'harvest-count';
+      } else {
+        const atc = Number(pool.atcCount) || 0;
+        const login = Number(pool.loginCount) || 0;
+        bp.textContent = `BEATBOTS app: connected — ATC ${atc}, login ${login}`;
+        bp.className = 'harvest-count';
+        if (atc < 3) bp.classList.add('harvest-count-low');
+        else if (atc < 10) bp.classList.add('harvest-count-mid');
+        else bp.classList.add('harvest-count-ok');
       }
     }
     if (w && s) w.hidden = !!s.sessionStorage;
@@ -347,6 +364,8 @@ function gatherSettings() {
       ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
       : 10,
     targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+    checkoutInNewTab: !!$('checkoutInNewTab')?.checked,
+    beatbotsCheckoutOnDomFailure: !!$('beatbotsCheckoutOnDomFailure')?.checked,
     errorRetryDelayMs: $('errorRetryDelayMs')
       ? parseIntInRange($('errorRetryDelayMs').value, 500, 30000, 3500)
       : 3500,
@@ -560,6 +579,11 @@ function populateFields(data) {
   const tm = $('targetMaxPrice');
   if (tm && typeof data.targetMaxPrice === 'number') tm.value = String(data.targetMaxPrice);
 
+  const cin = $('checkoutInNewTab');
+  if (cin) cin.checked = !!data.checkoutInNewTab;
+  const bbDom = $('beatbotsCheckoutOnDomFailure');
+  if (bbDom) bbDom.checked = !!data.beatbotsCheckoutOnDomFailure;
+
   const errMs = $('errorRetryDelayMs');
   if (errMs && typeof data.errorRetryDelayMs === 'number') errMs.value = String(data.errorRetryDelayMs);
 
@@ -641,7 +665,7 @@ function wireApplyHintReminders() {
     'useSavedPayment', 'autoPlaceOrder', 'preferPickup', 'checkoutSound',
     'discordWebhook', 'webhookSendFailures', 'endlessMode', 'endlessLimit',
     'addExtraProduct', 'extraProductTcin', 'highStockOnly', 'highStockThreshold',
-    'targetMaxPrice', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay', 'errorRetryDelayMs',
+    'targetMaxPrice', 'checkoutInNewTab', 'beatbotsCheckoutOnDomFailure', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay', 'errorRetryDelayMs',
     'dropExpectedAt', 'harvestEnabled', 'harvestPerLoad', 'harvestExpireMin',
     'harvestDontStop', 'harvestApplyNext', 'walmartUseSavedSession',
     'walmartSkipMonitoring', 'walmartMaxPrice', 'wmDropExpectedAt',
@@ -693,6 +717,8 @@ if (hasChromeStorage()) {
       'highStockOnly',
       'highStockThreshold',
       'targetMaxPrice',
+      'checkoutInNewTab',
+      'beatbotsCheckoutOnDomFailure',
       'errorRetryDelayMs',
       'imap2faEnabled',
       'imapProfile',
@@ -798,6 +824,8 @@ $('webhookSendFailures')?.addEventListener('change', autoSaveToggle);
 $('endlessLimit')?.addEventListener('change', autoSaveToggle);
 $('highStockThreshold')?.addEventListener('change', autoSaveToggle);
 $('targetMaxPrice')?.addEventListener('change', autoSaveToggle);
+$('checkoutInNewTab')?.addEventListener('change', autoSaveToggle);
+$('beatbotsCheckoutOnDomFailure')?.addEventListener('change', autoSaveToggle);
 
 $('webhookTestBtn')?.addEventListener('click', async () => {
   if (!hasChromeStorage()) return;
@@ -1202,6 +1230,13 @@ function renderProducts() {
       hypeChk.disabled = monitorActive;
       hypeChk.addEventListener('change', () => {
         products[i].hypeMode = hypeChk.checked;
+        if (hypeChk.checked) {
+          const cin = $('checkoutInNewTab');
+          if (cin && !cin.checked) {
+            cin.checked = true;
+            autoSaveToggle().catch(() => {});
+          }
+        }
         saveProducts();
       });
       hypeLabel.appendChild(hypeChk);
@@ -1221,6 +1256,45 @@ function renderProducts() {
 function readDropExpectedAtValue() {
   const v = (dropExpectedAtIn?.value || '').trim();
   return v || null;
+}
+
+function isInDropTensionWindow(dropIso) {
+  if (!dropIso) return false;
+  const t = Date.parse(dropIso);
+  if (!Number.isFinite(t)) return false;
+  const now = Date.now();
+  const until = t - now;
+  const afterDrop = now - t;
+  return (until >= 0 && until <= 10 * 60 * 1000) || (until < 0 && afterDrop <= 3 * 60 * 1000);
+}
+
+async function validatePreDropGuards(productsToMonitor) {
+  const warnings = [];
+  const hasHype = productsToMonitor.some((p) => p.hypeMode);
+  if (hasHype) {
+    const cin = $('checkoutInNewTab');
+    if (cin && !cin.checked) {
+      cin.checked = true;
+      await autoSaveToggle().catch(() => {});
+      showToast('Hype: fresh-tab checkout enabled');
+    }
+    try {
+      const st = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
+      const extPool = Number(st?.total) || 0;
+      const bbPool = st?.beatbots?.pool;
+      const bbAtc = Number(bbPool?.atcCount ?? st?.beatbots?.atcCount) || 0;
+      const pool = Math.max(extPool, bbAtc);
+      if (pool < 3) {
+        warnings.push(`Hype: Shape pool low (${pool}) — start BEATBOTS harvester`);
+      }
+    } catch (_) {}
+  }
+  const dropAt = readDropExpectedAtValue();
+  if (dropAt && isInDropTensionWindow(dropAt)) {
+    warnings.push('Inside drop window — avoid changing settings');
+  }
+  if (warnings.length) showToast(warnings.join(' · '));
+  return warnings;
 }
 
 async function saveProducts() {
@@ -1548,6 +1622,7 @@ async function toggleMonitor(retailerFilter) {
     }
     // Persist current UI state before starting so settings survive popup close/reopen.
     await autoSaveToggle().catch(() => {});
+    await validatePreDropGuards(filtered);
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
       products: filtered,
@@ -1559,6 +1634,7 @@ async function toggleMonitor(retailerFilter) {
         ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
         : 10,
       targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+      checkoutInNewTab: !!$('checkoutInNewTab')?.checked,
       walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
       errorRetryDelayMs: $('errorRetryDelayMs')
         ? parseIntInRange($('errorRetryDelayMs').value, 500, 30000, 3500)
@@ -1585,6 +1661,8 @@ function updateMonitorUI() {
   if (hsThrEl) hsThrEl.disabled = monitorActive;
   const tmEl = $('targetMaxPrice');
   if (tmEl) tmEl.disabled = monitorActive;
+  const cinEl = $('checkoutInNewTab');
+  if (cinEl) cinEl.disabled = monitorActive;
   // Sync Walmart tab drop time display
   const wmDrop = $('wmDropExpectedAt');
   if (wmDrop && dropExpectedAtIn?.value) wmDrop.value = dropExpectedAtIn.value;
@@ -1703,6 +1781,8 @@ async function loadMonitorData() {
   if ($('targetMaxPrice') && monitor.targetMaxPrice != null) {
     $('targetMaxPrice').value = String(monitor.targetMaxPrice);
   }
+  const cin = $('checkoutInNewTab');
+  if (cin) cin.checked = !!monitor.checkoutInNewTab;
   if (dropExpectedAtIn && monitor.dropExpectedAt) {
     dropExpectedAtIn.value = monitor.dropExpectedAt;
   }

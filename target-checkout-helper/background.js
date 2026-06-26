@@ -145,7 +145,25 @@ async function gmailFindOtpCode(token) {
 /** Poll Gmail every 4s for up to 3 minutes; send OTP_FOUND or OTP_TIMEOUT to the tab. */
 async function watchForOtp(tabId, startMs) {
   const deadline = startMs + 3 * 60 * 1000;
-  console.log('[TCH bg] Gmail OTP watch started for tab', tabId);
+  console.log('[TCH bg] OTP watch started for tab', tabId);
+
+  if (bbConnected) {
+    try {
+      const { targetEmail } = await chrome.storage.local.get('targetEmail');
+      const msg = await bbSendRequest('otp_watch_request', 95000, {
+        targetEmail: String(targetEmail || '').trim() || undefined,
+      });
+      if (msg?.type === 'otp_found' && msg.ok && msg.code) {
+        chrome.tabs.sendMessage(tabId, { type: 'OTP_FOUND', code: String(msg.code) }).catch(() => {});
+        console.log('[TCH bg] BEATBOTS IMAP OTP found');
+        return;
+      }
+      console.log('[TCH bg] BEATBOTS IMAP OTP unavailable — trying Gmail');
+    } catch (e) {
+      console.warn('[TCH bg] BEATBOTS OTP watch error:', e);
+    }
+  }
+
   while (Date.now() < deadline) {
     try {
       const token = await gmailGetValidToken();
@@ -206,12 +224,13 @@ async function maybeAutoRecoverTargetSession() {
     return { ok: false, reason: 'streak_below_threshold', streak: redskyErrorStreak };
   }
 
-  // Guard 2: never wipe site data while the user is in an active checkout flow.
-  // Clearing cookies mid-checkout is worse than a stale session — the user would
-  // be logged out at the payment or review step.
-  const checkoutTabs = await chrome.tabs.query({ url: '*://*.target.com/checkout*' }).catch(() => []);
-  if (checkoutTabs.length > 0) {
-    console.warn('[TCH bg] session recovery suppressed — checkout in progress on', checkoutTabs.length, 'tab(s)');
+  // Guard 2: never wipe site data while the user is in an active checkout or cart flow.
+  // Clearing cookies mid-checkout or on /cart during a drop is worse than a stale session.
+  const protectedTabs = await chrome.tabs.query({
+    url: ['*://*.target.com/checkout*', '*://*.target.com/cart*'],
+  }).catch(() => []);
+  if (protectedTabs.length > 0) {
+    console.warn('[TCH bg] session recovery suppressed — checkout/cart in progress on', protectedTabs.length, 'tab(s)');
     notifyTargetTabsSessionHint();
     return { ok: false, reason: 'checkout_in_progress' };
   }
@@ -455,6 +474,9 @@ const inQueueUrls    = new Set();
 // URLs where the background has already navigated the tab to the product page.
 // The content script is now in control — don't reload until it reports back.
 const navigationLock = new Set();
+/** @type {Map<string, number>} */
+const navigationLockAt = new Map();
+const NAV_LOCK_TTL_MS = 30 * 60 * 1000;
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
 // NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
@@ -739,8 +761,13 @@ async function runBackgroundPoll() {
       // the content script is loading; reloading again would restart the
       // Walmart traffic queue ("hang tight" loop).
       if (navigationLock.has(normUrl)) {
-        if (pollCycles % 30 === 0) console.log(`[TCH bg] Skipping ${normUrl} — navigation in progress`);
-        continue;
+        const lockedAt = navigationLockAt.get(normUrl) || 0;
+        if (Date.now() - lockedAt < NAV_LOCK_TTL_MS) {
+          if (pollCycles % 30 === 0) console.log(`[TCH bg] Skipping ${normUrl} — navigation in progress`);
+          continue;
+        }
+        navigationLock.delete(normUrl);
+        navigationLockAt.delete(normUrl);
       }
 
       const tcin = extractTcin(product.url);
@@ -824,7 +851,7 @@ async function runBackgroundPoll() {
           const currentTab = await chrome.tabs.get(tabId);
           if (isInCheckoutFlow(currentTab?.url)) {
             console.log(`[TCH bg] Tab ${tabId} already in checkout flow (${currentTab.url}) — not navigating`);
-            break;
+            continue;
           }
         } catch { /* tab closed — fall through to create new one */ }
       }
@@ -851,6 +878,7 @@ async function runBackgroundPoll() {
       // Lock this URL — content script is now loading on the product page.
       // Don't navigate again until it reports back (ATC_SUCCESS or NAV_FAILED).
       navigationLock.add(normUrl);
+      navigationLockAt.set(normUrl, Date.now());
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
       // Avoid hammering the same product multiple times per cycle.
       break;
@@ -877,9 +905,12 @@ async function runBackgroundPoll() {
     } catch {}
 
     const dropAggressive = computeBackgroundPollSleepMs(monitor) <= 250;
-    const sleepMs = hadApiError && !dropAggressive
+    const baseSleep = hadApiError && !dropAggressive
       ? (monitor.errorRetryDelayMs || 3500)
       : computeBackgroundPollSleepMs(monitor);
+    const sleepMs = typeof jitterBackgroundPollSleepMs === 'function'
+      ? jitterBackgroundPollSleepMs(baseSleep)
+      : baseSleep;
     await sleep(sleepMs);
   }
   console.log('[TCH bg] background poll stopped');
@@ -1100,6 +1131,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
+          checkoutInNewTab: !!message.checkoutInNewTab,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1116,7 +1148,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normFailUrl = normalizeProductUrl(message.url || '');
       if (normFailUrl) {
         navigationLock.delete(normFailUrl);
+        navigationLockAt.delete(normFailUrl);
         console.log('[TCH bg] Navigation lock released (failed):', normFailUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'TARGET_NAV_FAILED':
+    case 'TARGET_NAV_HANDOFF': {
+      const normNavUrl = normalizeProductUrl(message.url || '');
+      if (normNavUrl) {
+        if (message.type === 'TARGET_NAV_FAILED') {
+          navigationLock.delete(normNavUrl);
+          navigationLockAt.delete(normNavUrl);
+          console.log('[TCH bg] Target navigation lock released:', normNavUrl);
+        } else {
+          navigationLock.add(normNavUrl);
+          navigationLockAt.set(normNavUrl, Date.now());
+        }
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'WALMART_QUEUE_END': {
+      const normQueueEnd = normalizeProductUrl(message.url || '');
+      if (normQueueEnd) {
+        inQueueUrls.delete(normQueueEnd);
+        navigationLock.delete(normQueueEnd);
+        navigationLockAt.delete(normQueueEnd);
+        console.log('[TCH bg] Walmart queue ended — lock released:', normQueueEnd);
       }
       sendResponse({ ok: true });
       return true;
@@ -1128,6 +1190,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normQueueUrl = normalizeProductUrl(message.url || '');
       if (normQueueUrl) {
         inQueueUrls.add(normQueueUrl);
+        navigationLock.add(normQueueUrl);
+        navigationLockAt.set(normQueueUrl, Date.now());
         console.log('[TCH bg] WALMART_IN_QUEUE locked:', normQueueUrl);
       }
       sendResponse({ ok: true });
@@ -1313,6 +1377,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false, reason: 'error' }));
       return true;
 
+    case 'BB_APPLY_ATC_COOKIE':
+      bbApplyAppAtcCookie()
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false, reason: 'error' }));
+      return true;
+
+    case 'BB_REFRESH_POOL':
+      bbRefreshPoolStatus()
+        .then((pool) => sendResponse({ ok: true, beatbots: bbGetBeatbotsStatus(), pool }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case 'BB_CHECKOUT_REQUEST':
+      bbSendCheckoutRequest(message)
+        .then((r) => sendResponse(r))
+        .catch((e) => sendResponse({ ok: false, reason: 'error', error: String(e?.message || e) }));
+      return true;
+
+    case 'OPEN_FRESH_CHECKOUT_TAB':
+      chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true })
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
     case 'HARVEST_GET_STATUS':
       (async () => {
         try {
@@ -1339,6 +1427,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
 
           const allHidden = await computeAllTargetTabsHidden();
+          if (bbConnected && !bbPoolStatus) await bbRefreshPoolStatus();
           sendResponse({
             ...s,
             harvestHidden: allHidden,
@@ -1346,6 +1435,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             lastHarvestCaptureKind,
             nextHarvestInMs,
             nextHarvestMode,
+            beatbots: bbGetBeatbotsStatus(),
           });
         } catch {
           sendResponse({ ok: false });
@@ -1469,11 +1559,14 @@ async function maybeRunDropAwareHarvestKeepalive() {
     return;
   }
 
-  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
-  lastHarvestKeepaliveRunMs = Date.now();
-  lastHarvestCaptureMs = Date.now();
-  lastHarvestCaptureKind = 'keepalive';
-  console.log('[TCH bg] session keep-alive: snapshot captured');
+  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target')
+    .then((snap) => {
+      if (!snap?.ok) return;
+      lastHarvestKeepaliveRunMs = Date.now();
+      lastHarvestCaptureMs = Date.now();
+      lastHarvestCaptureKind = 'keepalive';
+      console.log('[TCH bg] session keep-alive: snapshot captured');
+    });
 }
 
 // ─── BROADCAST ──────────────────────────────────────────────────────────────
@@ -1500,6 +1593,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     targetMaxPrice = 0,
     walmartMaxPrice = 0,
     errorRetryDelayMs = 3500,
+    checkoutInNewTab = false,
     resetEndlessSuccessCount = true,
   } = opts;
 
@@ -1529,6 +1623,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
   monitor.walmartMaxPrice = Math.max(0, Number(walmartMaxPrice) || 0);
   monitor.errorRetryDelayMs = Math.max(500, Math.min(30000, Number(errorRetryDelayMs) || 3500));
+  monitor.checkoutInNewTab = !!checkoutInNewTab;
 
   await chrome.storage.local.set({
     monitor,
@@ -1568,6 +1663,7 @@ async function stopMonitor() {
   redskyErrorStreak = 0;
   inQueueUrls.clear();
   navigationLock.clear();
+  navigationLockAt.clear();
 
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) return;
@@ -1598,7 +1694,11 @@ async function handleATCSuccess(url, tabId) {
     return;
   }
 
+  // Drop CDP as soon as ATC succeeds — checkout form-fill uses native clicks.
+  tchDebuggerDetach().catch(() => {});
+
   navigationLock.delete(normUrl); // release — ATC succeeded
+  navigationLockAt.delete(normUrl);
   inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
   monitor.counts[normUrl] = (monitor.counts[normUrl] || 0) + 1;
   await chrome.storage.local.set({ monitor });
@@ -1609,10 +1709,10 @@ async function handleATCSuccess(url, tabId) {
   const currentCount = monitor.counts[normUrl];
 
   if (product && currentCount < product.qty) {
-    // Detach debugger before reload — next DEBUGGER_CLICK will re-attach on demand.
+    // Detach debugger before next unit — navigate back to product (not reload checkout).
     tchDebuggerDetach().catch(() => {});
     setTimeout(() => {
-      chrome.tabs.reload(tabId).catch(() => {});
+      chrome.tabs.update(tabId, { url: product.url }).catch(() => {});
     }, (monitor.refreshInterval || 1) * 1000);
     return;
   }
@@ -1629,8 +1729,15 @@ async function handleATCSuccess(url, tabId) {
     bgPollActive = false;
     const isWalmart = !!extractWalmartItemId(url);
     if (!isWalmart) {
-      // Target: navigate the ATC tab directly to Target checkout.
-      chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      const useFreshTab = monitor.checkoutInNewTab || !!(product && product.hypeMode);
+      if (useFreshTab) {
+        // Skip harvest replay after DOM ATC — cart is bound to the current session cookies.
+        await chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true });
+        console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)', product?.hypeMode ? '(hype)' : '');
+      } else {
+        // Target: navigate the ATC tab directly to Target checkout.
+        chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      }
       // Detach debugger — no click simulation needed during checkout form-fill.
       tchDebuggerDetach().catch(() => {});
     }
@@ -1657,13 +1764,157 @@ let bbWs = null;
 let bbWsPort = BB_WS_DEFAULT_PORT;
 let bbReconnectTimer = null;
 let bbConnected = false;
+let bbPoolStatus = null;
+let bbRequestSeq = 0;
+const bbPendingRequests = new Map();
 const BB_RECONNECT_DELAY_MS = 5000;
+const BB_REQUEST_TIMEOUT_MS = 3000;
 
 async function bbGetPort() {
   try {
     const { beatbotsWsPort } = await chrome.storage.local.get('beatbotsWsPort');
     return Number(beatbotsWsPort) || BB_WS_DEFAULT_PORT;
   } catch { return BB_WS_DEFAULT_PORT; }
+}
+
+function bbHandleWsMessage(msg) {
+  if (msg?.type === 'hello' && msg?.source === 'beatbots') {
+    if (typeof msg.port === 'number' && msg.port > 0) {
+      bbWsPort = msg.port;
+      chrome.storage.local.set({ beatbotsWsPort: msg.port }).catch(() => {});
+    }
+    return;
+  }
+
+  if (msg?.type === 'pool_status') {
+    bbPoolStatus = {
+      loginCount: Number(msg.loginCount) || 0,
+      atcCount: Number(msg.atcCount) || 0,
+      totalCount: Number(msg.totalCount) || 0,
+      lastHarvestAt: msg.lastHarvestAt ?? null,
+      generationRate: Number(msg.generationRate) || 0,
+    };
+  }
+
+  if (msg?.requestId && bbPendingRequests.has(msg.requestId)) {
+    const { resolve, timer } = bbPendingRequests.get(msg.requestId);
+    clearTimeout(timer);
+    bbPendingRequests.delete(msg.requestId);
+    resolve(msg);
+  }
+}
+
+function bbSendRequest(type, timeoutMs = BB_REQUEST_TIMEOUT_MS, extra = {}) {
+  return new Promise((resolve) => {
+    if (!bbConnected || !bbWs || bbWs.readyState !== WebSocket.OPEN) {
+      resolve(null);
+      return;
+    }
+    const requestId = `bb-${Date.now()}-${++bbRequestSeq}`;
+    const timer = setTimeout(() => {
+      bbPendingRequests.delete(requestId);
+      resolve(null);
+    }, timeoutMs);
+    bbPendingRequests.set(requestId, { resolve, timer });
+    try {
+      bbWs.send(JSON.stringify({ type, requestId, ...(extra || {}) }));
+    } catch {
+      clearTimeout(timer);
+      bbPendingRequests.delete(requestId);
+      resolve(null);
+    }
+  });
+}
+
+function bbGetBeatbotsStatus() {
+  return {
+    connected: bbConnected,
+    port: bbWsPort,
+    pool: bbPoolStatus,
+  };
+}
+
+async function bbApplyCookieMap(cookies) {
+  const setUrl = 'https://www.target.com';
+  let applied = 0;
+  for (const [name, value] of Object.entries(cookies || {})) {
+    if (!name || value == null) continue;
+    try {
+      await chrome.cookies.set({
+        url: setUrl,
+        name: String(name),
+        value: String(value),
+        domain: '.target.com',
+        path: '/',
+        secure: true,
+      });
+      applied++;
+    } catch { /* skip individual cookie set failures */ }
+  }
+  return applied;
+}
+
+async function bbRefreshPoolStatus() {
+  const msg = await bbSendRequest('pool_status_request');
+  if (msg?.type === 'pool_status') bbHandleWsMessage(msg);
+  return bbPoolStatus;
+}
+
+async function bbApplyAppAtcCookie() {
+  if (!bbConnected) return { ok: false, reason: 'not_connected' };
+  const msg = await bbSendRequest('consume_atc_request');
+  if (!msg || msg.type !== 'consume_atc' || !msg.ok) {
+    return { ok: false, reason: msg?.ok === false ? 'empty' : 'timeout' };
+  }
+  const applied = await bbApplyCookieMap(msg.cookies);
+  if (!applied) return { ok: false, reason: 'apply_failed' };
+  console.log('[TCH] applied BEATBOTS ATC Shape cookie;', applied, 'cookies set');
+  return { ok: true, applied, remaining: bbPoolStatus?.atcCount ?? null };
+}
+
+const BB_CHECKOUT_TIMEOUT_MS = 120000;
+
+async function bbCaptureTargetCookieMap() {
+  const cookies = await tchReadCookiesForRetailer('target');
+  const map = {};
+  for (const c of cookies) {
+    if (c.name && c.value != null) map[c.name] = String(c.value);
+  }
+  return map;
+}
+
+async function bbSendCheckoutRequest(message) {
+  if (!bbConnected) return { ok: false, reason: 'not_connected' };
+  const cookies = await bbCaptureTargetCookieMap();
+  const msg = await bbSendRequest('checkout_request', BB_CHECKOUT_TIMEOUT_MS, {
+    reason: String(message.reason || 'dom_failure'),
+    mode: message.cartId ? 'from_cart' : 'full',
+    cartId: String(message.cartId || ''),
+    tcin: String(message.tcin || ''),
+    qty: Number(message.qty) || 1,
+    pageUrl: String(message.pageUrl || ''),
+    apiKey: String(message.apiKey || ''),
+    profile: message.profile || {},
+    settings: message.settings || {},
+    cookies,
+  });
+  if (!msg) return { ok: false, reason: 'timeout' };
+  if (msg.type !== 'checkout_result') return { ok: false, reason: 'bad_response' };
+  if (!msg.ok) {
+    return {
+      ok: false,
+      reason: 'checkout_failed',
+      error: msg.error,
+      stage: msg.stage,
+      retryable: !!msg.retryable,
+    };
+  }
+  return {
+    ok: true,
+    orderId: msg.orderId,
+    orderTotal: msg.orderTotal,
+    durationMs: msg.durationMs,
+  };
 }
 
 function bbConnect() {
@@ -1676,20 +1927,24 @@ function bbConnect() {
       bbConnected = true;
       console.log('[TCH] BEATBOTS bridge connected on port', bbWsPort);
       if (bbReconnectTimer) { clearTimeout(bbReconnectTimer); bbReconnectTimer = null; }
+      void bbRefreshPoolStatus();
     });
 
     bbWs.addEventListener('message', (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'pong' || msg.type === 'hello') return;
-        console.log('[TCH] BEATBOTS msg:', msg.type);
+        if (msg.type === 'pong') return;
+        bbHandleWsMessage(msg);
+        if (msg.type !== 'hello' && msg.type !== 'pool_status') {
+          console.log('[TCH] BEATBOTS msg:', msg.type);
+        }
       } catch {}
     });
 
     bbWs.addEventListener('close', () => {
       bbConnected = false;
+      bbPoolStatus = null;
       bbWs = null;
-      // Try the +1 port (app retries on port conflict)
       bbScheduleReconnect();
     });
 

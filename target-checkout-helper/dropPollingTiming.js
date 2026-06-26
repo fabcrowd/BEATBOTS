@@ -107,3 +107,17 @@ function getHarvestBurstSameUrlDedupMs(monitor) {
   if (until > 0 && until <= 45 * 60 * 1000) return 45 * 1000;
   return 120 * 1000;
 }
+
+/**
+ * Break exact-interval polling fingerprints during the aggressive (≤250ms) window.
+ * Mean stays at `baseMs`; spread ±15–25% so server-side velocity heuristics see
+ * human-ish variance without slowing the drop window on average.
+ */
+function jitterBackgroundPollSleepMs(baseMs) {
+  const base = Math.max(0, Number(baseMs) || 0);
+  if (base <= 0) return base;
+  if (base > 250) return base;
+  const pct = 0.15 + Math.random() * 0.10;
+  const sign = Math.random() < 0.5 ? -1 : 1;
+  return Math.max(50, Math.round(base * (1 + sign * pct)));
+}
