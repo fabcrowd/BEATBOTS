@@ -38,8 +38,8 @@ export const JOURNEYS = {
     retailer: 'core',
     summary: 'Background poll navigationLock + inQueueUrls skip re-navigation',
     impl: ['target-checkout-helper/background.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['extension-functional.mjs'],
   },
   'TGT-1': {
     id: 'TGT-1',
@@ -205,7 +205,7 @@ export const INVARIANTS = {
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2'],
-  'extension-functional.mjs': ['MON-1', 'MON-2', 'TGT-1', 'TGT-2'],
+  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
 };
 
