@@ -185,6 +185,10 @@ async function handleSignInPage(settings, opts = {}) {
     autoSignInInFlight = true;
   }
   try {
+  if (getPageType() === 'checkout' && hasCheckoutAuthError()) {
+    console.warn('[TCH] auto sign-in: Target error banner present — skip');
+    return;
+  }
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
   const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
@@ -236,9 +240,26 @@ async function handleSignInPage(settings, opts = {}) {
 
   // Step 1: email field only visible — Target's two-step login flow.
   if (emailInput && !passInput) {
-    if (getPageType() === 'checkout' && (isCheckoutSignedInConfirm() || looksLoggedInOnTarget())) {
-      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      if (await tryCheckoutSignedInContinue()) return;
+    if (getPageType() === 'checkout') {
+      const signedInConfirm = isCheckoutSignedInConfirm();
+      const treatLoggedIn = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue
+        ? TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue({
+          signedInConfirm,
+          looksLoggedIn: looksLoggedInOnTarget(),
+          passwordOnlyReauth: isCheckoutPasswordOnlyReauth(),
+        })
+        : signedInConfirm || looksLoggedInOnTarget();
+      if (treatLoggedIn) {
+        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+        if (await tryCheckoutSignedInContinue()) return;
+        const stopAfterContinue = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldReturnAfterFailedSignedInContinue
+          ? TCH_SIGNIN_STEP.shouldReturnAfterFailedSignedInContinue({ onCheckout: true, signedInConfirm })
+          : signedInConfirm;
+        if (stopAfterContinue) {
+          console.log('[TCH] auto sign-in: signed-in confirm — waiting (no email re-entry)');
+          return;
+        }
+      }
     }
     console.log('[TCH] auto sign-in: step 1 — filling email via CDP');
     showToast('Auto sign-in: entering email…', 'persistent');
@@ -509,6 +530,71 @@ function isCheckoutSignedInConfirm() {
   return false;
 }
 
+function hasCheckoutAuthError() {
+  const root = getCheckoutAuthRoot() || document;
+  const tx = (root.innerText || document.body?.innerText || '').toLowerCase();
+  return tx.includes('something went wrong') || tx.includes('try again later');
+}
+
+function isCheckoutCreateAccountModal() {
+  if (getPageType() !== 'checkout') return false;
+  const root = getCheckoutAuthRoot() || document;
+  const tx = (root.innerText || document.body?.innerText || '').slice(0, 8000).toLowerCase();
+  return tx.includes('sign in or create account') || tx.includes('create account');
+}
+
+function readAuthWarmupAtMs() {
+  try {
+    return parseInt(sessionStorage.getItem(AUTH_WARMUP_AT_KEY) || '0', 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function markAuthWarmup() {
+  try { sessionStorage.setItem(AUTH_WARMUP_AT_KEY, String(Date.now())); } catch {}
+}
+
+function isAuthWarmupRecent() {
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.isAuthWarmupRecent) {
+    return TCH_SIGNIN_STEP.isAuthWarmupRecent(readAuthWarmupAtMs());
+  }
+  const at = readAuthWarmupAtMs();
+  return at > 0 && Date.now() - at < 30 * 60 * 1000;
+}
+
+function shouldSkipCheckoutEmailAutomation() {
+  if (typeof TCH_SIGNIN_STEP === 'undefined' || !TCH_SIGNIN_STEP.shouldSkipCheckoutEmailFlow) return false;
+  return TCH_SIGNIN_STEP.shouldSkipCheckoutEmailFlow({
+    looksLoggedIn: looksLoggedInOnTarget(),
+    warmupAtMs: readAuthWarmupAtMs(),
+    checkoutAuthError: hasCheckoutAuthError(),
+    isCreateAccountModal: isCheckoutCreateAccountModal(),
+    isSignedInConfirm: isCheckoutSignedInConfirm(),
+  });
+}
+
+/** After successful /login, visit /account once to warm session cookies before checkout. */
+async function maybeCompleteAuthWarmup(settings) {
+  if (!looksLoggedInOnTarget()) return;
+  markAuthWarmup();
+  let navDone = false;
+  try { navDone = sessionStorage.getItem(AUTH_WARMUP_NAV_KEY) === '1'; } catch {}
+  const path = location.pathname;
+  if (!navDone && !/^\/account/i.test(path)) {
+    try { sessionStorage.setItem(AUTH_WARMUP_NAV_KEY, '1'); } catch {}
+    console.log('[TCH] auth warmup: navigating to /account');
+    showToast('Session warmed — checkout should skip sign-in', 'persistent');
+    await sleep(400);
+    window.location.href = 'https://www.target.com/account';
+    return;
+  }
+  if (/^\/account/i.test(path)) {
+    console.log('[TCH] auth warmup: account page ready');
+    showToast('Signed in — ready for checkout', 'success');
+  }
+}
+
 async function tryCheckoutSignedInContinue() {
   const root = getCheckoutAuthRoot();
   const scope = root || document;
@@ -524,7 +610,10 @@ async function tryCheckoutSignedInContinue() {
         ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
         : (b.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
       if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesGuestCheckoutText?.(raw)) return false;
-      return raw === needle || raw.includes(needle);
+      const matches = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesSignedInContinueNeedle
+        ? TCH_SIGNIN_STEP.matchesSignedInContinueNeedle(raw, needle)
+        : (raw === needle || raw.includes(needle));
+      return matches;
     });
     if (el) {
       console.log('[TCH] checkout auth: clicking signed-in continue —', needle);
@@ -1522,19 +1611,48 @@ async function handleCheckoutPage(settings) {
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
 const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
 const SIGNIN_EMAIL_STEP_KEY = 'tch:signInEmailStepDone';
+const AUTH_WARMUP_AT_KEY = 'tch:authWarmupAt';
+const AUTH_WARMUP_NAV_KEY = 'tch:authWarmupNavDone';
 const PENDING_RETRY_INTERVAL_MS = 3000;
 const PENDING_MAX_RETRIES = 15;
 
 async function runCheckoutPendingActions(settings, step, options = {}) {
   console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
+  if (getPageType() === 'checkout' && hasCheckoutAuthError()) {
+    console.warn('[TCH] checkout auth: Target error banner — pausing auto sign-in');
+    if (!options.silent) {
+      showToast('Target sign-in error — wait and sign in manually or retry in a minute.', 'persistent');
+    }
+    return;
+  }
+  const preferContinue = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldPreferSignedInContinue
+    ? TCH_SIGNIN_STEP.shouldPreferSignedInContinue({
+      looksLoggedIn: looksLoggedInOnTarget(),
+      warmupAtMs: readAuthWarmupAtMs(),
+      isSignedInConfirm: isCheckoutSignedInConfirm(),
+    })
+    : looksLoggedInOnTarget() || isCheckoutSignedInConfirm();
+  if (preferContinue) {
+    try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+    if (await tryCheckoutSignedInContinue()) {
+      showToast('Checkout: continuing with signed-in account…', 'persistent');
+      await sleep(800);
+      return;
+    }
+  }
   const hasCredentials = !!(settings.autoSignIn && settings.targetEmail && settings.targetPassword);
   let alreadyTried = false;
   try {
     alreadyTried = sessionStorage.getItem(GUEST_CHECKOUT_ATTEMPT_KEY) === '1';
   } catch {}
   const attemptGuest = typeof TCH_SIGNIN_STEP !== 'undefined'
-    ? TCH_SIGNIN_STEP.shouldAttemptGuest({ autoSignIn: !!settings.autoSignIn, hasCredentials, alreadyTried })
-    : !hasCredentials && !alreadyTried;
+    ? TCH_SIGNIN_STEP.shouldAttemptGuest({
+      autoSignIn: !!settings.autoSignIn,
+      hasCredentials,
+      alreadyTried,
+      useSavedPayment: !!settings.useSavedPayment,
+    })
+    : !hasCredentials && !alreadyTried && !settings.useSavedPayment;
   if (attemptGuest && tryGuestCheckoutClick()) {
     try { sessionStorage.setItem(GUEST_CHECKOUT_ATTEMPT_KEY, '1'); } catch {}
     showToast('Guest checkout…');
@@ -1546,11 +1664,23 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
-    if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
+    const signedInConfirm = isCheckoutSignedInConfirm();
+    const treatLoggedIn = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue
+      ? TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue({
+        signedInConfirm,
+        looksLoggedIn: looksLoggedInOnTarget(),
+        passwordOnlyReauth: isCheckoutPasswordOnlyReauth(),
+      })
+      : signedInConfirm || looksLoggedInOnTarget();
+    if (treatLoggedIn) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) {
         showToast('Checkout: continuing with signed-in account…', 'persistent');
         await sleep(800);
+        return;
+      }
+      if (signedInConfirm || isCheckoutPasswordOnlyReauth()) {
+        console.log('[TCH] auto sign-in: signed-in confirm or password re-auth — waiting');
         return;
       }
       console.log('[TCH] auto sign-in: session looks logged in — waiting for checkout to advance');
@@ -1589,7 +1719,7 @@ function watchForCheckoutStep(settings, options = {}) {
 
   let handled = false;
   let pendingRetryCount = 0;
-  let lastPendingRetryMs = 0;
+  let lastPendingRetryMs = Date.now();
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
@@ -2394,6 +2524,9 @@ async function handleMonitoredATC(monitor, product) {
   let pollInProgress = false;
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
+  try {
+    chrome.runtime.sendMessage({ type: 'TARGET_NAV_HANDOFF', url: normUrl }).catch(() => {});
+  } catch {}
 
   const pollId = setInterval(async () => {
     if (!runtimeEnabled) { clearInterval(pollId); return; }
@@ -2547,6 +2680,11 @@ async function init() {
     showToast('Signing in…');
     await sleep(500);
     await handleSignInPage(settings);
+    await sleep(1500);
+    await maybeCompleteAuthWarmup(settings);
+  } else if (/^\/account/i.test(location.pathname) && looksLoggedInOnTarget()) {
+    markAuthWarmup();
+    console.log('[TCH] auth warmup: on account page with active session');
   } else if (page === 'confirmation') {
     await markCheckoutSuccess();
     showToast('Order placed!', 'success');

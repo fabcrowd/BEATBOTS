@@ -455,6 +455,9 @@ const inQueueUrls    = new Set();
 // URLs where the background has already navigated the tab to the product page.
 // The content script is now in control — don't reload until it reports back.
 const navigationLock = new Set();
+/** @type {Map<string, number>} */
+const navigationLockAt = new Map();
+const NAV_LOCK_TTL_MS = 30 * 60 * 1000;
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
 // NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
@@ -739,8 +742,13 @@ async function runBackgroundPoll() {
       // the content script is loading; reloading again would restart the
       // Walmart traffic queue ("hang tight" loop).
       if (navigationLock.has(normUrl)) {
-        if (pollCycles % 30 === 0) console.log(`[TCH bg] Skipping ${normUrl} — navigation in progress`);
-        continue;
+        const lockedAt = navigationLockAt.get(normUrl) || 0;
+        if (Date.now() - lockedAt < NAV_LOCK_TTL_MS) {
+          if (pollCycles % 30 === 0) console.log(`[TCH bg] Skipping ${normUrl} — navigation in progress`);
+          continue;
+        }
+        navigationLock.delete(normUrl);
+        navigationLockAt.delete(normUrl);
       }
 
       const tcin = extractTcin(product.url);
@@ -824,7 +832,7 @@ async function runBackgroundPoll() {
           const currentTab = await chrome.tabs.get(tabId);
           if (isInCheckoutFlow(currentTab?.url)) {
             console.log(`[TCH bg] Tab ${tabId} already in checkout flow (${currentTab.url}) — not navigating`);
-            break;
+            continue;
           }
         } catch { /* tab closed — fall through to create new one */ }
       }
@@ -851,6 +859,7 @@ async function runBackgroundPoll() {
       // Lock this URL — content script is now loading on the product page.
       // Don't navigate again until it reports back (ATC_SUCCESS or NAV_FAILED).
       navigationLock.add(normUrl);
+      navigationLockAt.set(normUrl, Date.now());
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
       // Avoid hammering the same product multiple times per cycle.
       break;
@@ -1100,6 +1109,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
+          checkoutInNewTab: !!message.checkoutInNewTab,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1116,7 +1126,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normFailUrl = normalizeProductUrl(message.url || '');
       if (normFailUrl) {
         navigationLock.delete(normFailUrl);
+        navigationLockAt.delete(normFailUrl);
         console.log('[TCH bg] Navigation lock released (failed):', normFailUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'TARGET_NAV_FAILED':
+    case 'TARGET_NAV_HANDOFF': {
+      const normNavUrl = normalizeProductUrl(message.url || '');
+      if (normNavUrl) {
+        if (message.type === 'TARGET_NAV_FAILED') {
+          navigationLock.delete(normNavUrl);
+          navigationLockAt.delete(normNavUrl);
+          console.log('[TCH bg] Target navigation lock released:', normNavUrl);
+        } else {
+          navigationLock.add(normNavUrl);
+          navigationLockAt.set(normNavUrl, Date.now());
+        }
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'WALMART_QUEUE_END': {
+      const normQueueEnd = normalizeProductUrl(message.url || '');
+      if (normQueueEnd) {
+        inQueueUrls.delete(normQueueEnd);
+        navigationLock.delete(normQueueEnd);
+        navigationLockAt.delete(normQueueEnd);
+        console.log('[TCH bg] Walmart queue ended — lock released:', normQueueEnd);
       }
       sendResponse({ ok: true });
       return true;
@@ -1128,6 +1168,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normQueueUrl = normalizeProductUrl(message.url || '');
       if (normQueueUrl) {
         inQueueUrls.add(normQueueUrl);
+        navigationLock.add(normQueueUrl);
+        navigationLockAt.set(normQueueUrl, Date.now());
         console.log('[TCH bg] WALMART_IN_QUEUE locked:', normQueueUrl);
       }
       sendResponse({ ok: true });
@@ -1469,11 +1511,14 @@ async function maybeRunDropAwareHarvestKeepalive() {
     return;
   }
 
-  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
-  lastHarvestKeepaliveRunMs = Date.now();
-  lastHarvestCaptureMs = Date.now();
-  lastHarvestCaptureKind = 'keepalive';
-  console.log('[TCH bg] session keep-alive: snapshot captured');
+  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target')
+    .then((snap) => {
+      if (!snap?.ok) return;
+      lastHarvestKeepaliveRunMs = Date.now();
+      lastHarvestCaptureMs = Date.now();
+      lastHarvestCaptureKind = 'keepalive';
+      console.log('[TCH bg] session keep-alive: snapshot captured');
+    });
 }
 
 // ─── BROADCAST ──────────────────────────────────────────────────────────────
@@ -1500,6 +1545,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     targetMaxPrice = 0,
     walmartMaxPrice = 0,
     errorRetryDelayMs = 3500,
+    checkoutInNewTab = false,
     resetEndlessSuccessCount = true,
   } = opts;
 
@@ -1529,6 +1575,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
   monitor.walmartMaxPrice = Math.max(0, Number(walmartMaxPrice) || 0);
   monitor.errorRetryDelayMs = Math.max(500, Math.min(30000, Number(errorRetryDelayMs) || 3500));
+  monitor.checkoutInNewTab = !!checkoutInNewTab;
 
   await chrome.storage.local.set({
     monitor,
@@ -1568,6 +1615,7 @@ async function stopMonitor() {
   redskyErrorStreak = 0;
   inQueueUrls.clear();
   navigationLock.clear();
+  navigationLockAt.clear();
 
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) return;
@@ -1599,6 +1647,7 @@ async function handleATCSuccess(url, tabId) {
   }
 
   navigationLock.delete(normUrl); // release — ATC succeeded
+  navigationLockAt.delete(normUrl);
   inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
   monitor.counts[normUrl] = (monitor.counts[normUrl] || 0) + 1;
   await chrome.storage.local.set({ monitor });
@@ -1609,10 +1658,10 @@ async function handleATCSuccess(url, tabId) {
   const currentCount = monitor.counts[normUrl];
 
   if (product && currentCount < product.qty) {
-    // Detach debugger before reload — next DEBUGGER_CLICK will re-attach on demand.
+    // Detach debugger before next unit — navigate back to product (not reload checkout).
     tchDebuggerDetach().catch(() => {});
     setTimeout(() => {
-      chrome.tabs.reload(tabId).catch(() => {});
+      chrome.tabs.update(tabId, { url: product.url }).catch(() => {});
     }, (monitor.refreshInterval || 1) * 1000);
     return;
   }
@@ -1629,8 +1678,21 @@ async function handleATCSuccess(url, tabId) {
     bgPollActive = false;
     const isWalmart = !!extractWalmartItemId(url);
     if (!isWalmart) {
-      // Target: navigate the ATC tab directly to Target checkout.
-      chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      if (monitor.checkoutInNewTab) {
+        try {
+          const cfg = await tchGetHarvestConfig();
+          if (cfg?.applyNextBeforeCheckout) {
+            await tchApplyNextSnapshot();
+          }
+        } catch (e) {
+          console.warn('[TCH bg] harvest apply before fresh-tab checkout failed', e);
+        }
+        await chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true });
+        console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)');
+      } else {
+        // Target: navigate the ATC tab directly to Target checkout.
+        chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      }
       // Detach debugger — no click simulation needed during checkout form-fill.
       tchDebuggerDetach().catch(() => {});
     }

@@ -38,6 +38,52 @@
   }
 
   /**
+   * Header "logged in" must not block password-only re-auth at checkout.
+   * @param {{ signedInConfirm?: boolean, looksLoggedIn?: boolean, passwordOnlyReauth?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldTreatAsLoggedInForCheckoutContinue(opts) {
+    opts = opts || {};
+    if (opts.signedInConfirm) return true;
+    if (opts.passwordOnlyReauth) return false;
+    return !!opts.looksLoggedIn;
+  }
+
+  /**
+   * @param {{ signedInConfirm?: boolean, onCheckout?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldReturnAfterFailedSignedInContinue(opts) {
+    opts = opts || {};
+    return !!(opts.onCheckout && opts.signedInConfirm);
+  }
+
+  /**
+   * Bare "continue" needle must not match "continue shopping" etc.
+   * @param {string} raw - normalized button text
+   * @param {string} needle
+   * @returns {boolean}
+   */
+  function matchesSignedInContinueNeedle(raw, needle) {
+    var norm = normalizeButtonText(raw);
+    var n = normalizeButtonText(needle);
+    if (n === 'continue') {
+      if (matchesGuestCheckoutText(norm)) return false;
+      if (/shopping|browsing|browse|exploring|reading/i.test(norm)) return false;
+      return norm === 'continue' || norm.indexOf('continue') === 0;
+    }
+    return norm === n || norm.indexOf(n) !== -1;
+  }
+
+  /**
+   * @param {string} path - URL pathname
+   * @returns {boolean}
+   */
+  function isWalmartCheckoutFlowPath(path) {
+    return /^\/(cart|checkout|qp|thankyou|thank-you|order-confirm)/i.test(path || '');
+  }
+
+  /**
    * @param {{ useSavedSession?: boolean, isLoggedIn?: boolean, path?: string }} opts
    * @returns {boolean}
    */
@@ -46,6 +92,7 @@
     if (opts.useSavedSession !== false) return false;
     if (opts.isLoggedIn) return false;
     if (classifyWalmartLoginPath(opts.path)) return false;
+    if (isWalmartCheckoutFlowPath(opts.path)) return false;
     return true;
   }
 
@@ -110,13 +157,63 @@
     return step === 'signin' || step === 'unknown';
   }
 
+  var AUTH_WARMUP_MAX_AGE_MS = 30 * 60 * 1000;
+
   /**
-   * @param {{ autoSignIn?: boolean, hasCredentials?: boolean, alreadyTried?: boolean }} opts
+   * @param {number} [warmupAtMs]
+   * @param {number} [nowMs]
+   * @returns {boolean}
+   */
+  function isAuthWarmupRecent(warmupAtMs, nowMs) {
+    if (!warmupAtMs || warmupAtMs <= 0) return false;
+    var now = nowMs != null ? nowMs : Date.now();
+    return now - warmupAtMs < AUTH_WARMUP_MAX_AGE_MS;
+  }
+
+  /**
+   * Skip automated email entry at checkout when session was warmed or looks signed in.
+   * @param {{
+   *   looksLoggedIn?: boolean,
+   *   warmupAtMs?: number,
+   *   nowMs?: number,
+   *   checkoutAuthError?: boolean,
+   *   isCreateAccountModal?: boolean,
+   *   isSignedInConfirm?: boolean,
+   * }} opts
+   * @returns {boolean}
+   */
+  function shouldSkipCheckoutEmailFlow(opts) {
+    opts = opts || {};
+    if (opts.checkoutAuthError) return true;
+    var warm = !!opts.looksLoggedIn || isAuthWarmupRecent(opts.warmupAtMs, opts.nowMs);
+    if (!warm) return false;
+    return !!(opts.isCreateAccountModal || opts.isSignedInConfirm);
+  }
+
+  /**
+   * @param {{
+   *   looksLoggedIn?: boolean,
+   *   warmupAtMs?: number,
+   *   nowMs?: number,
+   *   isSignedInConfirm?: boolean,
+   * }} opts
+   * @returns {boolean}
+   */
+  function shouldPreferSignedInContinue(opts) {
+    opts = opts || {};
+    if (opts.isSignedInConfirm) return true;
+    if (opts.looksLoggedIn) return true;
+    return isAuthWarmupRecent(opts.warmupAtMs, opts.nowMs);
+  }
+
+  /**
+   * @param {{ autoSignIn?: boolean, hasCredentials?: boolean, alreadyTried?: boolean, useSavedPayment?: boolean }} opts
    * @returns {boolean}
    */
   function shouldAttemptGuest(opts) {
     opts = opts || {};
     if (opts.alreadyTried) return false;
+    if (opts.useSavedPayment) return false;
     if (opts.autoSignIn && opts.hasCredentials) return false;
     return true;
   }
@@ -164,11 +261,19 @@
     classifyPathAsSignin: classifyPathAsSignin,
     classifyWalmartLoginPath: classifyWalmartLoginPath,
     shouldRedirectToWalmartLogin: shouldRedirectToWalmartLogin,
+    isWalmartCheckoutFlowPath: isWalmartCheckoutFlowPath,
+    shouldTreatAsLoggedInForCheckoutContinue: shouldTreatAsLoggedInForCheckoutContinue,
+    shouldReturnAfterFailedSignedInContinue: shouldReturnAfterFailedSignedInContinue,
+    matchesSignedInContinueNeedle: matchesSignedInContinueNeedle,
     matchesGuestCheckoutText: matchesGuestCheckoutText,
     isGenericContinueButtonText: isGenericContinueButtonText,
     resolveCheckoutStep: resolveCheckoutStep,
     shouldAutoSignInOnCheckoutPending: shouldAutoSignInOnCheckoutPending,
     normalizeButtonText: normalizeButtonText,
+    AUTH_WARMUP_MAX_AGE_MS: AUTH_WARMUP_MAX_AGE_MS,
+    isAuthWarmupRecent: isAuthWarmupRecent,
+    shouldSkipCheckoutEmailFlow: shouldSkipCheckoutEmailFlow,
+    shouldPreferSignedInContinue: shouldPreferSignedInContinue,
     shouldAttemptGuest: shouldAttemptGuest,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,
     formatLoginStatusLabel: formatLoginStatusLabel,
