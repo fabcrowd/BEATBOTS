@@ -70,8 +70,8 @@ export const JOURNEYS = {
     retailer: 'target',
     summary: 'Default stop at review; Place Order only when autoPlaceOrder is enabled',
     impl: ['target-checkout-helper/content.js', 'target-checkout-helper/popup.html (#autoPlaceOrder unchecked by default)'],
-    coverage: 'weak',
-    tests: ['review-dedup-simulation.mjs'],
+    coverage: 'strong',
+    tests: ['review-dedup-simulation.mjs', 'extension-e2e.mjs'],
   },
   'WM-1': {
     id: 'WM-1',
@@ -204,7 +204,7 @@ export const INVARIANTS = {
 
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
-  'extension-e2e.mjs': ['TGT-1', 'TGT-2'],
+  'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
 };
