@@ -28,3 +28,4 @@ No extension code changes required.
 ## Session Log
 
 - 2026-06-27 — @it scoped AYCD integration; brainstorm + autopilot task JSON created
+- 2026-06-27 — **Pivot:** user will not pay for AYCD → see `docs/autopilot/target-toolstack/TARGET-DIY-TOOLSTACK.md` for free build concept (`beatbots-app` + extension)
