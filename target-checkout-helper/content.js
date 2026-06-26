@@ -240,15 +240,26 @@ async function handleSignInPage(settings, opts = {}) {
 
   // Step 1: email field only visible — Target's two-step login flow.
   if (emailInput && !passInput) {
-    if (getPageType() === 'checkout' && shouldSkipCheckoutEmailAutomation()) {
-      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      console.log('[TCH] auto sign-in: warm session — trying signed-in continue instead of email');
-      if (await tryCheckoutSignedInContinue()) return;
-      return;
-    }
-    if (getPageType() === 'checkout' && (isCheckoutSignedInConfirm() || looksLoggedInOnTarget())) {
-      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      if (await tryCheckoutSignedInContinue()) return;
+    if (getPageType() === 'checkout') {
+      const signedInConfirm = isCheckoutSignedInConfirm();
+      const treatLoggedIn = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue
+        ? TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue({
+          signedInConfirm,
+          looksLoggedIn: looksLoggedInOnTarget(),
+          passwordOnlyReauth: isCheckoutPasswordOnlyReauth(),
+        })
+        : signedInConfirm || looksLoggedInOnTarget();
+      if (treatLoggedIn) {
+        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+        if (await tryCheckoutSignedInContinue()) return;
+        const stopAfterContinue = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldReturnAfterFailedSignedInContinue
+          ? TCH_SIGNIN_STEP.shouldReturnAfterFailedSignedInContinue({ onCheckout: true, signedInConfirm })
+          : signedInConfirm;
+        if (stopAfterContinue) {
+          console.log('[TCH] auto sign-in: signed-in confirm — waiting (no email re-entry)');
+          return;
+        }
+      }
     }
     console.log('[TCH] auto sign-in: step 1 — filling email via CDP');
     showToast('Auto sign-in: entering email…', 'persistent');
@@ -599,7 +610,10 @@ async function tryCheckoutSignedInContinue() {
         ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
         : (b.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
       if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesGuestCheckoutText?.(raw)) return false;
-      return raw === needle || raw.includes(needle);
+      const matches = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesSignedInContinueNeedle
+        ? TCH_SIGNIN_STEP.matchesSignedInContinueNeedle(raw, needle)
+        : (raw === needle || raw.includes(needle));
+      return matches;
     });
     if (el) {
       console.log('[TCH] checkout auth: clicking signed-in continue —', needle);
@@ -1650,11 +1664,23 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
-    if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
+    const signedInConfirm = isCheckoutSignedInConfirm();
+    const treatLoggedIn = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue
+      ? TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue({
+        signedInConfirm,
+        looksLoggedIn: looksLoggedInOnTarget(),
+        passwordOnlyReauth: isCheckoutPasswordOnlyReauth(),
+      })
+      : signedInConfirm || looksLoggedInOnTarget();
+    if (treatLoggedIn) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) {
         showToast('Checkout: continuing with signed-in account…', 'persistent');
         await sleep(800);
+        return;
+      }
+      if (signedInConfirm || isCheckoutPasswordOnlyReauth()) {
+        console.log('[TCH] auto sign-in: signed-in confirm or password re-auth — waiting');
         return;
       }
       console.log('[TCH] auto sign-in: session looks logged in — waiting for checkout to advance');
@@ -1693,7 +1719,7 @@ function watchForCheckoutStep(settings, options = {}) {
 
   let handled = false;
   let pendingRetryCount = 0;
-  let lastPendingRetryMs = 0;
+  let lastPendingRetryMs = Date.now();
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
@@ -2498,6 +2524,9 @@ async function handleMonitoredATC(monitor, product) {
   let pollInProgress = false;
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
+  try {
+    chrome.runtime.sendMessage({ type: 'TARGET_NAV_HANDOFF', url: normUrl }).catch(() => {});
+  } catch {}
 
   const pollId = setInterval(async () => {
     if (!runtimeEnabled) { clearInterval(pollId); return; }

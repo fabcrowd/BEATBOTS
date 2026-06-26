@@ -126,6 +126,26 @@ assert(
 
 assert(!S.shouldAttemptGuest({ useSavedPayment: true, autoSignIn: false, hasCredentials: false, alreadyTried: false }), 'no guest with saved payment');
 
+assert(
+  S.shouldTreatAsLoggedInForCheckoutContinue({ signedInConfirm: true, looksLoggedIn: false, passwordOnlyReauth: false }),
+  'signed-in confirm treats as logged in'
+);
+assert(
+  !S.shouldTreatAsLoggedInForCheckoutContinue({ signedInConfirm: false, looksLoggedIn: true, passwordOnlyReauth: true }),
+  'password-only reauth does not treat header as logged in'
+);
+assert(
+  S.shouldReturnAfterFailedSignedInContinue({ onCheckout: true, signedInConfirm: true }),
+  'stop email after failed continue on confirm screen'
+);
+assert(!S.matchesSignedInContinueNeedle('continue shopping', 'continue'), 'continue shopping excluded');
+assert(S.matchesSignedInContinueNeedle('continue to checkout', 'continue to checkout'), 'explicit continue needle');
+assert(S.isWalmartCheckoutFlowPath('/cart'), 'walmart cart is checkout flow');
+assert(
+  !S.shouldRedirectToWalmartLogin({ useSavedSession: false, isLoggedIn: false, path: '/cart' }),
+  'no walmart login redirect from cart'
+);
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);

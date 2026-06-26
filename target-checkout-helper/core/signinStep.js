@@ -38,6 +38,52 @@
   }
 
   /**
+   * Header "logged in" must not block password-only re-auth at checkout.
+   * @param {{ signedInConfirm?: boolean, looksLoggedIn?: boolean, passwordOnlyReauth?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldTreatAsLoggedInForCheckoutContinue(opts) {
+    opts = opts || {};
+    if (opts.signedInConfirm) return true;
+    if (opts.passwordOnlyReauth) return false;
+    return !!opts.looksLoggedIn;
+  }
+
+  /**
+   * @param {{ signedInConfirm?: boolean, onCheckout?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldReturnAfterFailedSignedInContinue(opts) {
+    opts = opts || {};
+    return !!(opts.onCheckout && opts.signedInConfirm);
+  }
+
+  /**
+   * Bare "continue" needle must not match "continue shopping" etc.
+   * @param {string} raw - normalized button text
+   * @param {string} needle
+   * @returns {boolean}
+   */
+  function matchesSignedInContinueNeedle(raw, needle) {
+    var norm = normalizeButtonText(raw);
+    var n = normalizeButtonText(needle);
+    if (n === 'continue') {
+      if (matchesGuestCheckoutText(norm)) return false;
+      if (/shopping|browsing|browse|exploring|reading/i.test(norm)) return false;
+      return norm === 'continue' || norm.indexOf('continue') === 0;
+    }
+    return norm === n || norm.indexOf(n) !== -1;
+  }
+
+  /**
+   * @param {string} path - URL pathname
+   * @returns {boolean}
+   */
+  function isWalmartCheckoutFlowPath(path) {
+    return /^\/(cart|checkout|qp|thankyou|thank-you|order-confirm)/i.test(path || '');
+  }
+
+  /**
    * @param {{ useSavedSession?: boolean, isLoggedIn?: boolean, path?: string }} opts
    * @returns {boolean}
    */
@@ -46,6 +92,7 @@
     if (opts.useSavedSession !== false) return false;
     if (opts.isLoggedIn) return false;
     if (classifyWalmartLoginPath(opts.path)) return false;
+    if (isWalmartCheckoutFlowPath(opts.path)) return false;
     return true;
   }
 
@@ -214,6 +261,10 @@
     classifyPathAsSignin: classifyPathAsSignin,
     classifyWalmartLoginPath: classifyWalmartLoginPath,
     shouldRedirectToWalmartLogin: shouldRedirectToWalmartLogin,
+    isWalmartCheckoutFlowPath: isWalmartCheckoutFlowPath,
+    shouldTreatAsLoggedInForCheckoutContinue: shouldTreatAsLoggedInForCheckoutContinue,
+    shouldReturnAfterFailedSignedInContinue: shouldReturnAfterFailedSignedInContinue,
+    matchesSignedInContinueNeedle: matchesSignedInContinueNeedle,
     matchesGuestCheckoutText: matchesGuestCheckoutText,
     isGenericContinueButtonText: isGenericContinueButtonText,
     resolveCheckoutStep: resolveCheckoutStep,
