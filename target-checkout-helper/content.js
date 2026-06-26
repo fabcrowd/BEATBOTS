@@ -71,8 +71,12 @@ let harvestBurstInProgress = false;
 let harvestBurstUrl = '';
 let harvestBurstAt = 0;
 
-async function maybeApplyHarvestedSession(settings) {
+async function maybeApplyHarvestedSession(settings, { skipAfterFreshAtc = false } = {}) {
   try {
+    if (skipAfterFreshAtc) {
+      console.log('[TCH] harvest apply skipped — fresh ATC keeps cart session');
+      return;
+    }
     if (!settings?.harvestConfig?.applyNextBeforeCheckout) return;
     const r = await chrome.runtime.sendMessage({ type: 'HARVEST_APPLY_NEXT' });
     if (r?.ok) console.log('[TCH] applied harvested cookie snapshot; remaining:', r.remaining);
@@ -846,9 +850,11 @@ const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
 const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
 const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; cleared on checkout load
+const CHECKOUT_FLOW_ACTIVE_KEY = 'tch:checkoutFlowActive';
 let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
+let lastCheckoutRetryReason = '';
 let stockWatchTimer = null;
 let stockWatchActive = false;
 let stockWatchPolls = 0;
@@ -911,6 +917,7 @@ function clearCheckoutRetryState() {
   try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
   try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
   try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+  try { sessionStorage.removeItem(CHECKOUT_FLOW_ACTIVE_KEY); } catch {}
   try { sessionStorage.removeItem(EXTRA_ATC_STATE_KEY); } catch {}
 }
 
@@ -920,6 +927,130 @@ function markCartReady() {
 
 function isCartReady() {
   try { return sessionStorage.getItem(CART_READY_KEY) === '1'; } catch { return false; }
+}
+
+function markCheckoutFlowActive() {
+  try { sessionStorage.setItem(CHECKOUT_FLOW_ACTIVE_KEY, String(Date.now())); } catch {}
+}
+
+function isCheckoutFlowActive() {
+  try {
+    const ts = parseInt(sessionStorage.getItem(CHECKOUT_FLOW_ACTIVE_KEY) || '0', 10);
+    return ts > 0 && Date.now() - ts < 30 * 60 * 1000;
+  } catch { return false; }
+}
+
+function getPageBodyText() {
+  return (document.body?.innerText || '').toLowerCase();
+}
+
+function hasHighVolumeBlock() {
+  const text = getPageBodyText();
+  return [
+    'high volume',
+    'unusually high traffic',
+    'experiencing issues',
+    'try again later',
+    'something went wrong',
+    'we\'re sorry',
+    'temporarily unavailable',
+    'please try again',
+    'couldn\'t load',
+    'can\'t load',
+    'unable to load',
+    'cart is unavailable',
+    'too many requests',
+  ].some((needle) => text.includes(needle));
+}
+
+function isCartEmptyOnPage() {
+  const text = getPageBodyText();
+  if (/your cart is empty|cart is empty|no items in your cart|looks like your cart is empty/i.test(text)) {
+    return true;
+  }
+  if (getPageType() !== 'cart') return false;
+  const lineItems = document.querySelectorAll(
+    '[data-test="cartItem"], [data-test="cart-item"], [data-test="cartLineItem"]'
+  );
+  const hasProductLink = document.querySelectorAll('a[href*="/p/"]').length > 0;
+  const hasCheckoutBtn = !!document.querySelector(SEL.cartCheckout);
+  if (lineItems.length > 0 || hasProductLink) return false;
+  if (hasHighVolumeBlock()) return false;
+  if (/empty/i.test(text)) return true;
+  if (!hasCheckoutBtn && text.length < 800) return true;
+  return false;
+}
+
+function isProductInCartOnPage() {
+  return !!(
+    Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find((el) => /\bin cart\b/i.test(el.textContent))
+    || document.querySelector('[data-test="cartButton"]')
+  );
+}
+
+async function probeCartHasItems(timeoutMs = 4000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch('https://api.target.com/web_checkouts/v1/cart', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.status === 204 || res.status === 404) return false;
+    if (!res.ok) return null;
+    const data = await res.json();
+    const items = data?.cart?.cart_items || data?.cart_items || [];
+    return Array.isArray(items) && items.length > 0;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForCartConfirmation(timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (isProductInCartOnPage()) return true;
+    const modal = document.querySelector(SEL.viewCart)
+      || Array.from(document.querySelectorAll('button, a')).find((el) =>
+        /view cart|item added|added to cart/i.test(el.textContent || ''));
+    if (modal) return true;
+    const api = await probeCartHasItems(2500);
+    if (api === true) return true;
+    if (api === false) return false;
+    await sleep(250);
+  }
+  const finalApi = await probeCartHasItems(3000);
+  if (finalApi === true) return true;
+  if (finalApi === false) return false;
+  return isProductInCartOnPage();
+}
+
+async function navigateToCheckout(settings, { skipHarvestAfterAtc = false, requireCartConfirm = false } = {}) {
+  if (requireCartConfirm) {
+    const confirmed = await waitForCartConfirmation(6000);
+    if (!confirmed) {
+      console.warn('[TCH] cart not confirmed before checkout navigation');
+      showToast('Cart not confirmed — retrying add-to-cart…', 'persistent');
+      try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+      chrome.runtime.sendMessage({
+        type: 'TARGET_NAV_FAILED',
+        url: location.href,
+        reason: 'Cart not confirmed before checkout',
+      }).catch(() => {});
+      await scheduleCheckoutRetry(settings, 'Cart not confirmed before checkout');
+      return false;
+    }
+  }
+  markCartReady();
+  markCheckoutFlowActive();
+  setNavigationMark('product_to_checkout');
+  await maybeApplyHarvestedSession(settings, { skipAfterFreshAtc: skipHarvestAfterAtc });
+  window.location.href = 'https://www.target.com/checkout';
+  return true;
 }
 
 function rememberProductUrl(url = location.href) {
@@ -1000,9 +1131,14 @@ function performRetryNavigation() {
     return;
   }
 
-  // If we already added to cart (ATC succeeded), go straight to cart → checkout
-  // to avoid re-landing on the product page where the button shows "1 in cart".
+  // If we already added to cart (ATC succeeded), prefer product re-ATC when cart was empty.
   if (isCartReady()) {
+    const remembered = getRememberedProductUrl();
+    if (/cart empty|not confirmed/i.test(lastCheckoutRetryReason) && remembered) {
+      markRetryNavigation(remembered);
+      window.location.href = remembered;
+      return;
+    }
     markRetryNavigation('https://www.target.com/cart');
     window.location.href = 'https://www.target.com/cart';
     return;
@@ -1021,6 +1157,7 @@ function performRetryNavigation() {
 
 async function scheduleCheckoutRetry(settings, reason, details = {}) {
   if (!runtimeEnabled) return false;
+  lastCheckoutRetryReason = String(reason || '');
   // Do not schedule reload / cart redirect while on checkout — user must sign in or fix the step locally.
   if (getPageType() === 'checkout') {
     console.warn('[TCH] navigation retry suppressed on checkout:', reason);
@@ -1365,6 +1502,7 @@ function markCheckoutStart(mode) {
   try {
     sessionStorage.setItem(CHECKOUT_START_KEY, String(Date.now()));
     sessionStorage.setItem(CHECKOUT_MODE_KEY, mode);
+    markCheckoutFlowActive();
   } catch {}
 }
 
@@ -1445,11 +1583,8 @@ async function handleProductPage(settings) {
   ) || document.querySelector('[data-test="cartButton"]');
   if (inCartEl) {
     console.log('[TCH] item already in cart — navigating to checkout');
-    markCartReady();
     showToast('Item in cart → checkout…');
-    setNavigationMark('product_to_checkout');
-    await maybeApplyHarvestedSession(settings);
-    window.location.href = 'https://www.target.com/checkout';
+    await navigateToCheckout(settings);
     return;
   }
 
@@ -1485,11 +1620,8 @@ async function handleProductPage(settings) {
     // (disabled because item is already in cart, not because it's OOS).
     if (/\bin cart\b/i.test(addBtn.textContent)) {
       console.log('[TCH] ATC button shows "in cart" — navigating to checkout');
-      markCartReady();
       showToast('Item in cart → checkout…');
-      setNavigationMark('product_to_checkout');
-      await maybeApplyHarvestedSession(settings);
-      window.location.href = 'https://www.target.com/checkout';
+      await navigateToCheckout(settings);
       return;
     }
     const altEnabled = findFirstEnabledAtcButton();
@@ -1533,16 +1665,13 @@ async function handleProductPage(settings) {
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
     try {
       const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
-      markCartReady(); // modal confirmed — item is in cart
+      markCartReady();
       setNavigationMark('product_to_checkout');
       await debuggerClick(viewCartBtn);
       return;
     } catch {
       console.log('[TCH] viewCart modal not found; navigating to checkout directly');
-      markCartReady(); // optimistic — modal may not appear even on a successful ATC
-      setNavigationMark('product_to_checkout');
-      await maybeApplyHarvestedSession(settings);
-      window.location.href = 'https://www.target.com/checkout';
+      await navigateToCheckout(settings, { skipHarvestAfterAtc: true, requireCartConfirm: true });
       return;
     }
   }
@@ -1563,28 +1692,72 @@ async function handleProductPage(settings) {
     }
   }
 
-  markCartReady(); // about to navigate — item should be in cart
   showToast('ATC → checkout…');
-  setNavigationMark('product_to_checkout');
-  await maybeApplyHarvestedSession(settings);
-  window.location.href = 'https://www.target.com/checkout';
+  await navigateToCheckout(settings, { skipHarvestAfterAtc: true, requireCartConfirm: true });
 }
 
 async function handleCartPage(settings) {
   console.log('[TCH] handleCartPage');
+  markCheckoutFlowActive();
+
+  if (hasHighVolumeBlock()) {
+    showToast('Cart: Target high volume — reloading in 8s…', 'persistent');
+    await reportRetryEvent({ status: 'high_volume', page: 'cart', url: location.href, ts: Date.now() });
+    setTimeout(() => { if (runtimeEnabled) location.reload(); }, 8000);
+    return;
+  }
+
+  await sleep(400);
+
+  if (isCartEmptyOnPage()) {
+    const apiEmpty = await probeCartHasItems();
+    if (apiEmpty === false) {
+      console.warn('[TCH] cart page empty — returning to product for re-ATC');
+      showToast('Cart empty (drop load?) — re-adding item…', 'persistent');
+      try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+      await scheduleCheckoutRetry(settings, 'Cart empty on cart page');
+      return;
+    }
+  }
+
+  const hydrateMs = isCheckoutFlowActive() ? 12000 : 8000;
   const stopCartCheckout = startTiming('cart_wait_for_checkout_button');
   try {
     const btn = await waitForAny([
       { sel: SEL.cartCheckout }, { text: 'check out' }, { text: 'sign in to check out' },
-    ], 6000);
+    ], hydrateMs);
+    if (isCartEmptyOnPage()) {
+      stopCartCheckout('empty_cart');
+      await scheduleCheckoutRetry(settings, 'Cart empty — checkout button visible but no items');
+      return;
+    }
     stopCartCheckout('clicked');
     setNavigationMark('cart_to_checkout');
+    await maybeApplyHarvestedSession(settings);
     await debuggerClick(btn);
   } catch {
-    stopCartCheckout('fallback_redirect');
-    setNavigationMark('cart_to_checkout');
-    await maybeApplyHarvestedSession(settings);
-    window.location.href = 'https://www.target.com/checkout';
+    const api = await probeCartHasItems();
+    if (api === false) {
+      stopCartCheckout('empty_timeout');
+      await scheduleCheckoutRetry(settings, 'Cart empty — checkout button timeout');
+      return;
+    }
+    if (hasHighVolumeBlock()) {
+      stopCartCheckout('high_volume');
+      showToast('Cart slow to load — reloading…', 'persistent');
+      setTimeout(() => { if (runtimeEnabled) location.reload(); }, 6000);
+      return;
+    }
+    if (api === true || isProductInCartOnPage()) {
+      stopCartCheckout('fallback_redirect');
+      setNavigationMark('cart_to_checkout');
+      markCartReady();
+      await maybeApplyHarvestedSession(settings);
+      window.location.href = 'https://www.target.com/checkout';
+      return;
+    }
+    stopCartCheckout('no_cart');
+    await scheduleCheckoutRetry(settings, 'Cart checkout button not found');
   }
 }
 
@@ -1610,6 +1783,7 @@ function markCheckoutFlow(step) {
 }
 
 async function handleCheckoutPage(settings) {
+  markCheckoutFlowActive();
   markCheckoutFlow('page_ready');
   // If a monitor Buy It Now click was pending confirmation, fire ATC_SUCCESS now that
   // checkout has loaded (the only reliable signal we have after cross-page navigation).
@@ -1620,6 +1794,13 @@ async function handleCheckoutPage(settings) {
       chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: binUrl }).catch(() => {});
     }
   } catch {}
+
+  if (hasHighVolumeBlock()) {
+    console.warn('[TCH] checkout high-volume block detected');
+    showToast('Checkout: Target high volume — wait on this page; do not reload.', 'persistent');
+    await reportRetryEvent({ status: 'high_volume', page: 'checkout', url: location.href, ts: Date.now() });
+  }
+
   const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
   if (step === 'shipping')    return handleShippingStep(settings);
@@ -1743,6 +1924,7 @@ function watchForCheckoutStep(settings, options = {}) {
   let handled = false;
   let pendingRetryCount = 0;
   let lastPendingRetryMs = Date.now();
+  let pendingEscalated = false;
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
@@ -1763,6 +1945,14 @@ function watchForCheckoutStep(settings, options = {}) {
         lastPendingRetryMs = Date.now();
         pendingRetryCount++;
         await runCheckoutPendingActions(settings, step, { silent: pendingRetryCount > 1 });
+      } else if (pendingRetryCount >= PENDING_MAX_RETRIES && !pendingEscalated) {
+        pendingEscalated = true;
+        showToast(
+          'Checkout stuck at sign-in — finish manually, enable Fresh tab checkout, or turn extension off and reload.',
+          'persistent'
+        );
+        await maybeApplyShapeCookieForAtc(settings, { hypeOnly: false });
+        await tryCheckoutSignedInContinue();
       }
       return;
     }
@@ -2491,36 +2681,56 @@ async function handleMonitoredATC(monitor, product) {
       setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
 
       if (settings.useSavedPayment) {
-        // With saved payment: click "View Cart & Check Out" from the ATC modal for fastest path.
         let cartConfirmed = false;
         try {
-          const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
+          const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 3500);
           setNavigationMark('product_to_checkout');
           await debuggerClick(viewCartBtn);
           cartConfirmed = true;
         } catch {
-          // Modal didn't appear; navigate to checkout directly.
-          setNavigationMark('product_to_checkout');
-          await maybeApplyHarvestedSession(settings);
-          window.location.href = 'https://www.target.com/checkout';
-          cartConfirmed = true;
+          cartConfirmed = await waitForCartConfirmation(5000);
+          if (cartConfirmed) {
+            setNavigationMark('product_to_checkout');
+            await navigateToCheckout(settings, { skipHarvestAfterAtc: true });
+          }
         }
+        if (!cartConfirmed) {
+          showToast('Monitor: ATC clicked but cart not confirmed — retrying…', 'persistent');
+          chrome.runtime.sendMessage({
+            type: 'TARGET_NAV_FAILED',
+            url: normUrl,
+            reason: 'Monitor ATC cart not confirmed',
+          }).catch(() => {});
+          return;
+        }
+        markCartReady();
         showToast(`Monitor: Added! → checkout (${currentCount + 1}/${product.qty})`, 'success');
-        console.log(`[TCH] monitor ATC (saved): navigating to checkout`);
+        console.log('[TCH] monitor ATC (saved): cart confirmed');
         chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl }).catch(() => {});
         return;
       }
 
-      // Without saved payment: navigate directly to checkout to skip the cart page round-trip.
       let cartConfirmed = false;
       try {
         await waitForAny([
           { sel: SEL.viewCart },
           { text: 'view cart' }, { text: 'view cart & check out' },
           { text: 'item added' }, { text: 'added to cart' },
-        ], 2500);
+        ], 3500);
         cartConfirmed = true;
-      } catch { /* modal didn't appear — item may still have been added */ }
+      } catch {
+        cartConfirmed = await waitForCartConfirmation(5000);
+      }
+
+      if (!cartConfirmed) {
+        showToast('Monitor: ATC clicked but cart not confirmed — retrying…', 'persistent');
+        chrome.runtime.sendMessage({
+          type: 'TARGET_NAV_FAILED',
+          url: normUrl,
+          reason: 'Monitor ATC cart not confirmed',
+        }).catch(() => {});
+        return;
+      }
 
       markCartReady();
       chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl }).catch(() => {});
@@ -2722,6 +2932,7 @@ async function init() {
 let lastUrl = location.href;
 new MutationObserver(() => {
   if (location.href === lastUrl) return;
+  const prevUrl = lastUrl;
   lastUrl = location.href;
   invalidateCache();
   document.getElementById('tch-toast')?.remove();
@@ -2730,6 +2941,19 @@ new MutationObserver(() => {
       ? TCH_HOSTS.detectRetailer(location.href)
       : null;
   if (r !== 'target' && r !== 'walmart') return;
+  if (/\/checkout/.test(prevUrl) && /\/cart/.test(location.pathname) && isCheckoutFlowActive()) {
+    requestAnimationFrame(async () => {
+      const data = await getSettings();
+      const empty = isCartEmptyOnPage() || (await probeCartHasItems()) === false;
+      if (empty) {
+        showToast('Kicked to empty cart — re-adding item…', 'persistent');
+        try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+        await scheduleCheckoutRetry(data, 'Checkout ejected to empty cart');
+      } else {
+        showToast('Returned to cart — continuing checkout…', 'persistent');
+      }
+    });
+  }
   requestAnimationFrame(init);
 }).observe(document, { subtree: true, childList: true });
 

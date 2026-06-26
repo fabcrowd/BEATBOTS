@@ -206,12 +206,13 @@ async function maybeAutoRecoverTargetSession() {
     return { ok: false, reason: 'streak_below_threshold', streak: redskyErrorStreak };
   }
 
-  // Guard 2: never wipe site data while the user is in an active checkout flow.
-  // Clearing cookies mid-checkout is worse than a stale session — the user would
-  // be logged out at the payment or review step.
-  const checkoutTabs = await chrome.tabs.query({ url: '*://*.target.com/checkout*' }).catch(() => []);
-  if (checkoutTabs.length > 0) {
-    console.warn('[TCH bg] session recovery suppressed — checkout in progress on', checkoutTabs.length, 'tab(s)');
+  // Guard 2: never wipe site data while the user is in an active checkout or cart flow.
+  // Clearing cookies mid-checkout or on /cart during a drop is worse than a stale session.
+  const protectedTabs = await chrome.tabs.query({
+    url: ['*://*.target.com/checkout*', '*://*.target.com/cart*'],
+  }).catch(() => []);
+  if (protectedTabs.length > 0) {
+    console.warn('[TCH bg] session recovery suppressed — checkout/cart in progress on', protectedTabs.length, 'tab(s)');
     notifyTargetTabsSessionHint();
     return { ok: false, reason: 'checkout_in_progress' };
   }
@@ -1693,14 +1694,7 @@ async function handleATCSuccess(url, tabId) {
     const isWalmart = !!extractWalmartItemId(url);
     if (!isWalmart) {
       if (monitor.checkoutInNewTab) {
-        try {
-          const cfg = await tchGetHarvestConfig();
-          if (cfg?.applyNextBeforeCheckout) {
-            await tchApplyNextSnapshot();
-          }
-        } catch (e) {
-          console.warn('[TCH bg] harvest apply before fresh-tab checkout failed', e);
-        }
+        // Skip harvest replay after DOM ATC — cart is bound to the current session cookies.
         await chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true });
         console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)');
       } else {
