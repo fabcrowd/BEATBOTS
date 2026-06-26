@@ -134,6 +134,11 @@
             <input type="number" id="targetMaxPrice" value="0" min="0" step="0.01" title="Price ceiling. The bot will not proceed if the item's retail price is above this amount. Set to 0 for no limit. Useful when products show inflated prices before a drop.">
             <span class="inline-hint">0 = no limit. Bot skips if retail price is above this.</span>
           </div>
+          <label class="option-row" style="margin-top:8px" title="When ON, opens checkout in a new tab after monitor ATC instead of navigating the monitor tab. Keeps the product tab on the page — light session separation (Stellar-style). Apply before checkout harvest still runs in the new tab context.">
+            <input type="checkbox" id="checkoutInNewTab">
+            <span class="option-label">Checkout in new tab (keep monitor tab)</span>
+          </label>
+          <p class="option-hint">Opens <code>/checkout</code> in a fresh tab after restock ATC. Monitor tab stays on the product page.</p>
           <button type="button" id="monitorBtn" class="btn-monitor" title="Opens a background tab for each product and begins polling Target's inventory API. When stock is detected, automatically navigates to the page and runs checkout.">Start monitoring</button>
         </div>
         <div id="monitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
@@ -141,6 +146,17 @@
 
       <section class="card" aria-labelledby="optionsHeading">
         <h2 id="optionsHeading">Checkout options</h2>
+
+        <details class="card guide-section" style="margin-bottom:10px">
+          <summary class="tips-summary">Pre-drop checklist (30 sec)</summary>
+          <ol class="guide-steps" style="margin-top:6px">
+            <li><strong>One</strong> Target tab · <strong>empty cart</strong> · extension <strong>ON</strong></li>
+            <li>Sign in <strong>30+ min early</strong> — visit <code>/login</code> or enable Advanced → auto sign-in</li>
+            <li>Cookie pool <strong>3+</strong> if hype drop · <strong>Apply before checkout</strong> ON</li>
+            <li>Do <strong>not</strong> toggle settings in the last minute before drop</li>
+            <li>Full research crosswalk: repo <code>docs/autopilot/checkout-improvements/CHECKOUT-RESEARCH-BRAINSTORM.md</code> (Guide tab below)</li>
+          </ol>
+        </details>
 
         <div class="acct-status" id="acctStatus">
           <div class="acct-status-header">

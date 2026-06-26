@@ -35,7 +35,7 @@
         "runCheckoutPendingActions backs off when error present",
         "signin-step or node test for pure helper if extracted"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3",
@@ -48,7 +48,7 @@
         "rehearsal-auth or content path documented in checkout-improvements-notes.md",
         "Log decision in notes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4",
@@ -60,7 +60,7 @@
         "tryGuestCheckoutClick or signed-in continue tried before email step on new modal",
         "No infinite email+Continue loop in rehearsal logs"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5",
@@ -73,7 +73,7 @@
         "Background handleATCSuccess respects new tab path",
         "node --check green"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6",
@@ -85,7 +85,7 @@
         "popup shows short checklist or link to CHECKOUT-RESEARCH-BRAINSTORM.md",
         "checkout-improvements-notes.md updated"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7",
@@ -98,7 +98,7 @@
         "cd scripts/browser-smoke && xvfb-run -a npm run test:extension"
       ],
       "acceptance": ["All gates PASS", "Summary in checkout-improvements-notes.md"],
-      "passes": false
+      "passes": true
     }
   ]
 }

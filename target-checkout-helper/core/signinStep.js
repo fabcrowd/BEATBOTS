@@ -110,13 +110,63 @@
     return step === 'signin' || step === 'unknown';
   }
 
+  var AUTH_WARMUP_MAX_AGE_MS = 30 * 60 * 1000;
+
   /**
-   * @param {{ autoSignIn?: boolean, hasCredentials?: boolean, alreadyTried?: boolean }} opts
+   * @param {number} [warmupAtMs]
+   * @param {number} [nowMs]
+   * @returns {boolean}
+   */
+  function isAuthWarmupRecent(warmupAtMs, nowMs) {
+    if (!warmupAtMs || warmupAtMs <= 0) return false;
+    var now = nowMs != null ? nowMs : Date.now();
+    return now - warmupAtMs < AUTH_WARMUP_MAX_AGE_MS;
+  }
+
+  /**
+   * Skip automated email entry at checkout when session was warmed or looks signed in.
+   * @param {{
+   *   looksLoggedIn?: boolean,
+   *   warmupAtMs?: number,
+   *   nowMs?: number,
+   *   checkoutAuthError?: boolean,
+   *   isCreateAccountModal?: boolean,
+   *   isSignedInConfirm?: boolean,
+   * }} opts
+   * @returns {boolean}
+   */
+  function shouldSkipCheckoutEmailFlow(opts) {
+    opts = opts || {};
+    if (opts.checkoutAuthError) return true;
+    var warm = !!opts.looksLoggedIn || isAuthWarmupRecent(opts.warmupAtMs, opts.nowMs);
+    if (!warm) return false;
+    return !!(opts.isCreateAccountModal || opts.isSignedInConfirm);
+  }
+
+  /**
+   * @param {{
+   *   looksLoggedIn?: boolean,
+   *   warmupAtMs?: number,
+   *   nowMs?: number,
+   *   isSignedInConfirm?: boolean,
+   * }} opts
+   * @returns {boolean}
+   */
+  function shouldPreferSignedInContinue(opts) {
+    opts = opts || {};
+    if (opts.isSignedInConfirm) return true;
+    if (opts.looksLoggedIn) return true;
+    return isAuthWarmupRecent(opts.warmupAtMs, opts.nowMs);
+  }
+
+  /**
+   * @param {{ autoSignIn?: boolean, hasCredentials?: boolean, alreadyTried?: boolean, useSavedPayment?: boolean }} opts
    * @returns {boolean}
    */
   function shouldAttemptGuest(opts) {
     opts = opts || {};
     if (opts.alreadyTried) return false;
+    if (opts.useSavedPayment) return false;
     if (opts.autoSignIn && opts.hasCredentials) return false;
     return true;
   }
@@ -169,6 +219,10 @@
     resolveCheckoutStep: resolveCheckoutStep,
     shouldAutoSignInOnCheckoutPending: shouldAutoSignInOnCheckoutPending,
     normalizeButtonText: normalizeButtonText,
+    AUTH_WARMUP_MAX_AGE_MS: AUTH_WARMUP_MAX_AGE_MS,
+    isAuthWarmupRecent: isAuthWarmupRecent,
+    shouldSkipCheckoutEmailFlow: shouldSkipCheckoutEmailFlow,
+    shouldPreferSignedInContinue: shouldPreferSignedInContinue,
     shouldAttemptGuest: shouldAttemptGuest,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,
     formatLoginStatusLabel: formatLoginStatusLabel,

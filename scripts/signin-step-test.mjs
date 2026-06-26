@@ -94,6 +94,38 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+assert(S.isAuthWarmupRecent(Date.now() - 1000), 'warmup recent within 30m');
+assert(!S.isAuthWarmupRecent(0), 'no warmup at zero');
+assert(!S.isAuthWarmupRecent(Date.now() - 31 * 60 * 1000), 'warmup stale after 30m');
+
+assert(
+  S.shouldSkipCheckoutEmailFlow({
+    looksLoggedIn: true,
+    isCreateAccountModal: true,
+    warmupAtMs: Date.now() - 5000,
+  }),
+  'skip email when warm + create-account modal'
+);
+assert(
+  !S.shouldSkipCheckoutEmailFlow({ looksLoggedIn: false, isCreateAccountModal: true }),
+  'no skip without warm session'
+);
+assert(
+  S.shouldSkipCheckoutEmailFlow({ checkoutAuthError: true, looksLoggedIn: true }),
+  'skip email on auth error'
+);
+
+assert(
+  S.shouldPreferSignedInContinue({ looksLoggedIn: true }),
+  'prefer continue when logged in'
+);
+assert(
+  S.shouldPreferSignedInContinue({ warmupAtMs: Date.now() - 1000 }),
+  'prefer continue when warmup recent'
+);
+
+assert(!S.shouldAttemptGuest({ useSavedPayment: true, autoSignIn: false, hasCredentials: false, alreadyTried: false }), 'no guest with saved payment');
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);

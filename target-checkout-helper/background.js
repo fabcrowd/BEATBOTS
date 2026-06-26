@@ -1100,6 +1100,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
+          checkoutInNewTab: !!message.checkoutInNewTab,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1500,6 +1501,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     targetMaxPrice = 0,
     walmartMaxPrice = 0,
     errorRetryDelayMs = 3500,
+    checkoutInNewTab = false,
     resetEndlessSuccessCount = true,
   } = opts;
 
@@ -1529,6 +1531,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
   monitor.walmartMaxPrice = Math.max(0, Number(walmartMaxPrice) || 0);
   monitor.errorRetryDelayMs = Math.max(500, Math.min(30000, Number(errorRetryDelayMs) || 3500));
+  monitor.checkoutInNewTab = !!checkoutInNewTab;
 
   await chrome.storage.local.set({
     monitor,
@@ -1629,8 +1632,21 @@ async function handleATCSuccess(url, tabId) {
     bgPollActive = false;
     const isWalmart = !!extractWalmartItemId(url);
     if (!isWalmart) {
-      // Target: navigate the ATC tab directly to Target checkout.
-      chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      if (monitor.checkoutInNewTab) {
+        try {
+          const cfg = await tchGetHarvestConfig();
+          if (cfg?.applyNextBeforeCheckout) {
+            await tchApplyNextSnapshot();
+          }
+        } catch (e) {
+          console.warn('[TCH bg] harvest apply before fresh-tab checkout failed', e);
+        }
+        await chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true });
+        console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)');
+      } else {
+        // Target: navigate the ATC tab directly to Target checkout.
+        chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      }
       // Detach debugger — no click simulation needed during checkout form-fill.
       tchDebuggerDetach().catch(() => {});
     }
