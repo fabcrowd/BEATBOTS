@@ -1,0 +1,104 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "checkout-improvements",
+  "description": "Research-driven checkout improvements (Tier A) — post deep-dive brainstorm",
+  "goals": [
+    "Close gap vs Refract/Stellar on pre-auth and checkout modal handling",
+    "Light monitor/checkout session separation where extension allows",
+    "All verify.sh gates green; notes document research traceability"
+  ],
+  "nonGoals": [
+    "API checkout in extension",
+    "Active Shape generation in extension",
+    "Proxy multi-account bot stack"
+  ],
+  "technicalNotes": "Brainstorm: docs/autopilot/checkout-improvements/CHECKOUT-RESEARCH-BRAINSTORM.md. Boss: @it. Use subagents for DOM/sign-in work. Reddit: no reliable corpus — vendor docs + rehearsal DOM probes.",
+  "_tdd": true,
+  "requirements": [
+    {
+      "id": "1",
+      "category": "testing",
+      "priority": "high",
+      "description": "Baseline: bash scripts/verify.sh exits 0",
+      "verification": ["bash scripts/verify.sh"],
+      "acceptance": ["verify.sh ALL PASSED"],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "functional",
+      "priority": "high",
+      "description": "Detect Target checkout auth error banner and stop sign-in retry spam",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "hasCheckoutAuthError() or equivalent detects 'Something went wrong' in auth modal",
+        "runCheckoutPendingActions backs off when error present",
+        "signin-step or node test for pure helper if extracted"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "high",
+      "description": "Pre-auth warmup: skip checkout email flow when session already valid",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "After /login success, optional warmup navigation reduces checkout modal sign-in",
+        "rehearsal-auth or content path documented in checkout-improvements-notes.md",
+        "Log decision in notes"
+      ],
+      "passes": true
+    },
+    {
+      "id": "4",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Checkout modal: guest or continue when useSavedPayment and auth gate blocks",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "tryGuestCheckoutClick or signed-in continue tried before email step on new modal",
+        "No infinite email+Continue loop in rehearsal logs"
+      ],
+      "passes": true
+    },
+    {
+      "id": "5",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Optional fresh-tab checkout after monitor ping (light session separation)",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "Setting or monitor flag opens new tab for checkout with harvest apply",
+        "Background handleATCSuccess respects new tab path",
+        "node --check green"
+      ],
+      "passes": true
+    },
+    {
+      "id": "6",
+      "category": "docs",
+      "priority": "low",
+      "description": "Popup pre-drop checklist + research summary link",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "popup shows short checklist or link to CHECKOUT-RESEARCH-BRAINSTORM.md",
+        "checkout-improvements-notes.md updated"
+      ],
+      "passes": true
+    },
+    {
+      "id": "7",
+      "category": "testing",
+      "priority": "high",
+      "description": "Final verify + extension smoke + summary",
+      "dependsOn": ["2", "3", "4", "5", "6"],
+      "verification": [
+        "bash scripts/verify.sh",
+        "cd scripts/browser-smoke && xvfb-run -a npm run test:extension"
+      ],
+      "acceptance": ["All gates PASS", "Summary in checkout-improvements-notes.md"],
+      "passes": true
+    }
+  ]
+}

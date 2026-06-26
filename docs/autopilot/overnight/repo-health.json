@@ -79,7 +79,7 @@
       "id": "3",
       "category": "functional",
       "priority": "high",
-      "description": "Bug hunt: Target checkout and sign-in flow (content.js) \u2014 fix issues, add Node tests if needed",
+      "description": "Bug hunt: Target checkout and sign-in flow (content.js) — fix issues, add Node tests if needed",
       "recurring": true,
       "dependsOn": [
         "1"
@@ -121,17 +121,17 @@
       "tdd": {
         "test": {
           "description": "Document issue with reproduction steps in notes",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Fix with surgical diff",
-          "passes": false
+          "passes": true
         },
         "refactor": {
-          "passes": false
+          "passes": true
         }
       },
-      "passes": false
+      "passes": true
     },
     {
       "id": "5",
@@ -150,17 +150,17 @@
       "tdd": {
         "test": {
           "description": "Identify issue in walmart flow",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Fix",
-          "passes": false
+          "passes": true
         },
         "refactor": {
-          "passes": false
+          "passes": true
         }
       },
-      "passes": false
+      "passes": true
     },
     {
       "id": "6",
@@ -179,17 +179,17 @@
       "tdd": {
         "test": {
           "description": "Identify duplication",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Extract or remove",
-          "passes": false
+          "passes": true
         },
         "refactor": {
-          "passes": false
+          "passes": true
         }
       },
-      "passes": false
+      "passes": true
     },
     {
       "id": "7",
@@ -209,17 +209,17 @@
       "tdd": {
         "test": {
           "description": "Run browser-smoke",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Fix or mark stuck",
-          "passes": false
+          "passes": true
         },
         "refactor": {
-          "passes": false
+          "passes": true
         }
       },
-      "passes": false
+      "passes": true
     },
     {
       "id": "8",
@@ -241,17 +241,17 @@
       "tdd": {
         "test": {
           "description": "Collect session outcomes",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Write summary and commit",
-          "passes": false
+          "passes": true
         },
         "refactor": {
-          "passes": false
+          "passes": true
         }
       },
-      "passes": false
+      "passes": true
     }
   ]
 }

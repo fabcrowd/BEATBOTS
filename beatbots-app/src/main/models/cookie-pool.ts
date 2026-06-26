@@ -16,6 +16,16 @@ const MAX_POOL_SIZE = 50
 let ttlMs = DEFAULT_TTL_MS
 let removalOrder: 'lifo' | 'fifo' = 'lifo'
 
+const poolChangeListeners: (() => void)[] = []
+
+export function onPoolChange(fn: () => void): void {
+  poolChangeListeners.push(fn)
+}
+
+function notifyPoolChange(): void {
+  for (const fn of poolChangeListeners) fn()
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export function setCookiePoolConfig(opts: {
@@ -62,6 +72,7 @@ export function addCookie(
       pools[kind].shift() // drop oldest
     }
   }
+  notifyPoolChange()
 }
 
 // ─── Consume ──────────────────────────────────────────────────────────────────
@@ -76,17 +87,21 @@ export function consumeCookie(kind: CookieKind, preferProxyMatch?: string): Harv
     const idx = pool.findIndex(c => c.proxyUsed === preferProxyMatch)
     if (idx !== -1) {
       const [cookie] = pool.splice(idx, 1)
+      notifyPoolChange()
       return cookie
     }
   }
 
   // LIFO: take newest (end of array)
   // FIFO: take oldest (start of array)
+  let consumed: HarvestedCookie | null
   if (removalOrder === 'lifo') {
-    return pool.pop() ?? null
+    consumed = pool.pop() ?? null
   } else {
-    return pool.shift() ?? null
+    consumed = pool.shift() ?? null
   }
+  if (consumed) notifyPoolChange()
+  return consumed
 }
 
 // ─── Prune ────────────────────────────────────────────────────────────────────
@@ -127,6 +142,7 @@ export function clearPool(kind?: CookieKind): void {
     pools.atc = []
   }
   harvestTimestamps = []
+  notifyPoolChange()
 }
 
 // ─── Peek (for UI display) ────────────────────────────────────────────────────
