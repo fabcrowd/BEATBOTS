@@ -171,6 +171,7 @@ flowchart TB
 
 ## Related docs
 
+- `docs/autopilot/stock-monitor-research/stock-monitor-research.md` — how stock bots detect restocks; Phase 1 plan
 - `docs/autopilot/checkout-reliability/CHECKOUT-BYPASS-RESEARCH.md`
 - `docs/autopilot/anti-detection/ANTI-DETECTION-RESEARCH-PLAN.md`
 - `docs/autopilot/target-toolstack/CHROME-PROFILES-RUNBOOK.md`
