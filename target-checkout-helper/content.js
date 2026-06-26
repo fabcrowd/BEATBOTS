@@ -81,6 +81,29 @@ async function maybeApplyHarvestedSession(settings) {
   }
 }
 
+/** Prefer BEATBOTS app Shape pool for monitor ATC; fall back to extension harvest pool. */
+async function maybeApplyShapeCookieForAtc(settings, { hypeOnly = false } = {}) {
+  try {
+    const bb = await chrome.runtime.sendMessage({ type: 'BB_APPLY_ATC_COOKIE' });
+    if (bb?.ok) {
+      console.log('[TCH] applied BEATBOTS Shape cookie before ATC; remaining app pool:', bb.remaining);
+      return true;
+    }
+    if (hypeOnly) return false;
+    await maybeApplyHarvestedSession(settings);
+    return !!settings?.harvestConfig?.applyNextBeforeCheckout;
+  } catch (e) {
+    console.warn('[TCH] Shape cookie apply skipped', e);
+    return false;
+  }
+}
+
+function hasShapePoolForHype(poolStatus) {
+  const extCount = Number(poolStatus?.count) || 0;
+  const appAtc = Number(poolStatus?.beatbots?.pool?.atcCount) || 0;
+  return extCount > 0 || appAtc > 0;
+}
+
 /** Refract-style: on product/login while harvesting is on, snapshot after page settles.
  *  @param {object} data - settings object with harvestConfig
  *  @param {object} [opts]
@@ -2395,12 +2418,13 @@ async function handleMonitoredATC(monitor, product) {
 
   if (currentCount >= product.qty) return;
 
-  // Hype mode: require at least one cookie snapshot in pool before ATC.
+  // Hype mode: require at least one cookie snapshot in extension or BEATBOTS app pool before ATC.
   if (product.hypeMode) {
     try {
       const poolStatus = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
-      if (!poolStatus?.count) {
-        showToast('Hype mode: no cookie snapshots in pool — waiting for harvest…', 'persistent');
+      if (!hasShapePoolForHype(poolStatus)) {
+        const bbHint = poolStatus?.beatbots?.connected ? '' : ' (start beatbots-app Shape harvester)';
+        showToast(`Hype mode: no Shape cookies in pool — waiting for harvest…${bbHint}`, 'persistent');
         return;
       }
     } catch { /* no-op if SW is inactive */ }
@@ -2459,6 +2483,7 @@ async function handleMonitoredATC(monitor, product) {
       showToast(`Price above max ($${Number(settings.targetMaxPrice).toFixed(2)}) — waiting…`, 'persistent');
     } else {
       showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
+      await maybeApplyShapeCookieForAtc(settings, { hypeOnly: !!product.hypeMode });
       await debuggerClick(addBtn);
       await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
 

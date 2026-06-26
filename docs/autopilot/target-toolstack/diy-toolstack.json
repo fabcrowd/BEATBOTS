@@ -45,7 +45,7 @@
         "Popup shows beatbots pool status when connected",
         "diy-toolstack-notes.md updated"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4",
@@ -58,7 +58,7 @@
         "Hype mode uses app cookie when available",
         "beatbots-app unit test or manual test steps in notes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5",

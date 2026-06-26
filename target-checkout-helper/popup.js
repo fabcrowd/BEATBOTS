@@ -131,6 +131,7 @@ async function refreshHarvestStatus() {
   try {
     const s = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
     const c = $('harvestCountText');
+    const bp = $('beatbotsPoolText');
     const n = $('harvestNextText');
     const w = $('harvestSessionWarn');
     const hw = $('harvestHiddenWarn');
@@ -142,6 +143,22 @@ async function refreshHarvestStatus() {
         if (count < 10) c.classList.add('harvest-count-low');
         else if (count < 30) c.classList.add('harvest-count-mid');
         else c.classList.add('harvest-count-ok');
+      }
+    }
+    if (bp && s) {
+      const bb = s.beatbots || {};
+      const pool = bb.pool || {};
+      if (!bb.connected) {
+        bp.textContent = 'BEATBOTS app: offline (extension-only harvest)';
+        bp.className = 'harvest-count';
+      } else {
+        const atc = Number(pool.atcCount) || 0;
+        const login = Number(pool.loginCount) || 0;
+        bp.textContent = `BEATBOTS app: connected — ATC ${atc}, login ${login}`;
+        bp.className = 'harvest-count';
+        if (atc < 3) bp.classList.add('harvest-count-low');
+        else if (atc < 10) bp.classList.add('harvest-count-mid');
+        else bp.classList.add('harvest-count-ok');
       }
     }
     if (w && s) w.hidden = !!s.sessionStorage;

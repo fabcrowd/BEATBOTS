@@ -1355,6 +1355,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false, reason: 'error' }));
       return true;
 
+    case 'BB_APPLY_ATC_COOKIE':
+      bbApplyAppAtcCookie()
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false, reason: 'error' }));
+      return true;
+
+    case 'BB_REFRESH_POOL':
+      bbRefreshPoolStatus()
+        .then((pool) => sendResponse({ ok: true, beatbots: bbGetBeatbotsStatus(), pool }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
     case 'HARVEST_GET_STATUS':
       (async () => {
         try {
@@ -1381,6 +1393,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
 
           const allHidden = await computeAllTargetTabsHidden();
+          if (bbConnected && !bbPoolStatus) await bbRefreshPoolStatus();
           sendResponse({
             ...s,
             harvestHidden: allHidden,
@@ -1388,6 +1401,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             lastHarvestCaptureKind,
             nextHarvestInMs,
             nextHarvestMode,
+            beatbots: bbGetBeatbotsStatus(),
           });
         } catch {
           sendResponse({ ok: false });
@@ -1719,13 +1733,112 @@ let bbWs = null;
 let bbWsPort = BB_WS_DEFAULT_PORT;
 let bbReconnectTimer = null;
 let bbConnected = false;
+let bbPoolStatus = null;
+let bbRequestSeq = 0;
+const bbPendingRequests = new Map();
 const BB_RECONNECT_DELAY_MS = 5000;
+const BB_REQUEST_TIMEOUT_MS = 3000;
 
 async function bbGetPort() {
   try {
     const { beatbotsWsPort } = await chrome.storage.local.get('beatbotsWsPort');
     return Number(beatbotsWsPort) || BB_WS_DEFAULT_PORT;
   } catch { return BB_WS_DEFAULT_PORT; }
+}
+
+function bbHandleWsMessage(msg) {
+  if (msg?.type === 'hello' && msg?.source === 'beatbots') {
+    if (typeof msg.port === 'number' && msg.port > 0) {
+      bbWsPort = msg.port;
+      chrome.storage.local.set({ beatbotsWsPort: msg.port }).catch(() => {});
+    }
+    return;
+  }
+
+  if (msg?.type === 'pool_status') {
+    bbPoolStatus = {
+      loginCount: Number(msg.loginCount) || 0,
+      atcCount: Number(msg.atcCount) || 0,
+      totalCount: Number(msg.totalCount) || 0,
+      lastHarvestAt: msg.lastHarvestAt ?? null,
+      generationRate: Number(msg.generationRate) || 0,
+    };
+  }
+
+  if (msg?.requestId && bbPendingRequests.has(msg.requestId)) {
+    const { resolve, timer } = bbPendingRequests.get(msg.requestId);
+    clearTimeout(timer);
+    bbPendingRequests.delete(msg.requestId);
+    resolve(msg);
+  }
+}
+
+function bbSendRequest(type, timeoutMs = BB_REQUEST_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    if (!bbConnected || !bbWs || bbWs.readyState !== WebSocket.OPEN) {
+      resolve(null);
+      return;
+    }
+    const requestId = `bb-${Date.now()}-${++bbRequestSeq}`;
+    const timer = setTimeout(() => {
+      bbPendingRequests.delete(requestId);
+      resolve(null);
+    }, timeoutMs);
+    bbPendingRequests.set(requestId, { resolve, timer });
+    try {
+      bbWs.send(JSON.stringify({ type, requestId }));
+    } catch {
+      clearTimeout(timer);
+      bbPendingRequests.delete(requestId);
+      resolve(null);
+    }
+  });
+}
+
+function bbGetBeatbotsStatus() {
+  return {
+    connected: bbConnected,
+    port: bbWsPort,
+    pool: bbPoolStatus,
+  };
+}
+
+async function bbApplyCookieMap(cookies) {
+  const setUrl = 'https://www.target.com';
+  let applied = 0;
+  for (const [name, value] of Object.entries(cookies || {})) {
+    if (!name || value == null) continue;
+    try {
+      await chrome.cookies.set({
+        url: setUrl,
+        name: String(name),
+        value: String(value),
+        domain: '.target.com',
+        path: '/',
+        secure: true,
+      });
+      applied++;
+    } catch { /* skip individual cookie set failures */ }
+  }
+  return applied;
+}
+
+async function bbRefreshPoolStatus() {
+  const msg = await bbSendRequest('pool_status_request');
+  if (msg?.type === 'pool_status') bbHandleWsMessage(msg);
+  return bbPoolStatus;
+}
+
+async function bbApplyAppAtcCookie() {
+  if (!bbConnected) return { ok: false, reason: 'not_connected' };
+  const msg = await bbSendRequest('consume_atc_request');
+  if (!msg || msg.type !== 'consume_atc' || !msg.ok) {
+    return { ok: false, reason: msg?.ok === false ? 'empty' : 'timeout' };
+  }
+  const applied = await bbApplyCookieMap(msg.cookies);
+  if (!applied) return { ok: false, reason: 'apply_failed' };
+  console.log('[TCH] applied BEATBOTS ATC Shape cookie;', applied, 'cookies set');
+  return { ok: true, applied, remaining: bbPoolStatus?.atcCount ?? null };
 }
 
 function bbConnect() {
@@ -1738,20 +1851,24 @@ function bbConnect() {
       bbConnected = true;
       console.log('[TCH] BEATBOTS bridge connected on port', bbWsPort);
       if (bbReconnectTimer) { clearTimeout(bbReconnectTimer); bbReconnectTimer = null; }
+      void bbRefreshPoolStatus();
     });
 
     bbWs.addEventListener('message', (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'pong' || msg.type === 'hello') return;
-        console.log('[TCH] BEATBOTS msg:', msg.type);
+        if (msg.type === 'pong') return;
+        bbHandleWsMessage(msg);
+        if (msg.type !== 'hello' && msg.type !== 'pool_status') {
+          console.log('[TCH] BEATBOTS msg:', msg.type);
+        }
       } catch {}
     });
 
     bbWs.addEventListener('close', () => {
       bbConnected = false;
+      bbPoolStatus = null;
       bbWs = null;
-      // Try the +1 port (app retries on port conflict)
       bbScheduleReconnect();
     });
 
