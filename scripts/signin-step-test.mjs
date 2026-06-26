@@ -94,6 +94,18 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+// Regression: checkout auth fallback must reassign emailInput after findVisibleSignInInputs().
+const contentPath = path.join(__dirname, '../target-checkout-helper/content.js');
+const contentSrc = fs.readFileSync(contentPath, 'utf8');
+assert(
+  /let\s*\{\s*emailInput,\s*passInput,\s*submitBtn\s*\}\s*=\s*findVisibleSignInInputs\(\)/.test(contentSrc),
+  'handleSignInPage uses let destructuring so checkout email fallback can reassign emailInput'
+);
+assert(
+  !/const\s*\{\s*emailInput,\s*passInput,\s*submitBtn\s*\}\s*=\s*findVisibleSignInInputs\(\)/.test(contentSrc),
+  'handleSignInPage must not const-bind emailInput before checkout fallback reassignment'
+);
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);
