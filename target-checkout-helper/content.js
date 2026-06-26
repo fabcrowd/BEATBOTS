@@ -185,6 +185,10 @@ async function handleSignInPage(settings, opts = {}) {
     autoSignInInFlight = true;
   }
   try {
+  if (getPageType() === 'checkout' && hasCheckoutAuthError()) {
+    console.warn('[TCH] auto sign-in: Target error banner present — skip');
+    return;
+  }
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
   const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
@@ -507,6 +511,12 @@ function isCheckoutSignedInConfirm() {
     if (looksLoggedInOnTarget()) return true;
   }
   return false;
+}
+
+function hasCheckoutAuthError() {
+  const root = getCheckoutAuthRoot() || document;
+  const tx = (root.innerText || document.body?.innerText || '').toLowerCase();
+  return tx.includes('something went wrong') || tx.includes('try again later');
 }
 
 async function tryCheckoutSignedInContinue() {
@@ -1527,6 +1537,13 @@ const PENDING_MAX_RETRIES = 15;
 
 async function runCheckoutPendingActions(settings, step, options = {}) {
   console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
+  if (getPageType() === 'checkout' && hasCheckoutAuthError()) {
+    console.warn('[TCH] checkout auth: Target error banner — pausing auto sign-in');
+    if (!options.silent) {
+      showToast('Target sign-in error — wait and sign in manually or retry in a minute.', 'persistent');
+    }
+    return;
+  }
   const hasCredentials = !!(settings.autoSignIn && settings.targetEmail && settings.targetPassword);
   let alreadyTried = false;
   try {
