@@ -57,6 +57,18 @@ Cook-group pings from Zephyr ≈ same RedSky flip we'd see in `runBackgroundPoll
 
 ---
 
+## Phase 1 build scope (@it)
+
+**Full spec:** `STOCK-MONITOR-PHASE1-SCOPE.md` in this folder.
+
+- **Branch:** `cursor/stock-monitor-phase1-4bbd`
+- **Next autopilot req:** 2 (monitor window mode)
+- **Senior call:** ship window start/end + `aggressiveWhileMonitorOn`; unified `isAggressivePoll`; zip on RedSky URLs; flip telemetry; Guide playbook
+- **Not in Phase 1:** req 6 beatbots WS, Discord, proxies
+
+---
+
 ## Review
 
 - 2026-06-27 — Initial research PRD + tasks JSON from operator field report + Refract/RedSky public docs.
+- 2026-06-25 — @it Phase 1 scope doc (`STOCK-MONITOR-PHASE1-SCOPE.md`); autopilot task activated; verify.sh green.
