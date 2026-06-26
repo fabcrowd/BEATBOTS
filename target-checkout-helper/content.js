@@ -186,7 +186,7 @@ async function handleSignInPage(settings, opts = {}) {
   }
   try {
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
-  const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
+  let { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
   if (getPageType() === 'checkout') {
     if (isCheckoutSignedInConfirm()) {
