@@ -78,8 +78,8 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Walmart content script product → cart → checkout flow',
     impl: ['target-checkout-helper/walmart-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-2': {
     id: 'WM-2',
@@ -207,6 +207,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
+  'walmart-flow-simulation.mjs': ['WM-1'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
