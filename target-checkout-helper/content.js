@@ -851,6 +851,8 @@ const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
 const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; cleared on checkout load
 const CHECKOUT_FLOW_ACTIVE_KEY = 'tch:checkoutFlowActive';
+const CHECKOUT_INIT_ID_KEY = 'tch:checkoutInitId';
+const CART_HV_RELOAD_KEY = 'tch:cartHighVolumeReloads';
 let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
@@ -977,24 +979,115 @@ function isProductInCartOnPage() {
 }
 
 async function probeCartHasItems(timeoutMs = 4000) {
+  const p = await probeTargetCart(timeoutMs);
+  if (!p.ok) return null;
+  return p.hasItems;
+}
+
+async function getTargetWebApiKey() {
+  try {
+    const cfg = window.__CONFIG__?.services || {};
+    const fromPage = cfg.auth?.apiKey || cfg.apiPlatform?.apiKey || '';
+    if (fromPage) return fromPage;
+  } catch { /* page config unavailable */ }
+  try {
+    const { bgApiKey } = await chrome.storage.local.get('bgApiKey');
+    return String(bgApiKey || '');
+  } catch { return ''; }
+}
+
+function parseCartProbePayload(data) {
+  if (typeof TCH_CHECKOUT_RELIABILITY !== 'undefined' && TCH_CHECKOUT_RELIABILITY.parseCartProbePayload) {
+    return TCH_CHECKOUT_RELIABILITY.parseCartProbePayload(data);
+  }
+  const cart = data?.cart || data || {};
+  const items = cart?.cart_items || data?.cart_items || [];
+  const cartId = cart?.cart_id || data?.cart_id || '';
+  const itemCount = Array.isArray(items) ? items.length : 0;
+  return { hasItems: itemCount > 0, cartId: String(cartId || ''), itemCount };
+}
+
+/** GET cart API — returns { ok, hasItems, cartId, itemCount }. */
+async function probeTargetCart(timeoutMs = 4000) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const apiKey = await getTargetWebApiKey();
+    const headers = { 'Cache-Control': 'no-cache', accept: 'application/json' };
+    if (apiKey) headers['x-api-key'] = apiKey;
     const res = await fetch('https://api.target.com/web_checkouts/v1/cart', {
       credentials: 'include',
       cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
+      headers,
       signal: controller.signal,
     });
     clearTimeout(timer);
-    if (res.status === 204 || res.status === 404) return false;
-    if (!res.ok) return null;
+    if (res.status === 204 || res.status === 404) {
+      return { ok: true, hasItems: false, cartId: '', itemCount: 0 };
+    }
+    if (!res.ok) return { ok: false, hasItems: false, cartId: '', itemCount: 0 };
     const data = await res.json();
-    const items = data?.cart?.cart_items || data?.cart_items || [];
-    return Array.isArray(items) && items.length > 0;
+    return { ok: true, ...parseCartProbePayload(data) };
   } catch {
-    return null;
+    return { ok: false, hasItems: false, cartId: '', itemCount: 0 };
   }
+}
+
+/** POST /checkout with cart_id — server-side init before DOM navigation (Stellar-style warm init). */
+async function warmInitTargetCheckout(cartId) {
+  if (!cartId) return { ok: false, reason: 'no_cart_id' };
+  try {
+    const apiKey = await getTargetWebApiKey();
+    const headers = {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'x-application-name': 'web',
+    };
+    if (apiKey) headers['x-api-key'] = apiKey;
+    const res = await fetch('https://api.target.com/web_checkouts/v1/checkout', {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      body: JSON.stringify({ cart_id: cartId }),
+    });
+    if (!res.ok) {
+      console.warn('[TCH] warm init checkout HTTP', res.status);
+      return { ok: false, status: res.status };
+    }
+    const data = await res.json();
+    const checkoutId = data?.checkout?.checkout_id || data?.checkout_id || '';
+    if (checkoutId) {
+      try { sessionStorage.setItem(CHECKOUT_INIT_ID_KEY, checkoutId); } catch {}
+      console.log('[TCH] warm init checkout ok:', checkoutId);
+    }
+    return { ok: true, checkoutId };
+  } catch (e) {
+    return { ok: false, reason: String(e?.message || e) };
+  }
+}
+
+async function pollCartApiUntilReady(maxAttempts = 6, intervalMs = 2000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const cart = await probeTargetCart(3000);
+    if (cart.ok) return cart;
+    await sleep(intervalMs);
+  }
+  return { ok: false, hasItems: false, cartId: '', itemCount: 0 };
+}
+
+/** API-confirmed bypass: warm-init checkout then navigate (avoids cart SPA reload loop). */
+async function goToCheckoutViaApiBypass(settings, { skipHarvestAfterAtc = false, mark = 'cart_to_checkout' } = {}) {
+  const cart = await probeTargetCart(5000);
+  if (!cart.ok || !cart.hasItems) return false;
+  if (cart.cartId) await warmInitTargetCheckout(cart.cartId);
+  markCartReady();
+  markCheckoutFlowActive();
+  setNavigationMark(mark);
+  await maybeApplyHarvestedSession(settings, { skipAfterFreshAtc: skipHarvestAfterAtc });
+  showToast('Cart API confirmed → checkout (no reload)…', 'persistent');
+  window.location.href = 'https://www.target.com/checkout';
+  return true;
 }
 
 async function waitForCartConfirmation(timeoutMs = 6000) {
@@ -1036,6 +1129,10 @@ async function navigateToCheckout(settings, { skipHarvestAfterAtc = false, requi
   markCheckoutFlowActive();
   setNavigationMark('product_to_checkout');
   await maybeApplyHarvestedSession(settings, { skipAfterFreshAtc: skipHarvestAfterAtc });
+  const cart = await probeTargetCart(4000);
+  if (cart.ok && cart.hasItems && cart.cartId) {
+    await warmInitTargetCheckout(cart.cartId);
+  }
   window.location.href = 'https://www.target.com/checkout';
   return true;
 }
@@ -1691,13 +1788,47 @@ async function handleCartPage(settings) {
   markCheckoutFlowActive();
 
   if (hasHighVolumeBlock()) {
-    showToast('Cart: Target high volume — reloading in 8s…', 'persistent');
+    showToast('Cart: high volume — polling cart API (skip reload if possible)…', 'persistent');
     await reportRetryEvent({ status: 'high_volume', page: 'cart', url: location.href, ts: Date.now() });
-    setTimeout(() => { if (runtimeEnabled) location.reload(); }, 8000);
+    const cart = await pollCartApiUntilReady(6, 2000);
+    if (cart.ok && cart.hasItems) {
+      try { sessionStorage.removeItem(CART_HV_RELOAD_KEY); } catch {}
+      if (await goToCheckoutViaApiBypass(settings)) return;
+    }
+    if (cart.ok && !cart.hasItems) {
+      showToast('Cart API empty — re-adding item…', 'persistent');
+      try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+      await scheduleCheckoutRetry(settings, 'Cart empty on cart page');
+      return;
+    }
+    let reloads = 0;
+    try { reloads = parseInt(sessionStorage.getItem(CART_HV_RELOAD_KEY) || '0', 10); } catch {}
+    const maxReloads = 3;
+    if (reloads < maxReloads) {
+      const delay = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined'
+        ? TCH_CHECKOUT_RELIABILITY.cartApiReloadDelayMs(reloads)
+        : 4000 + reloads * 4000;
+      try { sessionStorage.setItem(CART_HV_RELOAD_KEY, String(reloads + 1)); } catch {}
+      showToast(`Cart blocked — reload in ${Math.round(delay / 1000)}s (fallback ${reloads + 1}/${maxReloads})…`, 'persistent');
+      setTimeout(() => { if (runtimeEnabled) location.reload(); }, delay);
+      return;
+    }
+    showToast('Cart still blocked — enable Fresh tab checkout or reload manually', 'persistent');
+    chrome.runtime.sendMessage({ type: 'OPEN_FRESH_CHECKOUT_TAB' }).catch(() => {});
     return;
   }
 
   await sleep(400);
+
+  const earlyCart = await probeTargetCart(4000);
+  if (earlyCart.ok && earlyCart.hasItems) {
+    const checkoutBtn = document.querySelector(SEL.cartCheckout);
+    const btnReady = checkoutBtn && !checkoutBtn.disabled;
+    if (!btnReady) {
+      console.log('[TCH] cart API has items — bypassing slow cart DOM');
+      if (await goToCheckoutViaApiBypass(settings)) return;
+    }
+  }
 
   if (isCartEmptyOnPage()) {
     const apiEmpty = await probeCartHasItems();
@@ -1726,24 +1857,21 @@ async function handleCartPage(settings) {
     await maybeApplyHarvestedSession(settings);
     await debuggerClick(btn);
   } catch {
-    const api = await probeCartHasItems();
-    if (api === false) {
+    const cart = await probeTargetCart(5000);
+    if (cart.ok && !cart.hasItems) {
       stopCartCheckout('empty_timeout');
       await scheduleCheckoutRetry(settings, 'Cart empty — checkout button timeout');
       return;
     }
     if (hasHighVolumeBlock()) {
       stopCartCheckout('high_volume');
-      showToast('Cart slow to load — reloading…', 'persistent');
-      setTimeout(() => { if (runtimeEnabled) location.reload(); }, 6000);
-      return;
+      if (cart.ok && cart.hasItems && await goToCheckoutViaApiBypass(settings)) return;
+      showToast('Cart slow — trying API bypass…', 'persistent');
+      if (await goToCheckoutViaApiBypass(settings)) return;
     }
-    if (api === true || isProductInCartOnPage()) {
-      stopCartCheckout('fallback_redirect');
-      setNavigationMark('cart_to_checkout');
-      markCartReady();
-      await maybeApplyHarvestedSession(settings);
-      window.location.href = 'https://www.target.com/checkout';
+    if ((cart.ok && cart.hasItems) || isProductInCartOnPage()) {
+      stopCartCheckout('api_bypass_redirect');
+      await goToCheckoutViaApiBypass(settings);
       return;
     }
     stopCartCheckout('no_cart');
@@ -1787,7 +1915,13 @@ async function handleCheckoutPage(settings) {
 
   if (hasHighVolumeBlock()) {
     console.warn('[TCH] checkout high-volume block detected');
-    showToast('Checkout: Target high volume — wait on this page; do not reload.', 'persistent');
+    const cart = await probeTargetCart(4000);
+    if (cart.ok && cart.hasItems && cart.cartId) {
+      await warmInitTargetCheckout(cart.cartId);
+      showToast('Checkout: high volume — API warm-init done; stay on this page.', 'persistent');
+    } else {
+      showToast('Checkout: Target high volume — wait on this page; do not reload.', 'persistent');
+    }
     await reportRetryEvent({ status: 'high_volume', page: 'checkout', url: location.href, ts: Date.now() });
   }
 
@@ -1938,11 +2072,14 @@ function watchForCheckoutStep(settings, options = {}) {
       } else if (pendingRetryCount >= PENDING_MAX_RETRIES && !pendingEscalated) {
         pendingEscalated = true;
         showToast(
-          'Checkout stuck at sign-in — finish manually, enable Fresh tab checkout, or turn extension off and reload.',
+          'Checkout stuck — opening fresh checkout tab; finish sign-in there if needed.',
           'persistent'
         );
         await maybeApplyShapeCookieForAtc(settings, { hypeOnly: false });
         await tryCheckoutSignedInContinue();
+        const cart = await probeTargetCart(4000);
+        if (cart.ok && cart.hasItems && cart.cartId) await warmInitTargetCheckout(cart.cartId);
+        chrome.runtime.sendMessage({ type: 'OPEN_FRESH_CHECKOUT_TAB' }).catch(() => {});
       }
       return;
     }

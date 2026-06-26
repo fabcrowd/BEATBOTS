@@ -38,6 +38,13 @@ assert(!R.isCartEmptyText('1 item in cart'), 'in cart copy');
 assert(R.shouldRetryFromProductAfterCartFailure('Cart empty on cart page'), 'retry from product on empty');
 assert(!R.shouldRetryFromProductAfterCartFailure('ATC button not found'), 'no retry on ATC miss');
 
+const parsed = R.parseCartProbePayload({ cart: { cart_id: 'abc-123', cart_items: [{ tcin: '1' }] } });
+assert(parsed.hasItems && parsed.cartId === 'abc-123' && parsed.itemCount === 1, 'parse cart payload');
+
+assert(R.cartApiReloadDelayMs(0) === 4000, 'reload backoff base');
+assert(R.cartApiReloadDelayMs(2) === 12000, 'reload backoff step');
+assert(R.cartApiReloadDelayMs(99) === 16000, 'reload backoff cap');
+
 if (process.exitCode) {
   console.error('checkout-reliability-test: FAILED');
   process.exit(1);

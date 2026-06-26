@@ -14,14 +14,12 @@
 
 | Area | Fix |
 |------|-----|
-| `probeCartHasItems()` | GET `api.target.com/web_checkouts/v1/cart` before checkout nav |
-| `navigateToCheckout()` | Requires cart confirm; skips harvest after fresh ATC |
-| `handleCartPage` | Empty-cart + high-volume detection; longer hydrate timeout (12s in flow) |
-| `handleCheckoutPage` | High-volume toast; no auto-leave on checkout |
-| SPA watcher | Detect checkout → empty cart bounce; re-ATC |
-| Monitor ATC | No `ATC_SUCCESS` until cart confirmed (API or modal) |
-| `background.js` | Session recovery blocked on `/cart` tabs; no harvest replay on monitor checkout nav |
-| Pending sign-in | Escalation toast + Shape re-apply after 15 retries |
+| `probeTargetCart()` | Returns `cartId` + item count from GET cart API |
+| `warmInitTargetCheckout()` | POST `/web_checkouts/v1/checkout` before DOM nav |
+| `goToCheckoutViaApiBypass()` | API-confirmed path — no cart reload loop |
+| `handleCartPage` | High volume: API poll first; reload only with backoff (max 3) |
+| `OPEN_FRESH_CHECKOUT_TAB` | Fresh checkout tab when cart blocked or sign-in stuck |
+| `CHECKOUT-BYPASS-RESEARCH.md` | Reload alternatives documented |
 
 ## Drop-night checklist
 

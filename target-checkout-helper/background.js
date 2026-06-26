@@ -1386,6 +1386,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false }));
       return true;
 
+    case 'OPEN_FRESH_CHECKOUT_TAB':
+      chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true })
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
     case 'HARVEST_GET_STATUS':
       (async () => {
         try {
