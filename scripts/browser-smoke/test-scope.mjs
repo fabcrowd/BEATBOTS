@@ -86,8 +86,8 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Pre-drop disabled ATC alone is not queue — do not treat as sacred lock',
     impl: ['target-checkout-helper/walmart-content.js (wmIsProductQueued vs wmHasQueueIndicators)'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-3': {
     id: 'WM-3',
@@ -207,7 +207,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
-  'walmart-flow-simulation.mjs': ['WM-1'],
+  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */

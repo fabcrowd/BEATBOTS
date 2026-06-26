@@ -125,6 +125,34 @@ function wmIsProductQueued(page) {
   return atc.disabled || atc.ariaDisabled === 'true';
 }
 
+/** WM-2/WM-4: sacred lock only when queue indicators present — not disabled ATC alone. */
+function wmShouldEnterSacredQueueWait(page) {
+  return wmHasQueueIndicators(page);
+}
+
+/**
+ * Mirrors wmHandleProductPage entry decision (queue lock vs price guard vs ATC).
+ * Returns action trace for WM-2 assertions without async wait loops.
+ */
+function wmDecideProductPageEntry(page, settings = {}) {
+  const messages = [];
+  const maxPrice = parseFloat(settings.walmartMaxPrice) || 0;
+  if (maxPrice > 0 && settings.currentPrice != null && settings.currentPrice > maxPrice) {
+    messages.push({ type: 'PRICE_GUARD_WAIT' });
+    return { action: 'price_guard_wait', messages };
+  }
+  if (wmShouldEnterSacredQueueWait(page)) {
+    messages.push({ type: 'WALMART_IN_QUEUE' });
+    return { action: 'sacred_queue_wait', messages };
+  }
+  const atc = wmFindAtcLikeButton(page);
+  if (!atc || atc.disabled || !wmIsVisible(atc)) {
+    messages.push({ type: 'WALMART_NAV_FAILED' });
+    return { action: 'atc_unavailable', messages };
+  }
+  return { action: 'proceed_atc', messages: [] };
+}
+
 /** Mirrors wmGetPageType() — walmart-content.js */
 function wmGetPageType(page) {
   const path = page.pathname;
@@ -164,9 +192,18 @@ function wmInitDispatch(pageType) {
  */
 async function wmHandleProductPageSim(page, settings) {
   const actions = [];
-  if (wmHasQueueIndicators(page) || wmIsProductQueued(page)) {
+  const entry = wmDecideProductPageEntry(page, settings);
+  if (entry.action === 'price_guard_wait') {
+    actions.push('price_guard_wait');
+    return { path: 'price_guard', actions, messages: entry.messages };
+  }
+  if (entry.action === 'sacred_queue_wait') {
     actions.push('wait_in_queue');
-    return { path: 'queue_wait', actions };
+    return { path: 'queue_wait', actions, messages: entry.messages };
+  }
+  if (entry.action === 'atc_unavailable') {
+    actions.push('nav_failed');
+    return { path: 'atc_unavailable', actions, messages: entry.messages };
   }
 
   const atcBtn = wmFindAtcLikeButton(page);
@@ -340,11 +377,106 @@ async function runFlowTests() {
   assert.equal(atcOnly.path, 'atc_only', 'WM-1: walmartAtcOnly stops at cart');
 }
 
+function runWm2PredropQueueTests() {
+  const disabledAtcOnly = makePage({
+    pathname: '/ip/predrop-disabled-atc/123',
+    bodyText: 'Add to cart soon',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  assert.ok(wmIsProductQueued(disabledAtcOnly), 'WM-2 setup: disabled ATC detected');
+  assert.equal(
+    wmShouldEnterSacredQueueWait(disabledAtcOnly),
+    false,
+    'WM-2: disabled ATC alone is not sacred queue'
+  );
+  const predropDecision = wmDecideProductPageEntry(disabledAtcOnly);
+  assert.notEqual(predropDecision.action, 'sacred_queue_wait', 'WM-2: pre-drop disabled ATC must not enter sacred wait');
+  assert.ok(
+    !predropDecision.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-2: pre-drop disabled ATC must not send WALMART_IN_QUEUE'
+  );
+  assert.equal(predropDecision.action, 'atc_unavailable', 'WM-2: pre-drop disabled ATC releases via NAV_FAILED path');
+
+  const queueConfirmed = makePage({
+    pathname: '/ip/drop-queue/456',
+    bodyText: "You're in line — estimated wait time 3 minutes",
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  assert.equal(
+    wmShouldEnterSacredQueueWait(queueConfirmed),
+    true,
+    'WM-2: queue indicators confirm sacred wait'
+  );
+  const queueDecision = wmDecideProductPageEntry(queueConfirmed);
+  assert.equal(queueDecision.action, 'sacred_queue_wait', 'WM-2: queue indicators arm sacred wait');
+  assert.ok(
+    queueDecision.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-2: confirmed queue sends WALMART_IN_QUEUE'
+  );
+
+  const priceGuardOnly = makePage({
+    pathname: '/ip/price-guard/789',
+    bodyText: 'List price before drop',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+      },
+    ],
+  });
+  const priceDecision = wmDecideProductPageEntry(priceGuardOnly, {
+    walmartMaxPrice: 50,
+    currentPrice: 99.99,
+  });
+  assert.equal(priceDecision.action, 'price_guard_wait', 'WM-2: price guard uses separate wait');
+  assert.ok(
+    !priceDecision.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-2: price-guard-only must not arm sacred lock'
+  );
+}
+
+async function runWm2FlowTests() {
+  const predropPage = makePage({
+    pathname: '/ip/predrop-flow/111',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const predropResult = await wmHandleProductPageSim(predropPage, {});
+  assert.equal(predropResult.path, 'atc_unavailable', 'WM-2: sim does not sacred-lock pre-drop disabled ATC');
+  assert.ok(
+    !predropResult.messages?.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-2: sim pre-drop path has no WALMART_IN_QUEUE'
+  );
+}
+
 async function main() {
   runPageTypeTests();
   runDispatchTests();
   await runFlowTests();
-  console.log('walmart-flow-simulation PASS (WM-1): page type + product → cart → checkout flow');
+  runWm2PredropQueueTests();
+  await runWm2FlowTests();
+  console.log('walmart-flow-simulation PASS (WM-1 + WM-2): page type, flow, pre-drop queue semantics');
 }
 
 main().catch((e) => {
