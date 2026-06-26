@@ -134,6 +134,32 @@ export async function createGuestSession(apiKey = DEFAULT_API_KEY): Promise<Sess
   return ctx
 }
 
+/** Build a session from browser cookie jar forwarded by the Chrome extension. */
+export function sessionFromTargetCookies(
+  cookies: Record<string, string>,
+  apiKey = DEFAULT_API_KEY
+): SessionContext | null {
+  const accessToken =
+    cookies.accessToken ||
+    cookies.AccessToken ||
+    cookies['access_token'] ||
+    ''
+  if (!accessToken) return null
+  const visitorId =
+    cookies.visitorId ||
+    cookies.VisitorId ||
+    generateVisitorId()
+  return {
+    accountId: GUEST_ACCOUNT_ID,
+    email: cookies.email || cookies.Email || 'browser',
+    accessToken,
+    tokenExpiresAt: adjustedNow() + 3600_000,
+    visitorId,
+    apiKey: apiKey || DEFAULT_API_KEY,
+    proxy: null,
+  }
+}
+
 // ─── Session Manager ──────────────────────────────────────────────────────────
 
 export class SessionManager extends EventEmitter {

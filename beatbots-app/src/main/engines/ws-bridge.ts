@@ -3,7 +3,9 @@ import { addCookie, consumeCookie, getPoolStatus, onPoolChange } from '../models
 import { CookieKind } from '../../shared/types'
 import { BrowserWindow } from 'electron'
 import { IPC } from '../../shared/types'
-import { readOtpFromConfiguredImap } from './session-manager'
+import { readOtpFromConfiguredImap, createGuestSession, sessionFromTargetCookies } from './session-manager'
+import { checkoutEngine } from './checkout-engine'
+import { Profile, TaskSettings } from '../../shared/types'
 
 // ─── WebSocket bridge between the Chrome extension and Electron ───────────────
 // Extension connects, sends harvested cookies with a simple JSON protocol.
@@ -137,6 +139,11 @@ export class WsBridge {
         break
       }
 
+      case 'checkout_request': {
+        void this.handleCheckoutRequest(ws, msg)
+        break
+      }
+
       case 'ping': {
         ws.send(JSON.stringify({ type: 'pong', requestId: msg.requestId ?? null }))
         break
@@ -192,6 +199,87 @@ export class WsBridge {
       }
     } catch (e: any) {
       send({ type: 'otp_found', ok: false, reason: e?.message || 'error' })
+    }
+  }
+
+  private async handleCheckoutRequest(ws: WebSocket, msg: any): Promise<void> {
+    const requestId = msg.requestId ?? null
+    const send = (payload: object) => {
+      if (ws.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ type: 'checkout_result', requestId, ...payload }))
+    }
+
+    try {
+      const cookies = (msg.cookies && typeof msg.cookies === 'object') ? msg.cookies as Record<string, string> : {}
+      const apiKey = typeof msg.apiKey === 'string' && msg.apiKey ? msg.apiKey : undefined
+      let session = sessionFromTargetCookies(cookies, apiKey)
+      if (!session) {
+        session = await createGuestSession(apiKey)
+      }
+
+      const p = msg.profile || {}
+      const now = new Date().toISOString()
+      const profile: Profile = {
+        id: 0,
+        name: 'extension',
+        email: String(p.email || ''),
+        firstName: String(p.firstName || ''),
+        lastName: String(p.lastName || ''),
+        address1: String(p.address1 || ''),
+        address2: String(p.address2 || ''),
+        city: String(p.city || ''),
+        state: String(p.state || ''),
+        zip: String(p.zip || ''),
+        phone: String(p.phone || ''),
+        cardNumber: String(p.cardNumber || ''),
+        expMonth: String(p.expMonth || ''),
+        expYear: String(p.expYear || ''),
+        cvv: String(p.cvv || ''),
+        billingZip: String(p.billingZip || p.zip || ''),
+        jigIndex: Number(p.jigIndex) || 0,
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      const settings = msg.settings || {}
+      const cartId = String(msg.cartId || '')
+      const fromCart = msg.mode === 'from_cart' && cartId.length > 0
+
+      const taskSettings: TaskSettings = {
+        autoPlaceOrder: !!settings.autoPlaceOrder,
+        useGuestCheckout: !!settings.useGuestCheckout,
+        addExtraProduct: !!settings.addExtraProduct,
+        extraProductTcin: String(settings.extraProductTcin || ''),
+        useSavedPayment: false,
+        preferPickup: false,
+        endlessMode: false,
+        endlessLimit: 0,
+        highStockOnly: false,
+        highStockThreshold: 10,
+        maxPrice: null,
+        checkoutDelayMs: 0,
+        retryMaxAttempts: 0,
+        retryDelayMs: 1000,
+        checkoutSound: false,
+        dropExpectedAt: null,
+        monitorCooldownMs: 0,
+      }
+
+      const result = await checkoutEngine.run({
+        session,
+        profile,
+        tcin: String(msg.tcin || ''),
+        qty: Number(msg.qty) || 1,
+        settings: taskSettings,
+        taskId: 0,
+        existingCartId: fromCart ? cartId : undefined,
+        onStatus: (text) => console.log('[WSBridge checkout]', text),
+        abortSignal: AbortSignal.timeout(110_000),
+      })
+
+      send({ ok: result.ok, ...result })
+    } catch (e: any) {
+      send({ ok: false, error: e?.message || 'checkout_request failed', retryable: true })
     }
   }
 }

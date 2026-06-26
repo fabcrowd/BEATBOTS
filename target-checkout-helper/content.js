@@ -58,6 +58,7 @@ async function getSettings() {
       'highStockOnly',
       'highStockThreshold',
       'targetMaxPrice',
+      'beatbotsCheckoutOnDomFailure',
     ]);
   }
   return settingsCache;
@@ -488,10 +489,18 @@ function fillSelect(select, value) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
-// Click via the debugger (human-like mouse movement + press/release).
-// Falls back to .click() if the background rejects (e.g. debugger not attached).
-async function debuggerClick(el) {
+function detachDebugger() {
+  chrome.runtime.sendMessage({ type: 'DEBUGGER_DETACH' }).catch(() => {});
+}
+
+// Click via CDP for high-risk actions (ATC, sign-in, place order).
+// Low-risk buttons (Continue, decline coverage) use native .click() first.
+async function debuggerClick(el, { preferNative = false } = {}) {
   if (!el) return;
+  if (preferNative) {
+    el.click();
+    return;
+  }
   try {
     const r = el.getBoundingClientRect();
     const x = Math.round(r.left + r.width / 2);
@@ -1090,6 +1099,60 @@ async function goToCheckoutViaApiBypass(settings, { skipHarvestAfterAtc = false,
   return true;
 }
 
+/** Last resort when cart DOM is dead but API confirms items — delegates to beatbots-app. */
+async function maybeBeatbotsCheckoutOnDomFailure(settings, { reason, cart }) {
+  if (!settings?.beatbotsCheckoutOnDomFailure) return false;
+  if (!cart?.ok || !cart?.hasItems) return false;
+  const tcin = extractTcinFromUrl(getRememberedProductUrl() || location.href);
+  const ship = settings.shipping || {};
+  const pay = settings.payment || {};
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'BB_CHECKOUT_REQUEST',
+      reason,
+      cartId: cart.cartId || '',
+      tcin: tcin || '',
+      qty: 1,
+      pageUrl: location.href,
+      apiKey: document.documentElement.dataset.tchKey || '',
+      settings: {
+        autoPlaceOrder: !!settings.autoPlaceOrder,
+        useGuestCheckout: false,
+        addExtraProduct: !!settings.addExtraProduct,
+        extraProductTcin: settings.extraProductTcin || '',
+      },
+      profile: {
+        email: settings.targetEmail || ship.email || '',
+        firstName: ship.firstName || '',
+        lastName: ship.lastName || '',
+        address1: ship.address1 || '',
+        address2: ship.address2 || '',
+        city: ship.city || '',
+        state: ship.state || '',
+        zip: ship.zip || '',
+        phone: ship.phone || '',
+        cardNumber: pay.cardNumber || '',
+        expMonth: pay.expMonth || '',
+        expYear: pay.expYear || '',
+        cvv: pay.cvv || '',
+        billingZip: pay.billingZip || ship.zip || '',
+        jigIndex: settings.jigIndex ?? 0,
+      },
+    });
+    if (r?.ok) {
+      const msg = r.orderId
+        ? `BeatBots order placed: ${r.orderId}`
+        : 'BeatBots checkout reached review (check app)';
+      showToast(msg, r.orderId ? 'success' : 'persistent');
+      return true;
+    }
+    console.warn('[TCH] BeatBots checkout fallback:', r?.reason || r?.error);
+  } catch (e) {
+    console.warn('[TCH] BeatBots checkout fallback failed', e);
+  }
+  return false;
+}
+
 async function waitForCartConfirmation(timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1539,7 +1602,7 @@ function findContinueButton(enabledOnly = false) {
 
 async function clickContinue() {
   const btn = findContinueButton(true);
-  if (btn) { await debuggerClick(btn); return true; }
+  if (btn) { await debuggerClick(btn, { preferNative: true }); return true; }
   return false;
 }
 
@@ -1547,7 +1610,7 @@ async function waitAndClickContinue(timeout = 5000) {
   if (await clickContinue()) return true;
   try {
     const btn = await waitForEnabled(() => findContinueButton(true), timeout);
-    await debuggerClick(btn);
+    await debuggerClick(btn, { preferNative: true });
     return true;
   } catch {
     return false;
@@ -1742,6 +1805,7 @@ async function handleProductPage(settings) {
   await debuggerClick(addBtn);
 
   await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
+  detachDebugger();
 
   if (settings.useSavedPayment) {
     // For preorder/ATC: wait for the "View Cart & Check Out" modal button, which routes
@@ -1755,6 +1819,7 @@ async function handleProductPage(settings) {
       markCartReady();
       setNavigationMark('product_to_checkout');
       await debuggerClick(viewCartBtn);
+      detachDebugger();
       return;
     } catch {
       console.log('[TCH] viewCart modal not found; navigating to checkout directly');
@@ -1794,6 +1859,7 @@ async function handleCartPage(settings) {
     if (cart.ok && cart.hasItems) {
       try { sessionStorage.removeItem(CART_HV_RELOAD_KEY); } catch {}
       if (await goToCheckoutViaApiBypass(settings)) return;
+      if (await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'cart_dom_failure', cart })) return;
     }
     if (cart.ok && !cart.hasItems) {
       showToast('Cart API empty — re-adding item…', 'persistent');
@@ -1813,7 +1879,9 @@ async function handleCartPage(settings) {
       setTimeout(() => { if (runtimeEnabled) location.reload(); }, delay);
       return;
     }
-    showToast('Cart still blocked — enable Fresh tab checkout or reload manually', 'persistent');
+    showToast('Cart still blocked — trying BeatBots API checkout or fresh tab…', 'persistent');
+    const lastCart = await probeTargetCart(5000);
+    if (await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'high_volume_exhausted', cart: lastCart })) return;
     chrome.runtime.sendMessage({ type: 'OPEN_FRESH_CHECKOUT_TAB' }).catch(() => {});
     return;
   }
@@ -1868,11 +1936,12 @@ async function handleCartPage(settings) {
       if (cart.ok && cart.hasItems && await goToCheckoutViaApiBypass(settings)) return;
       showToast('Cart slow — trying API bypass…', 'persistent');
       if (await goToCheckoutViaApiBypass(settings)) return;
+      if (cart.ok && cart.hasItems && await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'cart_dom_failure', cart })) return;
     }
     if ((cart.ok && cart.hasItems) || isProductInCartOnPage()) {
       stopCartCheckout('api_bypass_redirect');
-      await goToCheckoutViaApiBypass(settings);
-      return;
+      if (await goToCheckoutViaApiBypass(settings)) return;
+      if (cart.ok && cart.hasItems && await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'checkout_button_timeout', cart })) return;
     }
     stopCartCheckout('no_cart');
     await scheduleCheckoutRetry(settings, 'Cart checkout button not found');

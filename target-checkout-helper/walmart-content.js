@@ -330,6 +330,12 @@ function wmGetPageType() {
 
 // ─── DIRECT ATC (OID PATH) ───────────────────────────────────────────────────
 
+function wmDirectAtcRetryDelayMs(attempt) {
+  const base = 150 + Math.floor(Math.random() * 101);
+  const backoff = Math.min((attempt || 1) * 10, 200);
+  return Math.min(500, base + backoff);
+}
+
 /**
  * Attempt to add the item to cart directly via Walmart's internal API using the
  * Offer ID (OID). This skips the product page DOM entirely — faster than clicking
@@ -340,14 +346,8 @@ function wmGetPageType() {
  *
  * @param {string} oid  Walmart Offer ID (hex string)
  * @returns {Promise<boolean>}  true if item was added and we navigated to checkout
- */
-/**
- * @param {string} oid
- * @param {object} settings
  * @param {object} [opts]
- * @param {number} [opts.rapidRetryMs=0]  If >0, retry every 200ms including on 4xx
- *   until this many ms have elapsed. Use for skip-monitoring mode where the item
- *   may go live any moment and a 4xx just means "not yet".
+ * @param {number} [opts.rapidRetryMs=0]  If >0, retry with jittered backoff including on 4xx
  */
 async function wmDirectAtc(oid, settings, opts = {}) {
   const { rapidRetryMs = 0 } = opts;
@@ -411,7 +411,7 @@ async function wmDirectAtc(oid, settings, opts = {}) {
       });
     } catch (e) {
       console.warn('[WMT] Direct ATC network error (attempt', attempt, '):', e.message);
-      await wmSleep(200);
+      await wmSleep(wmDirectAtcRetryDelayMs(attempt));
       continue;
     }
 
@@ -433,11 +433,11 @@ async function wmDirectAtc(oid, settings, opts = {}) {
       break;
     }
 
-    // Rapid mode: 4xx/5xx = item not live yet. Retry in 200ms.
+    // Rapid mode: 4xx/5xx = item not live yet. Retry with jittered backoff.
     if (attempt % 10 === 0) {
       wmShowToast(`Direct ATC retry #${attempt} (HTTP ${res.status})…`, 'persistent');
     }
-    await wmSleep(200);
+    await wmSleep(wmDirectAtcRetryDelayMs(attempt));
   } while (Date.now() < deadline);
 
   console.warn('[WMT] Direct ATC failed — falling back to DOM');

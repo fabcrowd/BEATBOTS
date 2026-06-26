@@ -250,6 +250,12 @@
         </div>
         <p id="debuggerStatusText" class="harvest-count" role="status">Debugger: —</p>
 
+        <label class="option-row" style="margin-top:8px" title="When cart DOM is dead but API confirms items, delegate full checkout to beatbots-app over WebSocket (last resort). Requires app running + Shape pool.">
+          <input type="checkbox" id="beatbotsCheckoutOnDomFailure">
+          <span class="option-label">BeatBots API checkout when cart DOM fails</span>
+        </label>
+        <p class="option-hint">Only triggers after API bypass fails on high-volume cart. Default off — higher API velocity.</p>
+
         <hr class="card-divider">
         <p class="section-lead" style="margin-top:6px"><strong>Auto sign-in</strong> — fills your Target credentials automatically when signed out mid-session or after a session recovery reload. Saves credentials in local storage (not encrypted).</p>
         <label class="option-row" title="When ON, the bot automatically fills your email and password on the Target sign-in page if you get signed out during monitoring. Credentials are stored as plain text — use only on a device you fully control.">

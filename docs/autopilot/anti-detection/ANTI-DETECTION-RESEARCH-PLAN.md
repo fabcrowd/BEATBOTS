@@ -2,7 +2,7 @@
 
 **Audience:** `@it` / head dev — drop-night engineering  
 **Scope:** Target.com + Walmart.com — how we get flagged, what to change, what to keep fast  
-**Status:** Research + plan only (no code changes in this doc)
+**Status:** Research + **Tier A/B implemented** in extension v2.3.0
 
 ---
 

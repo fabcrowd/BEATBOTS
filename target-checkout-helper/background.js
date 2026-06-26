@@ -905,9 +905,12 @@ async function runBackgroundPoll() {
     } catch {}
 
     const dropAggressive = computeBackgroundPollSleepMs(monitor) <= 250;
-    const sleepMs = hadApiError && !dropAggressive
+    const baseSleep = hadApiError && !dropAggressive
       ? (monitor.errorRetryDelayMs || 3500)
       : computeBackgroundPollSleepMs(monitor);
+    const sleepMs = typeof jitterBackgroundPollSleepMs === 'function'
+      ? jitterBackgroundPollSleepMs(baseSleep)
+      : baseSleep;
     await sleep(sleepMs);
   }
   console.log('[TCH bg] background poll stopped');
@@ -1386,6 +1389,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false }));
       return true;
 
+    case 'BB_CHECKOUT_REQUEST':
+      bbSendCheckoutRequest(message)
+        .then((r) => sendResponse(r))
+        .catch((e) => sendResponse({ ok: false, reason: 'error', error: String(e?.message || e) }));
+      return true;
+
     case 'OPEN_FRESH_CHECKOUT_TAB':
       chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true })
         .then(() => sendResponse({ ok: true }))
@@ -1685,6 +1694,9 @@ async function handleATCSuccess(url, tabId) {
     return;
   }
 
+  // Drop CDP as soon as ATC succeeds — checkout form-fill uses native clicks.
+  tchDebuggerDetach().catch(() => {});
+
   navigationLock.delete(normUrl); // release — ATC succeeded
   navigationLockAt.delete(normUrl);
   inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
@@ -1717,10 +1729,11 @@ async function handleATCSuccess(url, tabId) {
     bgPollActive = false;
     const isWalmart = !!extractWalmartItemId(url);
     if (!isWalmart) {
-      if (monitor.checkoutInNewTab) {
+      const useFreshTab = monitor.checkoutInNewTab || !!(product && product.hypeMode);
+      if (useFreshTab) {
         // Skip harvest replay after DOM ATC — cart is bound to the current session cookies.
         await chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true });
-        console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)');
+        console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)', product?.hypeMode ? '(hype)' : '');
       } else {
         // Target: navigate the ATC tab directly to Target checkout.
         chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
@@ -1857,6 +1870,51 @@ async function bbApplyAppAtcCookie() {
   if (!applied) return { ok: false, reason: 'apply_failed' };
   console.log('[TCH] applied BEATBOTS ATC Shape cookie;', applied, 'cookies set');
   return { ok: true, applied, remaining: bbPoolStatus?.atcCount ?? null };
+}
+
+const BB_CHECKOUT_TIMEOUT_MS = 120000;
+
+async function bbCaptureTargetCookieMap() {
+  const cookies = await tchReadCookiesForRetailer('target');
+  const map = {};
+  for (const c of cookies) {
+    if (c.name && c.value != null) map[c.name] = String(c.value);
+  }
+  return map;
+}
+
+async function bbSendCheckoutRequest(message) {
+  if (!bbConnected) return { ok: false, reason: 'not_connected' };
+  const cookies = await bbCaptureTargetCookieMap();
+  const msg = await bbSendRequest('checkout_request', BB_CHECKOUT_TIMEOUT_MS, {
+    reason: String(message.reason || 'dom_failure'),
+    mode: message.cartId ? 'from_cart' : 'full',
+    cartId: String(message.cartId || ''),
+    tcin: String(message.tcin || ''),
+    qty: Number(message.qty) || 1,
+    pageUrl: String(message.pageUrl || ''),
+    apiKey: String(message.apiKey || ''),
+    profile: message.profile || {},
+    settings: message.settings || {},
+    cookies,
+  });
+  if (!msg) return { ok: false, reason: 'timeout' };
+  if (msg.type !== 'checkout_result') return { ok: false, reason: 'bad_response' };
+  if (!msg.ok) {
+    return {
+      ok: false,
+      reason: 'checkout_failed',
+      error: msg.error,
+      stage: msg.stage,
+      retryable: !!msg.retryable,
+    };
+  }
+  return {
+    ok: true,
+    orderId: msg.orderId,
+    orderTotal: msg.orderTotal,
+    durationMs: msg.durationMs,
+  };
 }
 
 function bbConnect() {
