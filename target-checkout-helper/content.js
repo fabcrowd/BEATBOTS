@@ -945,29 +945,16 @@ function getPageBodyText() {
 }
 
 function hasHighVolumeBlock() {
+  const R = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined' ? TCH_CHECKOUT_RELIABILITY : null;
+  if (R) return R.hasHighVolumeBlock(getPageBodyText());
   const text = getPageBodyText();
-  return [
-    'high volume',
-    'unusually high traffic',
-    'experiencing issues',
-    'try again later',
-    'something went wrong',
-    'we\'re sorry',
-    'temporarily unavailable',
-    'please try again',
-    'couldn\'t load',
-    'can\'t load',
-    'unable to load',
-    'cart is unavailable',
-    'too many requests',
-  ].some((needle) => text.includes(needle));
+  return ['high volume', 'something went wrong', 'try again later'].some((n) => text.includes(n));
 }
 
 function isCartEmptyOnPage() {
+  const R = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined' ? TCH_CHECKOUT_RELIABILITY : null;
   const text = getPageBodyText();
-  if (/your cart is empty|cart is empty|no items in your cart|looks like your cart is empty/i.test(text)) {
-    return true;
-  }
+  if (R && R.isCartEmptyText(text)) return true;
   if (getPageType() !== 'cart') return false;
   const lineItems = document.querySelectorAll(
     '[data-test="cartItem"], [data-test="cart-item"], [data-test="cartLineItem"]'
@@ -1134,7 +1121,10 @@ function performRetryNavigation() {
   // If we already added to cart (ATC succeeded), prefer product re-ATC when cart was empty.
   if (isCartReady()) {
     const remembered = getRememberedProductUrl();
-    if (/cart empty|not confirmed/i.test(lastCheckoutRetryReason) && remembered) {
+    const retryProduct = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined'
+      ? TCH_CHECKOUT_RELIABILITY.shouldRetryFromProductAfterCartFailure(lastCheckoutRetryReason)
+      : /cart empty|not confirmed/i.test(lastCheckoutRetryReason);
+    if (retryProduct && remembered) {
       markRetryNavigation(remembered);
       window.location.href = remembered;
       return;

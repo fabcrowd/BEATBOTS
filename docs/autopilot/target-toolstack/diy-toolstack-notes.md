@@ -4,7 +4,14 @@
 
 - **Concept complete:** `TARGET-DIY-TOOLSTACK.md`
 - **Phase 1 complete:** WS pool depth in popup + app Shape cookie inject before monitor ATC
-- **Next build:** Phase 2 unified OTP via app IMAP (req 5)
+- **Phase 2 complete:** OTP via app IMAP when WS connected
+- **Next build:** Phase 3 profile sync (or use popup export/import)
+
+## Phase 2 — OTP via app IMAP (shipped)
+
+Extension `START_OTP_WATCH` → background tries `otp_watch_request` on BEATBOTS WS when connected → app polls first IMAP profile in `imap_profiles` → `otp_found` with 6-digit code → tab fills OTP. Falls back to Gmail OAuth when app offline.
+
+Setup: beatbots-app → IMAP Profiles → add Gmail app-password profile → keep app running during drop.
 
 ## Phase 1 — manual test
 

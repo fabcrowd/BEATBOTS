@@ -145,7 +145,25 @@ async function gmailFindOtpCode(token) {
 /** Poll Gmail every 4s for up to 3 minutes; send OTP_FOUND or OTP_TIMEOUT to the tab. */
 async function watchForOtp(tabId, startMs) {
   const deadline = startMs + 3 * 60 * 1000;
-  console.log('[TCH bg] Gmail OTP watch started for tab', tabId);
+  console.log('[TCH bg] OTP watch started for tab', tabId);
+
+  if (bbConnected) {
+    try {
+      const { targetEmail } = await chrome.storage.local.get('targetEmail');
+      const msg = await bbSendRequest('otp_watch_request', 95000, {
+        targetEmail: String(targetEmail || '').trim() || undefined,
+      });
+      if (msg?.type === 'otp_found' && msg.ok && msg.code) {
+        chrome.tabs.sendMessage(tabId, { type: 'OTP_FOUND', code: String(msg.code) }).catch(() => {});
+        console.log('[TCH bg] BEATBOTS IMAP OTP found');
+        return;
+      }
+      console.log('[TCH bg] BEATBOTS IMAP OTP unavailable — trying Gmail');
+    } catch (e) {
+      console.warn('[TCH bg] BEATBOTS OTP watch error:', e);
+    }
+  }
+
   while (Date.now() < deadline) {
     try {
       const token = await gmailGetValidToken();
@@ -1767,7 +1785,7 @@ function bbHandleWsMessage(msg) {
   }
 }
 
-function bbSendRequest(type, timeoutMs = BB_REQUEST_TIMEOUT_MS) {
+function bbSendRequest(type, timeoutMs = BB_REQUEST_TIMEOUT_MS, extra = {}) {
   return new Promise((resolve) => {
     if (!bbConnected || !bbWs || bbWs.readyState !== WebSocket.OPEN) {
       resolve(null);
@@ -1780,7 +1798,7 @@ function bbSendRequest(type, timeoutMs = BB_REQUEST_TIMEOUT_MS) {
     }, timeoutMs);
     bbPendingRequests.set(requestId, { resolve, timer });
     try {
-      bbWs.send(JSON.stringify({ type, requestId }));
+      bbWs.send(JSON.stringify({ type, requestId, ...(extra || {}) }));
     } catch {
       clearTimeout(timer);
       bbPendingRequests.delete(requestId);

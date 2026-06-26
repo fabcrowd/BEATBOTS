@@ -3,6 +3,7 @@ import { addCookie, consumeCookie, getPoolStatus, onPoolChange } from '../models
 import { CookieKind } from '../../shared/types'
 import { BrowserWindow } from 'electron'
 import { IPC } from '../../shared/types'
+import { readOtpFromConfiguredImap } from './session-manager'
 
 // ─── WebSocket bridge between the Chrome extension and Electron ───────────────
 // Extension connects, sends harvested cookies with a simple JSON protocol.
@@ -129,6 +130,13 @@ export class WsBridge {
         break
       }
 
+      case 'otp_watch_request': {
+        const requestId = msg.requestId ?? null
+        const targetEmail = typeof msg.targetEmail === 'string' ? msg.targetEmail : undefined
+        void this.handleOtpWatch(ws, requestId, targetEmail)
+        break
+      }
+
       case 'ping': {
         ws.send(JSON.stringify({ type: 'pong', requestId: msg.requestId ?? null }))
         break
@@ -166,6 +174,24 @@ export class WsBridge {
     this.broadcastPoolStatus()
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(IPC.PUSH_POOL_UPDATE)
+    }
+  }
+
+  private async handleOtpWatch(ws: WebSocket, requestId: string | null, targetEmail?: string): Promise<void> {
+    const send = (payload: object) => {
+      if (ws.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ requestId, ...payload }))
+    }
+    try {
+      const code = await readOtpFromConfiguredImap({ targetEmail, timeoutMs: 90_000 })
+      if (code) {
+        console.log('[WSBridge] OTP found via IMAP for extension')
+        send({ type: 'otp_found', ok: true, code })
+      } else {
+        send({ type: 'otp_found', ok: false, reason: 'timeout' })
+      }
+    } catch (e: any) {
+      send({ type: 'otp_found', ok: false, reason: e?.message || 'error' })
     }
   }
 }

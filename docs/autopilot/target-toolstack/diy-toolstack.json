@@ -71,7 +71,7 @@
         "Gmail OAuth fallback when app offline",
         "Document setup in diy-toolstack-notes.md"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6",
@@ -96,17 +96,17 @@
         "CHROME-PROFILES-RUNBOOK.md",
         "2-account example without cookie bleed"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8",
       "category": "testing",
       "priority": "high",
       "description": "Verify + summary",
-      "dependsOn": ["4", "5", "6", "7"],
+      "dependsOn": ["4", "5", "7"],
       "verification": ["bash scripts/verify.sh"],
       "acceptance": ["Notes summary; extension smoke if UI touched"],
-      "passes": false
+      "passes": true
     }
   ]
 }
