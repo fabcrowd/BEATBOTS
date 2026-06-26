@@ -1,0 +1,83 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "ship-tonight",
+  "description": "Ship working Target drop product — checkout reliability + DIY Phase 1 + docs",
+  "goals": [
+    "Checkout survives high-volume cart/checkout failures",
+    "BEATBOTS WS Shape + OTP wired",
+    "verify.sh and extension smoke green",
+    "Ship playbook documented"
+  ],
+  "nonGoals": [
+    "API checkout in extension",
+    "Paid AYCD tools",
+    "Live purchases in CI"
+  ],
+  "technicalNotes": "Branch cursor/checkout-reliability-4bbd · PR #23. Boss asleep — no blocking on user.",
+  "_tdd": true,
+  "requirements": [
+    {
+      "id": "1",
+      "category": "testing",
+      "priority": "high",
+      "description": "verify.sh green including checkout-reliability-test",
+      "verification": ["bash scripts/verify.sh"],
+      "acceptance": ["verify.sh ALL PASSED"],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "functional",
+      "priority": "high",
+      "description": "Checkout reliability: cart API confirm, high volume, bounce recovery",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "probeCartHasItems in content.js",
+        "checkout-reliability-notes.md",
+        "core/checkoutReliability.js tested"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "high",
+      "description": "BEATBOTS WS: Shape pool + OTP via IMAP",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "otp_watch_request in ws-bridge",
+        "watchForOtp delegates to app then Gmail",
+        "diy-toolstack-notes updated"
+      ],
+      "passes": true
+    },
+    {
+      "id": "4",
+      "category": "docs",
+      "priority": "high",
+      "description": "Ship playbook + Chrome profiles runbook",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "SHIP-TONIGHT.md",
+        "CHROME-PROFILES-RUNBOOK.md"
+      ],
+      "passes": true
+    },
+    {
+      "id": "5",
+      "category": "testing",
+      "priority": "high",
+      "description": "Extension smoke + PR ready",
+      "dependsOn": ["2", "3", "4"],
+      "verification": [
+        "cd scripts/browser-smoke && xvfb-run -a npm run test:extension"
+      ],
+      "acceptance": [
+        "Extension smoke PASS",
+        "PR #23 updated",
+        "ship-tonight-notes.md summary"
+      ],
+      "passes": true
+    }
+  ]
+}
