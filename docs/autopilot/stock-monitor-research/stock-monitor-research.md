@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Paid “stock bots” and cook-group monitors (Poke Signals, Refract monitors, Stellar tasks, Apify actors, etc.) alert you when Target or Walmart inventory flips. **You already use the same core technique on Target** — RedSky fulfillment JSON polling — but commercial stacks add **scale** (many IPs, always-on servers) and **workflow** (PID lists, Discord fan-out) that beat **human notification → click link**.
+Paid “stock bots” and cook-group monitors (**Zephyr Monitors**, Poke Signals, Refract monitors, Stellar tasks, Apify actors, etc.) alert you when Target or Walmart inventory flips. **You already use the same core technique on Target** — RedSky fulfillment JSON polling — but commercial stacks add **scale** (many IPs, always-on servers) and **workflow** (PID lists, Discord fan-out) that beat **human notification → click link**.
 
 This PRD documents **how restock detection actually works**, compares it to **our extension**, and defines a **minimal adoption plan** so you can pre-monitor window drops without waiting on Discord pings.
 

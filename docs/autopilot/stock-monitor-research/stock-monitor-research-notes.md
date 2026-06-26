@@ -51,6 +51,12 @@ runBackgroundPoll      → on stock true → tabs.update(product.url)
 
 ---
 
+## Zephyr-specific note
+
+Cook-group pings from Zephyr ≈ same RedSky flip we'd see in `runBackgroundPoll`. Pre-monitor TCINs to skip waiting on their Discord message. See **Zephyr Monitors** section in `stock-monitor-research.md`.
+
+---
+
 ## Review
 
 - 2026-06-27 — Initial research PRD + tasks JSON from operator field report + Refract/RedSky public docs.
