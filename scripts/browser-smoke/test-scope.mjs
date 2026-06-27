@@ -94,8 +94,8 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Queue-it MAIN-world WebSocket sniff → TCH_QUEUE_PASSED on documentElement',
     impl: ['target-checkout-helper/walmart-main-world.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-main-world-simulation.mjs'],
   },
   'WM-4': {
     id: 'WM-4',
@@ -208,6 +208,7 @@ export const EXTENSION_SUITE = {
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2'],
+  'walmart-main-world-simulation.mjs': ['WM-3'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
