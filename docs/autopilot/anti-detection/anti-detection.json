@@ -1,0 +1,107 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "anti-detection",
+  "description": "Research detection vectors on Target/Walmart and plan mitigations without sacrificing drop-window performance",
+  "goals": [
+    "Document how Target Shape/PX and Walmart PerimeterX can flag our extension",
+    "Prioritize Tier A extension changes with measured perf budgets",
+    "Align BEATBOTS Shape pool + optional API checkout with stealth"
+  ],
+  "nonGoals": [
+    "Proxy farms or multi-account orchestration in extension",
+    "Removing 250ms tension polling or Queue-it WebSocket sniff",
+    "Implementing all tiers in one PR without drop rehearsal"
+  ],
+  "technicalNotes": "Implemented v2.3.0 on cursor/anti-detection-impl-4bbd. scripts/anti-detection-test.mjs in verify.sh.",
+  "_tdd": true,
+  "requirements": [
+    {
+      "id": "1",
+      "category": "docs",
+      "priority": "high",
+      "description": "Anti-detection research doc with risk map and tiered plan",
+      "acceptance": [
+        "docs/autopilot/anti-detection/ANTI-DETECTION-RESEARCH-PLAN.md",
+        "Target + Walmart vectors documented",
+        "Performance budget table"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "functional",
+      "priority": "critical",
+      "description": "A1: Add cookies + browsingData to manifest.json",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "manifest.json includes cookies and browsingData",
+        "cookieHarvest and session recovery work in Chrome"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "high",
+      "description": "A2+A3: Debugger attach scope + click fallback ladder",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "Detach after ATC when checkout uses fillInput",
+        "Low-risk buttons try native click before CDP"
+      ],
+      "passes": true
+    },
+    {
+      "id": "4",
+      "category": "functional",
+      "priority": "high",
+      "description": "A4+A5: RedSky poll jitter + Walmart wmDirectAtc backoff",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "computeBackgroundPollSleepMs tension branch has jitter",
+        "wmDirectAtc uses non-flat retry delays"
+      ],
+      "passes": true
+    },
+    {
+      "id": "5",
+      "category": "functional",
+      "priority": "medium",
+      "description": "A6+A8: Popup pre-drop guards + hype fresh-tab default",
+      "dependsOn": ["3"],
+      "acceptance": [
+        "Hype monitor opens checkout in new tab by default",
+        "Pre-drop pool/tension warnings on monitor start"
+      ],
+      "passes": true
+    },
+    {
+      "id": "6",
+      "category": "functional",
+      "priority": "medium",
+      "description": "B2: WS checkout_request to CheckoutEngine (DOM fallback only)",
+      "dependsOn": ["3", "4"],
+      "acceptance": [
+        "ws-bridge handles checkout_request",
+        "Extension triggers only on high-volume / API bypass failure"
+      ],
+      "passes": true
+    },
+    {
+      "id": "7",
+      "category": "testing",
+      "priority": "high",
+      "description": "Verification matrix after Tier A implementation",
+      "dependsOn": ["3", "4"],
+      "verification": [
+        "bash scripts/verify.sh",
+        "cd scripts/browser-smoke && xvfb-run -a npm run test:extension"
+      ],
+      "acceptance": [
+        "verify.sh ALL PASSED",
+        "Poll jitter stats documented or tested"
+      ],
+      "passes": true
+    }
+  ]
+}

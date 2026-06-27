@@ -38,7 +38,7 @@ Rules:
 |------|---------|
 | `python -m orchestrator autopilot` | **Primary build guide** when task JSON has pending requirements |
 | `bash scripts/verify.sh` | **Quality gate** — must pass before claiming done (Windows: `powershell -File scripts/verify.ps1`) |
-| `@loop` / `./scripts/loop.sh` | Overnight unattended TDD (fresh `agent` session per requirement) |
+| `@loop` / `./scripts/loop.sh` | Overnight unattended TDD — loads `docs/autopilot/IT_LOOP_PROMPT.md` per session |
 | `@autopilot` | In-chat TDD for 1–4 requirements |
 | `@autopilot-cursor` skill | Cursor-native Autopilot runner details |
 | `@extension-e2e-test` | Puppeteer extension smoke when browser tests are in scope |

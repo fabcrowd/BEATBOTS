@@ -117,6 +117,17 @@ function wmSignalAtcSuccess(productUrl) {
   try { chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url }); } catch (_) {}
 }
 
+function wmReleaseQueueLock(url) {
+  try {
+    chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_END', url: url || location.href });
+  } catch (_) {}
+}
+
+function wmCheckoutDestination(settings) {
+  if (settings?.walmartAtcOnly) return 'https://www.walmart.com/cart';
+  return 'https://www.walmart.com/checkout';
+}
+
 /** Same telemetry path as Target review — drives Discord webhooks + endless mode. */
 async function wmReportCheckoutSuccess() {
   try {
@@ -319,6 +330,12 @@ function wmGetPageType() {
 
 // ─── DIRECT ATC (OID PATH) ───────────────────────────────────────────────────
 
+function wmDirectAtcRetryDelayMs(attempt) {
+  const base = 150 + Math.floor(Math.random() * 101);
+  const backoff = Math.min((attempt || 1) * 10, 200);
+  return Math.min(500, base + backoff);
+}
+
 /**
  * Attempt to add the item to cart directly via Walmart's internal API using the
  * Offer ID (OID). This skips the product page DOM entirely — faster than clicking
@@ -329,14 +346,8 @@ function wmGetPageType() {
  *
  * @param {string} oid  Walmart Offer ID (hex string)
  * @returns {Promise<boolean>}  true if item was added and we navigated to checkout
- */
-/**
- * @param {string} oid
- * @param {object} settings
  * @param {object} [opts]
- * @param {number} [opts.rapidRetryMs=0]  If >0, retry every 200ms including on 4xx
- *   until this many ms have elapsed. Use for skip-monitoring mode where the item
- *   may go live any moment and a 4xx just means "not yet".
+ * @param {number} [opts.rapidRetryMs=0]  If >0, retry with jittered backoff including on 4xx
  */
 async function wmDirectAtc(oid, settings, opts = {}) {
   const { rapidRetryMs = 0 } = opts;
@@ -400,16 +411,19 @@ async function wmDirectAtc(oid, settings, opts = {}) {
       });
     } catch (e) {
       console.warn('[WMT] Direct ATC network error (attempt', attempt, '):', e.message);
-      await wmSleep(200);
+      await wmSleep(wmDirectAtcRetryDelayMs(attempt));
       continue;
     }
 
     console.log('[WMT] Direct ATC response:', res.status, 'attempt', attempt);
     if (res.ok) {
-      wmShowToast('OID cart add succeeded — going to checkout…', 'success');
+      const dest = wmCheckoutDestination(settings);
+      wmShowToast(settings?.walmartAtcOnly
+        ? 'OID cart add succeeded — going to cart…'
+        : 'OID cart add succeeded — going to checkout…', 'success');
       wmSignalAtcSuccess(null);
       await wmSleep(300);
-      window.location.href = 'https://www.walmart.com/checkout';
+      window.location.href = dest;
       return true;
     }
 
@@ -419,11 +433,11 @@ async function wmDirectAtc(oid, settings, opts = {}) {
       break;
     }
 
-    // Rapid mode: 4xx/5xx = item not live yet. Retry in 200ms.
+    // Rapid mode: 4xx/5xx = item not live yet. Retry with jittered backoff.
     if (attempt % 10 === 0) {
       wmShowToast(`Direct ATC retry #${attempt} (HTTP ${res.status})…`, 'persistent');
     }
-    await wmSleep(200);
+    await wmSleep(wmDirectAtcRetryDelayMs(attempt));
   } while (Date.now() < deadline);
 
   console.warn('[WMT] Direct ATC failed — falling back to DOM');
@@ -519,6 +533,7 @@ async function wmWaitInProductQueue(settings, oid) {
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
+    wmReleaseQueueLock(settings?.productUrl || location.href);
   }
 }
 
@@ -557,6 +572,7 @@ async function wmHandleQueueRoom(settings) {
 
   wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] /qp waiting room timeout after 45 min');
+  wmReleaseQueueLock(lockUrl || settings?.productUrl);
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -695,6 +711,7 @@ async function wmHandleQueue(settings) {
   }
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Queue wait timed out after 45 min');
+  wmReleaseQueueLock(lockUrl);
 }
 
 /**
@@ -1036,14 +1053,15 @@ async function _wmInit() {
 
   // Use Saved Session guard: when OFF, redirect to login if not already logged in.
   const useSavedSession = data.walmartUseSavedSession !== false;
+  const isLoggedIn = !!(
+    document.querySelector('[data-automation-id="account-greeting"]') ||
+    Array.from(document.querySelectorAll('a')).some(a => /\/account\/logout|sign-out/i.test(a.href || ''))
+  );
+  const onLoginPage = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.classifyWalmartLoginPath
+    ? TCH_SIGNIN_STEP.classifyWalmartLoginPath(location.pathname)
+    : /^\/account\/login/i.test(location.pathname);
+
   if (!useSavedSession) {
-    const isLoggedIn = !!(
-      document.querySelector('[data-automation-id="account-greeting"]') ||
-      Array.from(document.querySelectorAll('a')).some(a => /\/account\/logout|sign-out/i.test(a.href || ''))
-    );
-    const onLoginPage = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.classifyWalmartLoginPath
-      ? TCH_SIGNIN_STEP.classifyWalmartLoginPath(location.pathname)
-      : /^\/account\/login/i.test(location.pathname);
     const shouldRedirect = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldRedirectToWalmartLogin
       ? TCH_SIGNIN_STEP.shouldRedirectToWalmartLogin({
           useSavedSession,
@@ -1057,18 +1075,19 @@ async function _wmInit() {
       wmInitInFlight = false;
       return;
     }
-    if (onLoginPage) {
-      const waitMsg = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.WALMART_LOGIN_WAIT_MESSAGE)
-        ? TCH_SIGNIN_STEP.WALMART_LOGIN_WAIT_MESSAGE
-        : 'Walmart login — complete captcha if shown; 2FA can be filled from email when enabled.';
-      wmShowToast(waitMsg, 'persistent');
-      void wmPollLoginImap2FA({
-        imap2faEnabled: !!data.imap2faEnabled,
-        imapProfile: data.imapProfile || {},
-      });
-      wmInitInFlight = false;
-      return;
-    }
+  }
+
+  if (onLoginPage) {
+    const waitMsg = (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.WALMART_LOGIN_WAIT_MESSAGE)
+      ? TCH_SIGNIN_STEP.WALMART_LOGIN_WAIT_MESSAGE
+      : 'Walmart login — complete captcha if shown; 2FA can be filled from email when enabled.';
+    wmShowToast(waitMsg, 'persistent');
+    void wmPollLoginImap2FA({
+      imap2faEnabled: !!data.imap2faEnabled,
+      imapProfile: data.imapProfile || {},
+    });
+    wmInitInFlight = false;
+    return;
   }
 
   // PerimeterX "hang tight" challenge — Walmart's bot detection landing page.

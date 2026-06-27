@@ -386,6 +386,16 @@ export function registerHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  monitorEngine.on('stock_flip', (ev) => {
+    wsBridge.broadcast({
+      type: 'stock_flip',
+      tcin: ev.tcin,
+      url: ev.url,
+      at: ev.at,
+      qty: ev.qty ?? 0,
+    })
+  })
+
   monitorEngine.on('status', (ev) => {
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send(IPC.PUSH_TASK_UPDATE, { event: 'monitorStatus', ...ev })

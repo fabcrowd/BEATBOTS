@@ -10,6 +10,9 @@ FILES=(
   "$ROOT/target-checkout-helper/cookieHarvest.js"
   "$ROOT/target-checkout-helper/core/hosts.js"
   "$ROOT/target-checkout-helper/core/signinStep.js"
+  "$ROOT/target-checkout-helper/core/redskyFulfillment.js"
+  "$ROOT/target-checkout-helper/core/stockFlipTelemetry.js"
+  "$ROOT/target-checkout-helper/core/stockNavigateGate.js"
   "$ROOT/target-checkout-helper/core/debuggerBridge.js"
 )
 for f in "${FILES[@]}"; do

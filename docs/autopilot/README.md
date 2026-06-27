@@ -2,6 +2,8 @@
 
 Autonomous TDD for this repo, adapted from [Gens-ai/autopilot](https://github.com/Gens-ai/autopilot) for **Cursor Agent** instead of Claude Code.
 
+**LLM handoff (post-release):** [HANDOFF.md](HANDOFF.md)
+
 ## Quick start
 
 ```bash

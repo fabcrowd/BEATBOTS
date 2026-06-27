@@ -1,3 +1,11 @@
+## @it always invokes senior-singulr-dev
+
+**User rule (standing):** When the user says `@it`, always act as the senior dev per `.cursor/skills/senior-singulr-dev/SKILL.md` and `.cursor/commands/it.md` — narrate Observing → Hypothesis → Action → Result; scope is `target-checkout-helper/`, `scripts/`, `docs/autopilot/` unless the task says otherwise.
+
+## @it overnight loop uses IT_LOOP_PROMPT.md
+
+**Rule:** `./scripts/loop.sh` / `autopilot-overnight.sh` must set `AUTOPILOT_PROMPT_TEMPLATE` to `docs/autopilot/IT_LOOP_PROMPT.md` — not inline edits to `session-prompt-overnight.md`.
+
 ## @it must narrate thought process in chat
 
 **Mistake:** Running silent multi-step tool batches during drop-prep/watch mode — user cannot follow reasoning from tmux logs alone.

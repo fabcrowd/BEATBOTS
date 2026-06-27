@@ -79,7 +79,7 @@
       "id": "3",
       "category": "functional",
       "priority": "high",
-      "description": "Bug hunt: Target checkout and sign-in flow (content.js) \u2014 fix issues, add Node tests if needed",
+      "description": "Bug hunt: Target checkout and sign-in flow (content.js) — fix issues, add Node tests if needed",
       "recurring": true,
       "dependsOn": [
         "1"
@@ -92,17 +92,17 @@
       "tdd": {
         "test": {
           "description": "Identify failing scenario or code smell with file:line",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Minimal fix",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     },
     {
       "id": "4",

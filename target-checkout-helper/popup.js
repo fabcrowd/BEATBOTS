@@ -131,6 +131,7 @@ async function refreshHarvestStatus() {
   try {
     const s = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
     const c = $('harvestCountText');
+    const bp = $('beatbotsPoolText');
     const n = $('harvestNextText');
     const w = $('harvestSessionWarn');
     const hw = $('harvestHiddenWarn');
@@ -142,6 +143,22 @@ async function refreshHarvestStatus() {
         if (count < 10) c.classList.add('harvest-count-low');
         else if (count < 30) c.classList.add('harvest-count-mid');
         else c.classList.add('harvest-count-ok');
+      }
+    }
+    if (bp && s) {
+      const bb = s.beatbots || {};
+      const pool = bb.pool || {};
+      if (!bb.connected) {
+        bp.textContent = 'BEATBOTS app: offline (extension-only harvest)';
+        bp.className = 'harvest-count';
+      } else {
+        const atc = Number(pool.atcCount) || 0;
+        const login = Number(pool.loginCount) || 0;
+        bp.textContent = `BEATBOTS app: connected — ATC ${atc}, login ${login}`;
+        bp.className = 'harvest-count';
+        if (atc < 3) bp.classList.add('harvest-count-low');
+        else if (atc < 10) bp.classList.add('harvest-count-mid');
+        else bp.classList.add('harvest-count-ok');
       }
     }
     if (w && s) w.hidden = !!s.sessionStorage;
@@ -347,6 +364,8 @@ function gatherSettings() {
       ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
       : 10,
     targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+    checkoutInNewTab: !!$('checkoutInNewTab')?.checked,
+    beatbotsCheckoutOnDomFailure: !!$('beatbotsCheckoutOnDomFailure')?.checked,
     errorRetryDelayMs: $('errorRetryDelayMs')
       ? parseIntInRange($('errorRetryDelayMs').value, 500, 30000, 3500)
       : 3500,
@@ -560,6 +579,11 @@ function populateFields(data) {
   const tm = $('targetMaxPrice');
   if (tm && typeof data.targetMaxPrice === 'number') tm.value = String(data.targetMaxPrice);
 
+  const cin = $('checkoutInNewTab');
+  if (cin) cin.checked = !!data.checkoutInNewTab;
+  const bbDom = $('beatbotsCheckoutOnDomFailure');
+  if (bbDom) bbDom.checked = !!data.beatbotsCheckoutOnDomFailure;
+
   const errMs = $('errorRetryDelayMs');
   if (errMs && typeof data.errorRetryDelayMs === 'number') errMs.value = String(data.errorRetryDelayMs);
 
@@ -641,7 +665,7 @@ function wireApplyHintReminders() {
     'useSavedPayment', 'autoPlaceOrder', 'preferPickup', 'checkoutSound',
     'discordWebhook', 'webhookSendFailures', 'endlessMode', 'endlessLimit',
     'addExtraProduct', 'extraProductTcin', 'highStockOnly', 'highStockThreshold',
-    'targetMaxPrice', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay', 'errorRetryDelayMs',
+    'targetMaxPrice', 'checkoutInNewTab', 'beatbotsCheckoutOnDomFailure', 'refreshInterval', 'checkoutRetryMax', 'checkoutRetryDelay', 'errorRetryDelayMs',
     'dropExpectedAt', 'harvestEnabled', 'harvestPerLoad', 'harvestExpireMin',
     'harvestDontStop', 'harvestApplyNext', 'walmartUseSavedSession',
     'walmartSkipMonitoring', 'walmartMaxPrice', 'wmDropExpectedAt',
@@ -693,6 +717,8 @@ if (hasChromeStorage()) {
       'highStockOnly',
       'highStockThreshold',
       'targetMaxPrice',
+      'checkoutInNewTab',
+      'beatbotsCheckoutOnDomFailure',
       'errorRetryDelayMs',
       'imap2faEnabled',
       'imapProfile',
@@ -798,6 +824,8 @@ $('webhookSendFailures')?.addEventListener('change', autoSaveToggle);
 $('endlessLimit')?.addEventListener('change', autoSaveToggle);
 $('highStockThreshold')?.addEventListener('change', autoSaveToggle);
 $('targetMaxPrice')?.addEventListener('change', autoSaveToggle);
+$('checkoutInNewTab')?.addEventListener('change', autoSaveToggle);
+$('beatbotsCheckoutOnDomFailure')?.addEventListener('change', autoSaveToggle);
 
 $('webhookTestBtn')?.addEventListener('click', async () => {
   if (!hasChromeStorage()) return;
@@ -1054,6 +1082,13 @@ const monitorStatusEl    = $('monitorStatus');
 const refreshIntervalIn  = $('refreshInterval');
 const dropExpectedAtIn   = $('dropExpectedAt');
 const dropCountdownEl    = $('dropCountdown');
+const monitorWindowStartIn = $('monitorWindowStart');
+const monitorWindowEndIn = $('monitorWindowEnd');
+const aggressiveWhileMonitorOnIn = $('aggressiveWhileMonitorOn');
+const keywordWatchIn = $('keywordWatch');
+const keywordWatchMaxIn = $('keywordWatchMax');
+const stockConfirmRequiredIn = $('stockConfirmRequired');
+const stockConfirmWindowIn = $('stockConfirmWindow');
 
 let products = [];
 let monitorActive = false;
@@ -1202,6 +1237,13 @@ function renderProducts() {
       hypeChk.disabled = monitorActive;
       hypeChk.addEventListener('change', () => {
         products[i].hypeMode = hypeChk.checked;
+        if (hypeChk.checked) {
+          const cin = $('checkoutInNewTab');
+          if (cin && !cin.checked) {
+            cin.checked = true;
+            autoSaveToggle().catch(() => {});
+          }
+        }
         saveProducts();
       });
       hypeLabel.appendChild(hypeChk);
@@ -1223,6 +1265,79 @@ function readDropExpectedAtValue() {
   return v || null;
 }
 
+function readMonitorWindowStartValue() {
+  const v = (monitorWindowStartIn?.value || '').trim();
+  return v || null;
+}
+
+function readMonitorWindowEndValue() {
+  const v = (monitorWindowEndIn?.value || '').trim();
+  return v || null;
+}
+
+function readAggressiveWhileMonitorOn() {
+  return !!aggressiveWhileMonitorOnIn?.checked;
+}
+
+function readKeywordWatchValue() {
+  const v = (keywordWatchIn?.value || '').trim();
+  return v || null;
+}
+
+function isDropTensionNow(dropIso) {
+  if (!dropIso || typeof isInDropTensionWindow !== 'function') return false;
+  return isInDropTensionWindow({ dropExpectedAt: dropIso });
+}
+
+function formatStockFlipTime(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  try {
+    return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function extractTcinFromProductUrl(url) {
+  try {
+    const m = new URL(url).pathname.match(/\/A-(\d{6,10})/i);
+    return m?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function validatePreDropGuards(productsToMonitor) {
+  const warnings = [];
+  const hasHype = productsToMonitor.some((p) => p.hypeMode);
+  if (hasHype) {
+    const cin = $('checkoutInNewTab');
+    if (cin && !cin.checked) {
+      cin.checked = true;
+      await autoSaveToggle().catch(() => {});
+      showToast('Hype: fresh-tab checkout enabled');
+    }
+    try {
+      const st = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
+      const extPool = Number(st?.total) || 0;
+      const bbPool = st?.beatbots?.pool;
+      const bbAtc = Number(bbPool?.atcCount ?? st?.beatbots?.atcCount) || 0;
+      const pool = Math.max(extPool, bbAtc);
+      if (pool < 3) {
+        warnings.push(`Hype: Shape pool low (${pool}) — start BEATBOTS harvester`);
+      }
+    } catch (_) {}
+  }
+  const dropAt = readDropExpectedAtValue();
+  if (dropAt && isDropTensionNow(dropAt)) {
+    warnings.push('Inside drop window — avoid changing settings');
+  }
+  if (warnings.length) showToast(warnings.join(' · '));
+  return warnings;
+}
+
 async function saveProducts() {
   if (!hasChromeStorage()) return;
   const { monitor } = await chrome.storage.local.get('monitor');
@@ -1230,6 +1345,25 @@ async function saveProducts() {
   const dropVal = readDropExpectedAtValue();
   if (dropVal) next.dropExpectedAt = dropVal;
   else delete next.dropExpectedAt;
+  const winStart = readMonitorWindowStartValue();
+  const winEnd = readMonitorWindowEndValue();
+  if (winStart) next.monitorWindowStart = winStart;
+  else delete next.monitorWindowStart;
+  if (winEnd) next.monitorWindowEnd = winEnd;
+  else delete next.monitorWindowEnd;
+  next.aggressiveWhileMonitorOn = readAggressiveWhileMonitorOn();
+  const kw = readKeywordWatchValue();
+  if (kw) next.keywordWatch = kw;
+  else delete next.keywordWatch;
+  next.keywordWatchMax = keywordWatchMaxIn
+    ? parseIntInRange(keywordWatchMaxIn.value, 1, 24, 8)
+    : 8;
+  next.stockConfirmRequired = stockConfirmRequiredIn
+    ? parseIntInRange(stockConfirmRequiredIn.value, 1, 5, 2)
+    : 2;
+  next.stockConfirmWindow = stockConfirmWindowIn
+    ? parseIntInRange(stockConfirmWindowIn.value, 2, 6, 3)
+    : 3;
   await chrome.storage.local.set({ monitor: next });
 }
 
@@ -1542,23 +1676,38 @@ async function toggleMonitor(retailerFilter) {
     const filtered = retailerFilter
       ? products.filter(p => retailerFilter.test(p.url))
       : products;
-    if (!filtered.length) {
+    if (!filtered.length && !readKeywordWatchValue()) {
       showToast('No matching products to monitor');
       return;
     }
     // Persist current UI state before starting so settings survive popup close/reopen.
     await autoSaveToggle().catch(() => {});
+    await validatePreDropGuards(filtered);
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
       products: filtered,
       refreshInterval: parseInt(refreshIntervalIn.value, 10) || 1,
       dropExpectedAt: readDropExpectedAtValue(),
+      monitorWindowStart: readMonitorWindowStartValue(),
+      monitorWindowEnd: readMonitorWindowEndValue(),
+      aggressiveWhileMonitorOn: readAggressiveWhileMonitorOn(),
+      keywordWatch: readKeywordWatchValue(),
+      keywordWatchMax: keywordWatchMaxIn
+        ? parseIntInRange(keywordWatchMaxIn.value, 1, 24, 8)
+        : 8,
+      stockConfirmRequired: stockConfirmRequiredIn
+        ? parseIntInRange(stockConfirmRequiredIn.value, 1, 5, 2)
+        : 2,
+      stockConfirmWindow: stockConfirmWindowIn
+        ? parseIntInRange(stockConfirmWindowIn.value, 2, 6, 3)
+        : 3,
       walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
       highStockOnly: !!$('highStockOnly')?.checked,
       highStockThreshold: $('highStockThreshold')
         ? parseIntInRange($('highStockThreshold').value, 1, 999, 10)
         : 10,
       targetMaxPrice: parseFloat($('targetMaxPrice')?.value) || 0,
+      checkoutInNewTab: !!$('checkoutInNewTab')?.checked,
       walmartMaxPrice: parseFloat($('walmartMaxPrice')?.value) || 0,
       errorRetryDelayMs: $('errorRetryDelayMs')
         ? parseIntInRange($('errorRetryDelayMs').value, 500, 30000, 3500)
@@ -1574,17 +1723,26 @@ async function toggleMonitor(retailerFilter) {
 function updateMonitorUI() {
   monitorBtn.textContent = monitorActive ? 'Stop monitoring' : 'Start monitoring';
   monitorBtn.classList.toggle('active', monitorActive);
-  monitorBtn.disabled = !monitorActive && !products.length;
+  monitorBtn.disabled = !monitorActive && !products.length && !readKeywordWatchValue();
   productUrlInput.disabled = monitorActive;
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
   if (dropExpectedAtIn) dropExpectedAtIn.disabled = monitorActive;
+  if (monitorWindowStartIn) monitorWindowStartIn.disabled = monitorActive;
+  if (monitorWindowEndIn) monitorWindowEndIn.disabled = monitorActive;
+  if (aggressiveWhileMonitorOnIn) aggressiveWhileMonitorOnIn.disabled = monitorActive;
+  if (keywordWatchIn) keywordWatchIn.disabled = monitorActive;
+  if (keywordWatchMaxIn) keywordWatchMaxIn.disabled = monitorActive;
+  if (stockConfirmRequiredIn) stockConfirmRequiredIn.disabled = monitorActive;
+  if (stockConfirmWindowIn) stockConfirmWindowIn.disabled = monitorActive;
   const hsOnlyEl = $('highStockOnly');
   if (hsOnlyEl) hsOnlyEl.disabled = monitorActive;
   const hsThrEl = $('highStockThreshold');
   if (hsThrEl) hsThrEl.disabled = monitorActive;
   const tmEl = $('targetMaxPrice');
   if (tmEl) tmEl.disabled = monitorActive;
+  const cinEl = $('checkoutInNewTab');
+  if (cinEl) cinEl.disabled = monitorActive;
   // Sync Walmart tab drop time display
   const wmDrop = $('wmDropExpectedAt');
   if (wmDrop && dropExpectedAtIn?.value) wmDrop.value = dropExpectedAtIn.value;
@@ -1606,7 +1764,10 @@ async function pollStatus() {
       const parts = (m.products || []).map((p) => {
         const name = extractProductName(p.url);
         const count = m.counts?.[normalizeProductUrl(p.url)] || 0;
-        return `${name}: ${count}/${p.qty}`;
+        const tcin = extractTcinFromProductUrl(p.url);
+        const flipAt = tcin && m.lastStockFlips?.[tcin]?.at;
+        const flipSuffix = flipAt ? ` flip ${formatStockFlipTime(flipAt)}` : '';
+        return `${name}: ${count}/${p.qty}${flipSuffix}`;
       });
       const textParts = [];
       if (parts.length) textParts.push(parts.join(' · '));
@@ -1703,8 +1864,29 @@ async function loadMonitorData() {
   if ($('targetMaxPrice') && monitor.targetMaxPrice != null) {
     $('targetMaxPrice').value = String(monitor.targetMaxPrice);
   }
+  const cin = $('checkoutInNewTab');
+  if (cin) cin.checked = !!monitor.checkoutInNewTab;
   if (dropExpectedAtIn && monitor.dropExpectedAt) {
     dropExpectedAtIn.value = monitor.dropExpectedAt;
+  }
+  if (monitorWindowStartIn && monitor.monitorWindowStart) {
+    monitorWindowStartIn.value = monitor.monitorWindowStart;
+  }
+  if (monitorWindowEndIn && monitor.monitorWindowEnd) {
+    monitorWindowEndIn.value = monitor.monitorWindowEnd;
+  }
+  if (aggressiveWhileMonitorOnIn) {
+    aggressiveWhileMonitorOnIn.checked = !!monitor.aggressiveWhileMonitorOn;
+  }
+  if (keywordWatchIn && monitor.keywordWatch) keywordWatchIn.value = monitor.keywordWatch;
+  if (keywordWatchMaxIn && monitor.keywordWatchMax != null) {
+    keywordWatchMaxIn.value = String(monitor.keywordWatchMax);
+  }
+  if (stockConfirmRequiredIn && monitor.stockConfirmRequired != null) {
+    stockConfirmRequiredIn.value = String(monitor.stockConfirmRequired);
+  }
+  if (stockConfirmWindowIn && monitor.stockConfirmWindow != null) {
+    stockConfirmWindowIn.value = String(monitor.stockConfirmWindow);
   }
   // Sync Walmart tab drop time
   const wmDrop = $('wmDropExpectedAt');
@@ -1729,6 +1911,13 @@ if (dropExpectedAtIn) {
     formatDropCountdown(readDropExpectedAtValue() || '');
     saveProducts();
   });
+}
+for (const el of [monitorWindowStartIn, monitorWindowEndIn]) {
+  el?.addEventListener('change', () => saveProducts());
+}
+aggressiveWhileMonitorOnIn?.addEventListener('change', () => saveProducts());
+for (const el of [keywordWatchIn, keywordWatchMaxIn, stockConfirmRequiredIn, stockConfirmWindowIn]) {
+  el?.addEventListener('change', () => saveProducts());
 }
 
 setInterval(() => {
