@@ -1082,6 +1082,9 @@ const monitorStatusEl    = $('monitorStatus');
 const refreshIntervalIn  = $('refreshInterval');
 const dropExpectedAtIn   = $('dropExpectedAt');
 const dropCountdownEl    = $('dropCountdown');
+const monitorWindowStartIn = $('monitorWindowStart');
+const monitorWindowEndIn = $('monitorWindowEnd');
+const aggressiveWhileMonitorOnIn = $('aggressiveWhileMonitorOn');
 
 let products = [];
 let monitorActive = false;
@@ -1258,14 +1261,43 @@ function readDropExpectedAtValue() {
   return v || null;
 }
 
-function isInDropTensionWindow(dropIso) {
-  if (!dropIso) return false;
-  const t = Date.parse(dropIso);
-  if (!Number.isFinite(t)) return false;
-  const now = Date.now();
-  const until = t - now;
-  const afterDrop = now - t;
-  return (until >= 0 && until <= 10 * 60 * 1000) || (until < 0 && afterDrop <= 3 * 60 * 1000);
+function readMonitorWindowStartValue() {
+  const v = (monitorWindowStartIn?.value || '').trim();
+  return v || null;
+}
+
+function readMonitorWindowEndValue() {
+  const v = (monitorWindowEndIn?.value || '').trim();
+  return v || null;
+}
+
+function readAggressiveWhileMonitorOn() {
+  return !!aggressiveWhileMonitorOnIn?.checked;
+}
+
+function isDropTensionNow(dropIso) {
+  if (!dropIso || typeof isInDropTensionWindow !== 'function') return false;
+  return isInDropTensionWindow({ dropExpectedAt: dropIso });
+}
+
+function formatStockFlipTime(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  try {
+    return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function extractTcinFromProductUrl(url) {
+  try {
+    const m = new URL(url).pathname.match(/\/A-(\d{6,10})/i);
+    return m?.[1] || null;
+  } catch {
+    return null;
+  }
 }
 
 async function validatePreDropGuards(productsToMonitor) {
@@ -1290,7 +1322,7 @@ async function validatePreDropGuards(productsToMonitor) {
     } catch (_) {}
   }
   const dropAt = readDropExpectedAtValue();
-  if (dropAt && isInDropTensionWindow(dropAt)) {
+  if (dropAt && isDropTensionNow(dropAt)) {
     warnings.push('Inside drop window — avoid changing settings');
   }
   if (warnings.length) showToast(warnings.join(' · '));
@@ -1304,6 +1336,13 @@ async function saveProducts() {
   const dropVal = readDropExpectedAtValue();
   if (dropVal) next.dropExpectedAt = dropVal;
   else delete next.dropExpectedAt;
+  const winStart = readMonitorWindowStartValue();
+  const winEnd = readMonitorWindowEndValue();
+  if (winStart) next.monitorWindowStart = winStart;
+  else delete next.monitorWindowStart;
+  if (winEnd) next.monitorWindowEnd = winEnd;
+  else delete next.monitorWindowEnd;
+  next.aggressiveWhileMonitorOn = readAggressiveWhileMonitorOn();
   await chrome.storage.local.set({ monitor: next });
 }
 
@@ -1628,6 +1667,9 @@ async function toggleMonitor(retailerFilter) {
       products: filtered,
       refreshInterval: parseInt(refreshIntervalIn.value, 10) || 1,
       dropExpectedAt: readDropExpectedAtValue(),
+      monitorWindowStart: readMonitorWindowStartValue(),
+      monitorWindowEnd: readMonitorWindowEndValue(),
+      aggressiveWhileMonitorOn: readAggressiveWhileMonitorOn(),
       walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
       highStockOnly: !!$('highStockOnly')?.checked,
       highStockThreshold: $('highStockThreshold')
@@ -1655,6 +1697,9 @@ function updateMonitorUI() {
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
   if (dropExpectedAtIn) dropExpectedAtIn.disabled = monitorActive;
+  if (monitorWindowStartIn) monitorWindowStartIn.disabled = monitorActive;
+  if (monitorWindowEndIn) monitorWindowEndIn.disabled = monitorActive;
+  if (aggressiveWhileMonitorOnIn) aggressiveWhileMonitorOnIn.disabled = monitorActive;
   const hsOnlyEl = $('highStockOnly');
   if (hsOnlyEl) hsOnlyEl.disabled = monitorActive;
   const hsThrEl = $('highStockThreshold');
@@ -1684,7 +1729,10 @@ async function pollStatus() {
       const parts = (m.products || []).map((p) => {
         const name = extractProductName(p.url);
         const count = m.counts?.[normalizeProductUrl(p.url)] || 0;
-        return `${name}: ${count}/${p.qty}`;
+        const tcin = extractTcinFromProductUrl(p.url);
+        const flipAt = tcin && m.lastStockFlips?.[tcin]?.at;
+        const flipSuffix = flipAt ? ` flip ${formatStockFlipTime(flipAt)}` : '';
+        return `${name}: ${count}/${p.qty}${flipSuffix}`;
       });
       const textParts = [];
       if (parts.length) textParts.push(parts.join(' · '));
@@ -1786,6 +1834,15 @@ async function loadMonitorData() {
   if (dropExpectedAtIn && monitor.dropExpectedAt) {
     dropExpectedAtIn.value = monitor.dropExpectedAt;
   }
+  if (monitorWindowStartIn && monitor.monitorWindowStart) {
+    monitorWindowStartIn.value = monitor.monitorWindowStart;
+  }
+  if (monitorWindowEndIn && monitor.monitorWindowEnd) {
+    monitorWindowEndIn.value = monitor.monitorWindowEnd;
+  }
+  if (aggressiveWhileMonitorOnIn) {
+    aggressiveWhileMonitorOnIn.checked = !!monitor.aggressiveWhileMonitorOn;
+  }
   // Sync Walmart tab drop time
   const wmDrop = $('wmDropExpectedAt');
   if (wmDrop && monitor.dropExpectedAt) {
@@ -1810,6 +1867,10 @@ if (dropExpectedAtIn) {
     saveProducts();
   });
 }
+for (const el of [monitorWindowStartIn, monitorWindowEndIn]) {
+  el?.addEventListener('change', () => saveProducts());
+}
+aggressiveWhileMonitorOnIn?.addEventListener('change', () => saveProducts());
 
 setInterval(() => {
   formatDropCountdown(readDropExpectedAtValue() || '');

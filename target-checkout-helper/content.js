@@ -2519,18 +2519,20 @@ function extractTcinFromUrl(url) {
   }
 }
 
-function buildFulfillmentApiUrl(productUrl) {
+function buildFulfillmentApiUrl(productUrl, opts = {}) {
   const tcin = extractTcinFromUrl(productUrl);
   if (!tcin) return null;
 
   const cfg = window.__CONFIG__?.services || {};
   const baseUrl = (cfg.redsky?.baseUrl || 'https://redsky.target.com').replace(/\/$/, '');
-  const endpoint = (cfg.redsky?.apis?.redskyAggregations?.endpointPaths?.productFulfillment
-    || 'redsky_aggregations/v1/web/product_fulfillment_v1').replace(/^\/+/, '');
   const apiKey = cfg.auth?.apiKey || cfg.apiPlatform?.apiKey || '';
   if (!apiKey) return null;
 
-  return `${baseUrl}/${endpoint}?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
+  if (typeof buildRedskyFulfillmentUrl === 'function') {
+    return buildRedskyFulfillmentUrl(tcin, { apiKey, redskyBase: baseUrl, zip: opts.zip });
+  }
+
+  return `${baseUrl}/redsky_aggregations/v1/web/product_fulfillment_v1?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
 }
 
 /** Same logic as background extractTargetRetailPrice — fulfillment-only responses often omit this. */
@@ -2673,7 +2675,8 @@ function parseFulfillmentStockStatus(payload) {
 }
 
 async function checkStockFromFulfillmentApi(url, timeoutMs = 3000, stockOpts = null) {
-  const fulfillmentUrl = buildFulfillmentApiUrl(url);
+  const settings = await getSettings();
+  const fulfillmentUrl = buildFulfillmentApiUrl(url, { zip: settings?.shipping?.zip });
   if (!fulfillmentUrl) return null;
 
   const controller = new AbortController();

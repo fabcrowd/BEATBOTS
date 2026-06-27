@@ -2,7 +2,14 @@
 // Relays messages between popup/content scripts + orchestrates product monitoring.
 // Background TCIN polling runs here — no browser tab throttling.
 
-importScripts('dropPollingTiming.js', 'core/hosts.js', 'core/debuggerBridge.js', 'cookieHarvest.js');
+importScripts(
+  'dropPollingTiming.js',
+  'core/hosts.js',
+  'core/redskyFulfillment.js',
+  'core/stockFlipTelemetry.js',
+  'core/debuggerBridge.js',
+  'cookieHarvest.js'
+);
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
@@ -363,7 +370,7 @@ async function checkWalmartItemStock(itemId) {
     const qRaw = json?.product?.productAvailability?.inventoryAvailableQuantity
       ?? json?.product?.productAvailability?.quantity;
     const qty = Number(qRaw);
-    const stock = SELLABLE_STATUSES.has(status);
+    const stock = /^(IN_STOCK|AVAILABLE|LIMITED_STOCK)$/i.test(String(status));
     const price = json?.product?.priceInfo?.currentPrice?.price ?? null;
     return {
       stock,
@@ -374,12 +381,6 @@ async function checkWalmartItemStock(itemId) {
 }
 
 // ─── STOCK STATUS PARSING ────────────────────────────────────────────────────
-
-const SELLABLE_STATUSES = new Set([
-  'IN_STOCK', 'LIMITED_STOCK', 'PRE_ORDER_SELLABLE',
-  'BACKORDER_AVAILABLE', 'BACKORDERED', 'AVAILABLE',
-]);
-const BLOCKED_RE = /(OUT_OF_STOCK|UNSELLABLE|UNAVAILABLE|NOT_AVAILABLE|NO_INVENTORY|INVENTORY_UNAVAILABLE)/i;
 
 /** Best-effort current retail USD from RedSky product node; null when absent (do not gate on unknown). */
 function extractTargetRetailPrice(product) {
@@ -412,18 +413,9 @@ function extractTargetRetailPrice(product) {
 }
 
 /** @returns {{ stock: boolean | null, qty: number, price: number | null }} */
-function parseFulfillmentBlock(fulfillment) {
-  if (!fulfillment || typeof fulfillment !== 'object') return { stock: null, qty: 0, price: null };
-  const shipping = fulfillment.shipping_options || {};
-  const status = String(shipping.availability_status || '').toUpperCase();
-  const qty = Number(shipping.available_to_promise_quantity) || 0;
-  const soldOut = fulfillment.sold_out === true;
-  const oosAll  = fulfillment.is_out_of_stock_in_all_store_locations === true;
-  const sellable = qty > 0 || SELLABLE_STATUSES.has(status);
-  const blocked  = soldOut || BLOCKED_RE.test(status) || (oosAll && qty <= 0 && !sellable);
-  if (sellable && !soldOut) return { stock: true, qty, price: null };
-  if (blocked) return { stock: false, qty, price: null };
-  return { stock: null, qty, price: null };
+function parseFulfillmentBlockLocal(fulfillment) {
+  if (typeof parseFulfillmentBlock === 'function') return parseFulfillmentBlock(fulfillment);
+  return { stock: null, qty: 0, price: null };
 }
 
 function mergeTargetStockAndPrice(block, productNode) {
@@ -477,6 +469,8 @@ const navigationLock = new Set();
 /** @type {Map<string, number>} */
 const navigationLockAt = new Map();
 const NAV_LOCK_TTL_MS = 30 * 60 * 1000;
+/** @type {Map<string, object|boolean>} */
+const lastPollStockByTcin = new Map();
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
 // NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
@@ -532,10 +526,16 @@ function requestApiKeyFromTabs() {
 // ─── TCIN STOCK CHECK ────────────────────────────────────────────────────────
 
 // Single-TCIN check using product_fulfillment_v1 (known-good for preorders).
-async function checkSingleTcin(tcin, apiKey, redskyBase) {
-  const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
-  const url  = `${base}/redsky_aggregations/v1/web/product_fulfillment_v1`
-    + `?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
+async function checkSingleTcin(tcin, apiKey, redskyBase, geoOpts = {}) {
+  const url = typeof buildRedskyFulfillmentUrl === 'function'
+    ? buildRedskyFulfillmentUrl(tcin, {
+      apiKey,
+      redskyBase,
+      zip: geoOpts.zip,
+      storeId: geoOpts.storeId,
+    })
+    : null;
+  if (!url) return null;
   try {
     const res = await fetch(url, {
       cache: 'no-store',
@@ -562,7 +562,7 @@ async function checkSingleTcin(tcin, apiKey, redskyBase) {
 // returns undefined (batch endpoint returned no data), falls back to the
 // single-TCIN product_fulfillment_v1 endpoint which is authoritative for
 // preorder items.
-async function checkTcinsStock(tcins, apiKey, redskyBase) {
+async function checkTcinsStock(tcins, apiKey, redskyBase, geoOpts = {}) {
   if (!tcins.length || !apiKey) return new Map();
   const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
   const url  = `${base}/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1`
@@ -593,7 +593,7 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
   const missing = tcins.filter(t => out.get(t) === undefined);
   if (missing.length) {
     await Promise.all(missing.map(async (tcin) => {
-      const result = await checkSingleTcin(tcin, apiKey, redskyBase);
+      const result = await checkSingleTcin(tcin, apiKey, redskyBase, geoOpts);
       if (result !== null) out.set(tcin, result);
     }));
   }
@@ -652,6 +652,22 @@ function accurateNow() {
 
 // ─── BACKGROUND POLL LOOP ────────────────────────────────────────────────────
 
+async function maybeRecordStockFlip(tcin, nextEntry) {
+  if (!tcin || typeof detectStockFlip !== 'function') return;
+  const prev = lastPollStockByTcin.get(tcin);
+  lastPollStockByTcin.set(tcin, nextEntry);
+  const flip = detectStockFlip(prev, nextEntry);
+  if (!flip) return;
+
+  const { lastStockFlips } = await chrome.storage.local.get('lastStockFlips').catch(() => ({}));
+  const existing = lastStockFlips?.[tcin];
+  const nowMs = Date.now();
+  if (!shouldRecordStockFlip(existing, flip, nowMs, STOCK_FLIP_DEBOUNCE_MS)) return;
+
+  const updated = applyStockFlipRecord(lastStockFlips || {}, tcin, flip);
+  await chrome.storage.local.set({ lastStockFlips: updated }).catch(() => {});
+}
+
 async function runBackgroundPoll() {
   bgPollActive = true;
   let pollCycles = 0;
@@ -698,13 +714,18 @@ async function runBackgroundPoll() {
     const stockMap = new Map();
 
     let hadApiError = false;
+    const { shipping } = await chrome.storage.local.get('shipping').catch(() => ({}));
+    const geoOpts = { zip: shipping?.zip };
     if (hasTargetWork) {
       const tcins = targetProducts.map(p => extractTcin(p.url)).filter(Boolean);
       if (tcins.length) {
         const streakBefore = redskyErrorStreak;
-        const targetMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
+        const targetMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase, geoOpts);
         if (redskyErrorStreak > streakBefore) hadApiError = true;
-        for (const [k, v] of targetMap) stockMap.set(k, v);
+        for (const [k, v] of targetMap) {
+          stockMap.set(k, v);
+          await maybeRecordStockFlip(k, v);
+        }
       }
     }
 
@@ -1132,6 +1153,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
           checkoutInNewTab: !!message.checkoutInNewTab,
+          monitorWindowStart: message.monitorWindowStart || null,
+          monitorWindowEnd: message.monitorWindowEnd || null,
+          aggressiveWhileMonitorOn: !!message.aggressiveWhileMonitorOn,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1234,11 +1258,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'GET_MONITOR_STATUS':
-      chrome.storage.local.get(['monitor', 'checkoutTelemetry'], ({ monitor, checkoutTelemetry }) => {
+      chrome.storage.local.get(['monitor', 'checkoutTelemetry', 'lastStockFlips'], ({ monitor, checkoutTelemetry, lastStockFlips }) => {
         const baseMonitor = monitor || { active: false, products: [], counts: {} };
         sendResponse({
           ...baseMonitor,
           checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
+          lastStockFlips: lastStockFlips || {},
         });
       });
       return true;
@@ -1594,10 +1619,14 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     walmartMaxPrice = 0,
     errorRetryDelayMs = 3500,
     checkoutInNewTab = false,
+    monitorWindowStart = null,
+    monitorWindowEnd = null,
+    aggressiveWhileMonitorOn = false,
     resetEndlessSuccessCount = true,
   } = opts;
 
   await stopMonitor();
+  lastPollStockByTcin.clear();
 
   if (resetEndlessSuccessCount) {
     await chrome.storage.local.set({ endlessSuccessCount: 0 });
@@ -1617,6 +1646,13 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   if (dropExpectedAt && String(dropExpectedAt).trim()) {
     monitor.dropExpectedAt = String(dropExpectedAt).trim();
   }
+  if (monitorWindowStart && String(monitorWindowStart).trim()) {
+    monitor.monitorWindowStart = String(monitorWindowStart).trim();
+  }
+  if (monitorWindowEnd && String(monitorWindowEnd).trim()) {
+    monitor.monitorWindowEnd = String(monitorWindowEnd).trim();
+  }
+  monitor.aggressiveWhileMonitorOn = !!aggressiveWhileMonitorOn;
   if (skipMonitoring) monitor.skipMonitoring = true;
   monitor.highStockOnly = !!highStockOnly;
   monitor.highStockThreshold = Math.max(1, Math.min(999, Number(highStockThreshold) || 10));
@@ -1659,6 +1695,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
 
 async function stopMonitor() {
   bgPollActive = false;
+  lastPollStockByTcin.clear();
   lastHarvestKeepaliveRunMs = 0;
   redskyErrorStreak = 0;
   inQueueUrls.clear();
@@ -1777,12 +1814,86 @@ async function bbGetPort() {
   } catch { return BB_WS_DEFAULT_PORT; }
 }
 
+async function bbHandleStockFlip(msg) {
+  const tcin = String(msg.tcin || '').trim();
+  if (!tcin) return;
+
+  const { monitor, lastStockFlips } = await chrome.storage.local.get(['monitor', 'lastStockFlips']).catch(() => ({}));
+  if (!monitor?.active) return;
+
+  const product = (monitor.products || []).find((p) => extractTcin(p.url) === tcin);
+  if (!product) return;
+
+  const flip = {
+    from: 'OOS',
+    to: 'IN_STOCK',
+    at: msg.at || new Date().toISOString(),
+    qty: Number(msg.qty) || 0,
+  };
+  if (shouldRecordStockFlip(lastStockFlips?.[tcin], flip, Date.now(), STOCK_FLIP_DEBOUNCE_MS)) {
+    const updated = applyStockFlipRecord(lastStockFlips || {}, tcin, flip);
+    await chrome.storage.local.set({ lastStockFlips: updated }).catch(() => {});
+  }
+
+  const normUrl = normalizeProductUrl(product.url);
+  if ((monitor.counts?.[normUrl] || 0) >= product.qty) return;
+  if (inQueueUrls.has(normUrl)) return;
+  if (navigationLock.has(normUrl)) {
+    const lockedAt = navigationLockAt.get(normUrl) || 0;
+    if (Date.now() - lockedAt < NAV_LOCK_TTL_MS) return;
+    navigationLock.delete(normUrl);
+    navigationLockAt.delete(normUrl);
+  }
+
+  const entry = { stock: true, qty: flip.qty };
+  if (monitor.highStockOnly) {
+    const th = Number(monitor.highStockThreshold) || 10;
+    const qty = Number(entry.qty) || 0;
+    if (qty > 0 && qty < th) return;
+  }
+
+  console.log(`[TCH bg] BEATBOTS stock_flip: tcin=${tcin} url=${product.url}`);
+  const tabId = urlToTabId[normUrl];
+  if (tabId) {
+    try {
+      const currentTab = await chrome.tabs.get(tabId);
+      if (isInCheckoutFlow(currentTab?.url)) return;
+    } catch { /* tab closed */ }
+  }
+
+  let navigated = false;
+  if (tabId) {
+    try {
+      await chrome.tabs.update(tabId, { url: product.url, active: true });
+      navigated = true;
+    } catch { /* tab closed */ }
+  }
+  if (!navigated) {
+    const existing = await chrome.tabs.query({}).catch(() => []);
+    const match = existing.find((t) => t.url && normalizeProductUrl(t.url) === normUrl && !isInCheckoutFlow(t.url));
+    if (match) {
+      chrome.tabs.update(match.id, { url: product.url, active: true }).catch(() => {});
+      navigated = true;
+    }
+  }
+  if (!navigated) {
+    chrome.tabs.create({ url: product.url, active: true }).catch(() => {});
+  }
+  navigationLock.add(normUrl);
+  navigationLockAt.set(normUrl, Date.now());
+}
+
 function bbHandleWsMessage(msg) {
   if (msg?.type === 'hello' && msg?.source === 'beatbots') {
     if (typeof msg.port === 'number' && msg.port > 0) {
       bbWsPort = msg.port;
       chrome.storage.local.set({ beatbotsWsPort: msg.port }).catch(() => {});
     }
+    return;
+  }
+
+  if (msg?.type === 'stock_flip') {
+    bbHandleStockFlip(msg).catch((e) => console.warn('[TCH] stock_flip handler failed', e));
     return;
   }
 

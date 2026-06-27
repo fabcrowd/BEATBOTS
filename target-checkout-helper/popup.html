@@ -100,8 +100,19 @@
             <label class="field-label" for="dropExpectedAt">Expected drop / restock (local time)</label>
             <input type="datetime-local" id="dropExpectedAt" class="input-datetime" step="1" aria-describedby="dropHint" title="If you know when the item goes live, enter that time here. The poll speeds up to 250ms in the 10 minutes before this time and holds fast for 3 minutes after. Leave blank for unknown restocks — the poll runs at a steady rate. For Walmart drops, set 10 seconds before actual drop time (e.g. 8:59:50 for 9:00 PM).">
             <p id="dropCountdown" class="drop-countdown" aria-live="polite"></p>
-            <p id="dropHint" class="field-hint">Optional. Polling speeds up in the 10 minutes before this time (and briefly after). Leave blank if you don't know when it restocks.</p>
+            <p id="dropHint" class="field-hint">Optional point-in-time drop: poll speeds up ±10m around this time. For <strong>hours-long window drops</strong>, set the monitor window below or enable aggressive polling.</p>
           </div>
+          <div class="drop-block" style="margin-top:8px">
+            <label class="field-label" for="monitorWindowStart">Monitor window start (local)</label>
+            <input type="datetime-local" id="monitorWindowStart" class="input-datetime" step="1" title="Start of a multi-hour Target restock window. Poll runs at 250ms inside this span.">
+            <label class="field-label" for="monitorWindowEnd" style="margin-top:6px">Monitor window end (local)</label>
+            <input type="datetime-local" id="monitorWindowEnd" class="input-datetime" step="1" title="End of the restock window. Outside this span, polling returns to normal unless aggressive mode is on.">
+          </div>
+          <label class="option-row" style="margin-top:8px" title="When ON and no point drop time is set, background poll stays at 250ms for the whole monitor session — beats waiting on Discord/Zephyr pings.">
+            <input type="checkbox" id="aggressiveWhileMonitorOn">
+            <span class="option-label">Aggressive poll while monitor ON (unknown window)</span>
+          </label>
+          <p class="option-hint">Use for overnight / unknown-window SKUs. Leave OFF if you set a monitor window or point drop time.</p>
           <div class="monitor-grid">
             <div class="monitor-field">
               <label class="field-label" for="refreshInterval">Poll every (sec)</label>
@@ -608,6 +619,35 @@
         </ul>
       </details>
 
+      <!-- ─── TARGET: WINDOW DROP (beat Discord) ─────────────────── -->
+
+      <details class="card guide-section" open>
+        <summary class="tips-summary">Target — Window drop (beat Discord / Zephyr)</summary>
+        <p class="guide-note">Target window drops have <strong>no fixed second</strong> — cook-group pings (often from <strong>Zephyr Monitors</strong>) fire when RedSky flips. Pre-monitoring the same TCIN in this extension skips the Discord click latency.</p>
+
+        <h3 class="guide-subhead">Zephyr path vs our path</h3>
+        <ul class="guide-steps">
+          <li><strong>Their path:</strong> cloud RedSky poll → Discord webhook → you click → ATC</li>
+          <li><strong>Our path:</strong> extension RedSky poll → tab navigates → ATC (no ping wait)</li>
+        </ul>
+        <p class="guide-note">See <code>docs/autopilot/stock-monitor-research/stock-monitor-research.md</code> in the repo for the full research write-up.</p>
+
+        <h3 class="guide-subhead">Step 1: Before the window</h3>
+        <ol class="guide-steps">
+          <li>Add each Target URL to <strong>Product monitor</strong> (hit <strong>+</strong>) — hours before the window opens</li>
+          <li>Build cookie pool (30+ snapshots) on the <strong>Monitor</strong> tab</li>
+          <li>Set <strong>Monitor window start/end</strong> for known multi-hour windows <em>or</em> enable <strong>Aggressive poll while monitor ON</strong> when timing is unknown</li>
+        </ol>
+
+        <h3 class="guide-subhead">Step 2: During the window</h3>
+        <ol class="guide-steps">
+          <li>Click <strong>Start monitoring</strong> — keep Chrome open (minimized OK)</li>
+          <li>Do <strong>not</strong> wait for Discord — the background poll navigates on the same RedSky flip</li>
+          <li>One Target tab discipline; don't toggle settings mid-window</li>
+          <li>Check monitor status for <strong>Flip</strong> timestamps if you want post-drop proof we saw stock</li>
+        </ol>
+      </details>
+
       <!-- ─── TARGET: UNKNOWN DROP ───────────────────────────────── -->
 
       <details class="card guide-section" open>
@@ -624,13 +664,13 @@
         <ol class="guide-steps">
           <li>Turn <strong>Don't stop harvesting</strong> → <strong>OFF</strong>, <strong>Save settings</strong></li>
           <li>In <strong>Product monitor</strong>: paste product URL(s), hit <strong>+</strong></li>
-          <li>Leave <strong>Expected drop / restock</strong> blank — poll runs flat at 500ms</li>
+          <li>Leave <strong>Expected drop / restock</strong> blank — enable <strong>Aggressive poll while monitor ON</strong> for 250ms polling, or accept ~500ms steady rate</li>
           <li>Click <strong>Start monitoring</strong></li>
         </ol>
 
         <h3 class="guide-subhead">What happens</h3>
         <ol class="guide-steps">
-          <li>Poll runs at a steady 500ms with background keepalive every 5 min</li>
+          <li>Poll runs at 250ms when <strong>Aggressive poll while monitor ON</strong> is enabled; otherwise ~500ms with background keepalive every 5 min</li>
           <li>When stock appears (could be minutes, hours, or overnight), bot navigates → ATC → checkout</li>
           <li>Consider <strong>Endless mode</strong> if you want the monitor to restart after each successful checkout</li>
         </ol>
@@ -722,6 +762,7 @@
     </p>
   </footer>
 
+  <script src="dropPollingTiming.js"></script>
   <script src="core/signinStep.js"></script>
   <script src="popup.js"></script>
 </body>

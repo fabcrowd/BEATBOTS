@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
   "name": "stock-monitor-research",
-  "description": "Understand how commercial stock bots detect Target/Walmart restocks; adopt same detection with window-mode and geo params — no Discord webhook",
+  "description": "Understand how commercial stock bots detect Target/Walmart restocks; adopt same detection with window-mode and geo params \u2014 no Discord webhook",
   "goals": [
     "Document RedSky / Walmart JSON monitor patterns vs our extension",
     "Close Target window-drop gap without notification latency",
@@ -37,8 +37,14 @@
           "target-checkout-helper/background.js",
           "tasks/stellar-vs-us-comparison.md"
         ],
-        "patterns": ["RedSky product_fulfillment_v1", "runBackgroundPoll"],
-        "targetFiles": { "modify": [], "create": [] }
+        "patterns": [
+          "RedSky product_fulfillment_v1",
+          "runBackgroundPoll"
+        ],
+        "targetFiles": {
+          "modify": [],
+          "create": []
+        }
       },
       "acceptance": [
         "PRD explains TCIN, RedSky endpoints, stock signals",
@@ -51,8 +57,10 @@
       "id": "2",
       "category": "functional",
       "priority": "critical",
-      "description": "Monitor window mode: aggressive polling for hours-long Target window drops (not only dropExpectedAt ±10m)",
-      "dependsOn": ["1"],
+      "description": "Monitor window mode: aggressive polling for hours-long Target window drops (not only dropExpectedAt \u00b110m)",
+      "dependsOn": [
+        "1"
+      ],
       "codeAnalysis": {
         "approach": "extend",
         "existingFiles": [
@@ -61,8 +69,13 @@
           "target-checkout-helper/popup.js",
           "target-checkout-helper/popup.html"
         ],
-        "relatedTests": ["scripts/checkout-speed-test.mjs"],
-        "patterns": ["isInDropTensionWindow", "computeBackgroundPollSleepMs"],
+        "relatedTests": [
+          "scripts/checkout-speed-test.mjs"
+        ],
+        "patterns": [
+          "isInDropTensionWindow",
+          "computeBackgroundPollSleepMs"
+        ],
         "targetFiles": {
           "modify": [
             "target-checkout-helper/dropPollingTiming.js",
@@ -83,42 +96,50 @@
         "test": {
           "description": "Extend checkout-speed-test.mjs with monitorWindow helpers",
           "file": "scripts/checkout-speed-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "Add monitorWindowStart/End or aggressiveWhileMonitorOn to dropPollingTiming + background poll",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Single isAggressivePoll(monitor) used by bg and content",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "Monitor ON with window spanning 2h uses 250ms mean poll inside window",
         "Outside window uses 500ms+ base"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3",
       "category": "functional",
       "priority": "high",
       "description": "RedSky geo params: zip + store_id on fulfillment URLs for location-accurate ATP",
-      "dependsOn": ["1"],
+      "dependsOn": [
+        "1"
+      ],
       "codeAnalysis": {
         "approach": "extend",
         "existingFiles": [
           "target-checkout-helper/background.js",
           "target-checkout-helper/content.js"
         ],
-        "patterns": ["checkSingleTcin", "buildFulfillmentApiUrl", "credentials include"],
+        "patterns": [
+          "checkSingleTcin",
+          "buildFulfillmentApiUrl",
+          "credentials include"
+        ],
         "targetFiles": {
           "modify": [
             "target-checkout-helper/background.js",
             "target-checkout-helper/content.js"
           ],
-          "create": ["scripts/fixtures/redsky-fulfillment-sample.json"]
+          "create": [
+            "scripts/fixtures/redsky-fulfillment-sample.json"
+          ]
         }
       },
       "acceptance": [
@@ -131,38 +152,46 @@
         "test": {
           "description": "scripts/stock-monitor-test.mjs with fixture payloads + URL builder",
           "file": "scripts/stock-monitor-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
           "description": "buildRedskyFulfillmentUrl(tcin, { apiKey, zip, storeId }) shared bg+content",
-          "passes": false
+          "passes": true
         },
         "refactor": {
           "description": "Deduplicate parseFulfillmentBlock between bg and content if practical",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "Background poll URL logged includes zip when shipping saved",
         "verify.sh includes stock-monitor-test"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4",
       "category": "functional",
       "priority": "medium",
-      "description": "Stock flip telemetry: record OOS→in-stock transition per TCIN for post-drop debug",
-      "dependsOn": ["2"],
+      "description": "Stock flip telemetry: record OOS\u2192in-stock transition per TCIN for post-drop debug",
+      "dependsOn": [
+        "2"
+      ],
       "codeAnalysis": {
         "approach": "extend",
         "existingFiles": [
           "target-checkout-helper/background.js",
           "target-checkout-helper/popup.js"
         ],
-        "patterns": ["checkoutTelemetry", "reportRetryEvent"],
+        "patterns": [
+          "checkoutTelemetry",
+          "reportRetryEvent"
+        ],
         "targetFiles": {
-          "modify": ["target-checkout-helper/background.js", "target-checkout-helper/popup.js"],
+          "modify": [
+            "target-checkout-helper/background.js",
+            "target-checkout-helper/popup.js"
+          ],
           "create": []
         }
       },
@@ -174,29 +203,31 @@
       "tdd": {
         "test": {
           "description": "Unit test flip detector pure function in stock-monitor-test.mjs",
-          "passes": false
+          "passes": true
         },
         "implement": {
-          "description": "recordStockFlip in background when stockMap transitions false→true",
-          "passes": false
+          "description": "recordStockFlip in background when stockMap transitions false\u2192true",
+          "passes": true
         },
         "refactor": {
           "description": "Reuse telemetry limit pattern from RETRY_EVENT_LIMIT",
-          "passes": false
+          "passes": true
         }
       },
       "verification": [
         "Simulated poll transition writes lastStockFlip",
         "Popup displays human-readable flip time"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5",
       "category": "docs",
       "priority": "high",
       "description": "Operator playbook: pre-monitor beats Discord for Target window drops",
-      "dependsOn": ["1"],
+      "dependsOn": [
+        "1"
+      ],
       "codeAnalysis": {
         "approach": "extend",
         "existingFiles": [
@@ -215,27 +246,35 @@
         "Target guide section: add SKUs before window, monitor ON, skip Discord dependency",
         "Links to stock-monitor-research.md"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6",
       "category": "integration",
       "priority": "low",
       "description": "Phase 3 spike: beatbots-app WS stock_flip from headless RedSky poller (optional scale)",
-      "dependsOn": ["3", "4"],
+      "dependsOn": [
+        "3",
+        "4"
+      ],
       "codeAnalysis": {
         "approach": "create",
         "existingFiles": [
           "beatbots-app/src/main/engines/ws-bridge.ts",
           "target-checkout-helper/background.js"
         ],
-        "patterns": ["BB_APPLY_ATC_COOKIE", "pool_status"],
+        "patterns": [
+          "BB_APPLY_ATC_COOKIE",
+          "pool_status"
+        ],
         "targetFiles": {
           "modify": [
             "beatbots-app/src/main/engines/ws-bridge.ts",
             "target-checkout-helper/background.js"
           ],
-          "create": ["beatbots-app/src/main/engines/stock-monitor.ts"]
+          "create": [
+            "beatbots-app/src/main/engines/stock-monitor.ts"
+          ]
         }
       },
       "acceptance": [
@@ -243,7 +282,7 @@
         "Extension navigates only if monitor lists that TCIN",
         "Graceful no-op if app offline"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

@@ -46,7 +46,7 @@
    Discord/webhook listener or “open this URL now” deep link from stock bot → extension navigates active Target tab in &lt;1s. Removes human click latency.
 
 3. **Window mode vs point-in-time drop**  
-   `dropExpectedAt` tightens polling in a **10m band** — wrong mental model for Target window drops. Consider **“monitor window”** (start/end) or “always aggressive while monitor ON” for unknown-window SKUs.
+   `dropExpectedAt` tightens polling in a **10m band** — wrong mental model for Target window drops. **Shipped (v2.4.0):** **Monitor window** start/end + **Aggressive poll while monitor ON** for unknown-window SKUs.
 
 4. **Hurdle ordering matches our v2.2+ work**  
    Cart confirm → API bypass → checkout steps is the right stack; your field report validates that **checkout without cart confirm** was a root failure mode.

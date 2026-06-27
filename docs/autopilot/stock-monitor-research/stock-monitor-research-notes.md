@@ -72,3 +72,4 @@ Cook-group pings from Zephyr ≈ same RedSky flip we'd see in `runBackgroundPoll
 
 - 2026-06-27 — Initial research PRD + tasks JSON from operator field report + Refract/RedSky public docs.
 - 2026-06-25 — @it Phase 1 scope doc (`STOCK-MONITOR-PHASE1-SCOPE.md`); autopilot task activated; verify.sh green.
+- 2026-06-25 — **Shipped v2.4.0:** reqs 2–6 complete (window mode, RedSky zip, flip telemetry, guide, beatbots `stock_flip` WS). `verify.sh` + `stock-monitor-test.mjs` green.
