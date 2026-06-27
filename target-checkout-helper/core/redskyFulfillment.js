@@ -43,3 +43,55 @@ function parseFulfillmentBlock(fulfillment) {
   if (blocked) return { stock: false, qty, price: null };
   return { stock: null, qty, price: null };
 }
+
+/** Parse batch product_summary_with_fulfillment_v1 → { [tcin]: block } */
+function parseBatchFulfillmentMap(payload) {
+  const out = {};
+  const products = payload?.data?.products ?? [];
+  for (const p of products) {
+    const tcin = String(p?.tcin ?? '').trim();
+    if (!tcin) continue;
+    out[tcin] = parseFulfillmentBlock(p?.fulfillment);
+  }
+  return out;
+}
+
+function buildPlpSearchUrl(keyword, opts) {
+  const kw = String(keyword || '').trim();
+  const apiKey = String(opts?.apiKey || '').trim();
+  if (!kw || !apiKey) return null;
+
+  const base = String(opts?.redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
+  const path = 'redsky_aggregations/v1/web/plp_search_v2';
+  const params = new URLSearchParams();
+  params.set('key', apiKey);
+  params.set('channel', 'WEB');
+  params.set('keyword', kw);
+  const pageSlug = kw.trim().toLowerCase().replace(/\s+/g, '+');
+  params.set('page', `/s/${pageSlug}`);
+  params.set('visitor_id', String(opts?.visitorId || 'tch-monitor').slice(0, 32));
+  const storeId = String(opts?.storeId || opts?.pricingStoreId || '3991').trim();
+  if (storeId && /^\d+$/.test(storeId)) params.set('pricing_store_id', storeId);
+  params.set('default_purchasability_filter', 'false');
+  params.set('count', String(Math.min(48, Math.max(1, Number(opts?.count) || 24))));
+  params.set('offset', '0');
+  params.set('platform', 'desktop');
+
+  const zip = String(opts?.zip || '').trim();
+  if (/^\d{5}$/.test(zip)) params.set('zip', zip);
+
+  return `${base}/${path}?${params.toString()}`;
+}
+
+/** @returns {string[]} TCINs from plp_search_v2 response */
+function parsePlpSearchTcins(payload, maxCount) {
+  const max = Math.max(1, Number(maxCount) || 24);
+  const products = payload?.data?.search?.products ?? [];
+  const out = [];
+  for (const p of products) {
+    const tcin = String(p?.tcin ?? '').trim();
+    if (tcin && /^\d{6,10}$/.test(tcin)) out.push(tcin);
+    if (out.length >= max) break;
+  }
+  return out;
+}

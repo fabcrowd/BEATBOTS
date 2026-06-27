@@ -7,6 +7,7 @@ importScripts(
   'core/hosts.js',
   'core/redskyFulfillment.js',
   'core/stockFlipTelemetry.js',
+  'core/stockNavigateGate.js',
   'core/debuggerBridge.js',
   'cookieHarvest.js'
 );
@@ -412,11 +413,6 @@ function extractTargetRetailPrice(product) {
   return null;
 }
 
-/** @returns {{ stock: boolean | null, qty: number, price: number | null }} */
-function parseFulfillmentBlockLocal(fulfillment) {
-  if (typeof parseFulfillmentBlock === 'function') return parseFulfillmentBlock(fulfillment);
-  return { stock: null, qty: 0, price: null };
-}
 
 function mergeTargetStockAndPrice(block, productNode) {
   const price = extractTargetRetailPrice(productNode);
@@ -428,6 +424,17 @@ function mergeTargetStockAndPrice(block, productNode) {
 function parseBatchFulfillmentResponse(payload) {
   const out = new Map();
   const products = payload?.data?.products ?? [];
+  const batchMap = typeof parseBatchFulfillmentMap === 'function'
+    ? parseBatchFulfillmentMap(payload)
+    : null;
+  if (batchMap) {
+    for (const p of products) {
+      const tcin = String(p.tcin ?? '');
+      if (!tcin || batchMap[tcin] === undefined) continue;
+      out.set(tcin, mergeTargetStockAndPrice(batchMap[tcin], p));
+    }
+    return out;
+  }
   for (const p of products) {
     const tcin = String(p.tcin ?? '');
     if (tcin) out.set(tcin, mergeTargetStockAndPrice(parseFulfillmentBlock(p.fulfillment), p));
@@ -471,6 +478,10 @@ const navigationLockAt = new Map();
 const NAV_LOCK_TTL_MS = 30 * 60 * 1000;
 /** @type {Map<string, object|boolean>} */
 const lastPollStockByTcin = new Map();
+/** @type {Map<string, Array<{stock: boolean, qty: number}>>} */
+const pollConfirmBuffers = new Map();
+let keywordWatchCache = { keyword: '', tcins: [], at: 0 };
+const KEYWORD_WATCH_REFRESH_MS = 5 * 60 * 1000;
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
 // NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
@@ -590,7 +601,10 @@ async function checkTcinsStock(tcins, apiKey, redskyBase, geoOpts = {}) {
   } catch {}
 
   // For TCINs not covered by the batch endpoint, fall back to individual calls.
-  const missing = tcins.filter(t => out.get(t) === undefined);
+  const batchObj = Object.fromEntries(out);
+  const missing = typeof tcinsNeedingSingleFallback === 'function'
+    ? tcinsNeedingSingleFallback(tcins, batchObj)
+    : tcins.filter(t => out.get(t) === undefined);
   if (missing.length) {
     await Promise.all(missing.map(async (tcin) => {
       const result = await checkSingleTcin(tcin, apiKey, redskyBase, geoOpts);
@@ -668,6 +682,89 @@ async function maybeRecordStockFlip(tcin, nextEntry) {
   await chrome.storage.local.set({ lastStockFlips: updated }).catch(() => {});
 }
 
+function getStockConfirmOpts(monitor) {
+  return {
+    required: Math.max(1, Math.min(5, Number(monitor?.stockConfirmRequired) || 2)),
+    window: Math.max(2, Math.min(6, Number(monitor?.stockConfirmWindow) || 3)),
+  };
+}
+
+function passesStockNavigateGate(confirmKey, entry, monitor) {
+  if (!confirmKey || typeof pushStockPollSample !== 'function') return true;
+  const opts = getStockConfirmOpts(monitor);
+  const prev = pollConfirmBuffers.get(confirmKey) || [];
+  const next = pushStockPollSample(prev, entry, 5);
+  pollConfirmBuffers.set(confirmKey, next);
+  if (!stockConfirmedForNavigate(next, opts)) return false;
+  if (typeof isAtpStatusFlicker === 'function' && isAtpStatusFlicker(next, opts)) return false;
+  return true;
+}
+
+async function fetchKeywordWatchTcins(monitor, geoOpts) {
+  const kw = String(monitor?.keywordWatch || '').trim();
+  if (!kw || !cachedApiKey || typeof buildPlpSearchUrl !== 'function') return [];
+
+  const now = Date.now();
+  if (keywordWatchCache.keyword === kw && now - keywordWatchCache.at < KEYWORD_WATCH_REFRESH_MS) {
+    return keywordWatchCache.tcins;
+  }
+
+  const url = buildPlpSearchUrl(kw, {
+    apiKey: cachedApiKey,
+    redskyBase: cachedRedskyBase,
+    zip: geoOpts?.zip,
+    storeId: geoOpts?.storeId,
+  });
+  if (!url) return [];
+
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return keywordWatchCache.keyword === kw ? keywordWatchCache.tcins : [];
+    const json = await res.json();
+    const max = Math.max(1, Math.min(24, Number(monitor?.keywordWatchMax) || 8));
+    const tcins = typeof parsePlpSearchTcins === 'function' ? parsePlpSearchTcins(json, max) : [];
+    keywordWatchCache = { keyword: kw, tcins, at: now };
+    if (tcins.length) console.log('[TCH bg] keyword watch', kw, '→', tcins.length, 'TCINs');
+    return tcins;
+  } catch {
+    return keywordWatchCache.keyword === kw ? keywordWatchCache.tcins : [];
+  }
+}
+
+function keywordProductsFromTcins(tcins, monitor) {
+  const max = Math.max(1, Math.min(24, Number(monitor?.keywordWatchMax) || 8));
+  return (tcins || []).slice(0, max).map((tcin) => ({
+    url: `https://www.target.com/p/-/A-${tcin}`,
+    qty: 1,
+    name: `kw:${tcin}`,
+    fromKeyword: true,
+  }));
+}
+
+async function mergeKeywordTargetProducts(targetProducts, monitor, geoOpts) {
+  const kw = String(monitor?.keywordWatch || '').trim();
+  if (!kw) return targetProducts;
+
+  const tcins = await fetchKeywordWatchTcins(monitor, geoOpts);
+  const kwProds = keywordProductsFromTcins(tcins, monitor);
+  if (!kwProds.length) return targetProducts;
+
+  const merged = [...targetProducts];
+  const seen = new Set(merged.map((p) => extractTcin(p.url) || normalizeProductUrl(p.url)));
+  for (const kp of kwProds) {
+    const key = extractTcin(kp.url) || normalizeProductUrl(kp.url);
+    if (!key || seen.has(key)) continue;
+    merged.push(kp);
+    seen.add(key);
+  }
+  return merged;
+}
+
 async function runBackgroundPoll() {
   bgPollActive = true;
   let pollCycles = 0;
@@ -686,7 +783,11 @@ async function runBackgroundPoll() {
     const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
     if (!monitor?.active) { bgPollActive = false; break; }
 
-    const pendingProducts = (monitor.products || []).filter(p => {
+    const { shipping } = await chrome.storage.local.get('shipping').catch(() => ({}));
+    const geoOpts = { zip: shipping?.zip };
+
+    const catalog = await mergeKeywordTargetProducts([...(monitor.products || [])], monitor, geoOpts);
+    const pendingProducts = catalog.filter(p => {
       const n = normalizeProductUrl(p.url);
       return (monitor.counts?.[n] || 0) < p.qty;
     });
@@ -714,8 +815,6 @@ async function runBackgroundPoll() {
     const stockMap = new Map();
 
     let hadApiError = false;
-    const { shipping } = await chrome.storage.local.get('shipping').catch(() => ({}));
-    const geoOpts = { zip: shipping?.zip };
     if (hasTargetWork) {
       const tcins = targetProducts.map(p => extractTcin(p.url)).filter(Boolean);
       if (tcins.length) {
@@ -795,6 +894,14 @@ async function runBackgroundPoll() {
       // Prefer TCIN key (Target) then fall back to URL key (Walmart).
       const entry = (tcin && stockMap.has(tcin)) ? stockMap.get(tcin) : stockMap.get(normUrl);
       if (!stockEntryMeansAvailable(entry)) continue;
+
+      const confirmKey = tcin || normUrl;
+      if (!passesStockNavigateGate(confirmKey, entry, monitor)) {
+        if (pollCycles % 60 === 0) {
+          console.log(`[TCH bg] stock confirm pending (${getStockConfirmOpts(monitor).required}-of-${getStockConfirmOpts(monitor).window}):`, confirmKey);
+        }
+        continue;
+      }
 
       // Gate only when API reports a positive quantity below threshold. qty===0 often means
       // "unknown" while status still shows sellable — do not block those restocks.
@@ -1156,6 +1263,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           monitorWindowStart: message.monitorWindowStart || null,
           monitorWindowEnd: message.monitorWindowEnd || null,
           aggressiveWhileMonitorOn: !!message.aggressiveWhileMonitorOn,
+          keywordWatch: message.keywordWatch || null,
+          keywordWatchMax: Number(message.keywordWatchMax) || 8,
+          stockConfirmRequired: Number(message.stockConfirmRequired) || 2,
+          stockConfirmWindow: Number(message.stockConfirmWindow) || 3,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1622,11 +1733,17 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     monitorWindowStart = null,
     monitorWindowEnd = null,
     aggressiveWhileMonitorOn = false,
+    keywordWatch = null,
+    keywordWatchMax = 8,
+    stockConfirmRequired = 2,
+    stockConfirmWindow = 3,
     resetEndlessSuccessCount = true,
   } = opts;
 
   await stopMonitor();
   lastPollStockByTcin.clear();
+  pollConfirmBuffers.clear();
+  keywordWatchCache = { keyword: '', tcins: [], at: 0 };
 
   if (resetEndlessSuccessCount) {
     await chrome.storage.local.set({ endlessSuccessCount: 0 });
@@ -1653,6 +1770,12 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     monitor.monitorWindowEnd = String(monitorWindowEnd).trim();
   }
   monitor.aggressiveWhileMonitorOn = !!aggressiveWhileMonitorOn;
+  if (keywordWatch && String(keywordWatch).trim()) {
+    monitor.keywordWatch = String(keywordWatch).trim();
+  }
+  monitor.keywordWatchMax = Math.max(1, Math.min(24, Number(keywordWatchMax) || 8));
+  monitor.stockConfirmRequired = Math.max(1, Math.min(5, Number(stockConfirmRequired) || 2));
+  monitor.stockConfirmWindow = Math.max(2, Math.min(6, Number(stockConfirmWindow) || 3));
   if (skipMonitoring) monitor.skipMonitoring = true;
   monitor.highStockOnly = !!highStockOnly;
   monitor.highStockThreshold = Math.max(1, Math.min(999, Number(highStockThreshold) || 10));
@@ -1696,6 +1819,8 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
 async function stopMonitor() {
   bgPollActive = false;
   lastPollStockByTcin.clear();
+  pollConfirmBuffers.clear();
+  keywordWatchCache = { keyword: '', tcins: [], at: 0 };
   lastHarvestKeepaliveRunMs = 0;
   redskyErrorStreak = 0;
   inQueueUrls.clear();

@@ -1,0 +1,27 @@
+{
+  "data": {
+    "products": [
+      {
+        "tcin": "94300072",
+        "fulfillment": {
+          "sold_out": false,
+          "shipping_options": {
+            "availability_status": "IN_STOCK",
+            "available_to_promise_quantity": 5
+          }
+        },
+        "price": { "current_retail": 19.99 }
+      },
+      {
+        "tcin": "88888888",
+        "fulfillment": {
+          "sold_out": false,
+          "shipping_options": {
+            "availability_status": "OUT_OF_STOCK",
+            "available_to_promise_quantity": 0
+          }
+        }
+      }
+    ]
+  }
+}

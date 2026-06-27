@@ -113,6 +113,25 @@
             <span class="option-label">Aggressive poll while monitor ON (unknown window)</span>
           </label>
           <p class="option-hint">Use for overnight / unknown-window SKUs. Leave OFF if you set a monitor window or point drop time.</p>
+          <div class="monitor-field" style="margin-top:8px">
+            <label class="field-label" for="keywordWatch">Keyword watch (Target search)</label>
+            <input type="text" id="keywordWatch" placeholder="e.g. pokemon 151 binder" autocomplete="off" title="Optional. Polls RedSky plp_search_v2 to discover TCINs for unannounced SKUs — merges with your URL list. Refreshes every 5 min.">
+            <span class="inline-hint">Discovers TCINs via plp_search_v2 — no URL needed if results match your drop.</span>
+          </div>
+          <div class="monitor-grid" style="margin-top:4px">
+            <div class="monitor-field">
+              <label class="field-label" for="keywordWatchMax">Keyword max SKUs</label>
+              <input type="number" id="keywordWatchMax" value="8" min="1" max="24" title="Max TCINs to poll from keyword search results (first page).">
+            </div>
+            <div class="monitor-field">
+              <label class="field-label" for="stockConfirmRequired">Confirm polls (N)</label>
+              <input type="number" id="stockConfirmRequired" value="2" min="1" max="5" title="In-stock readings required before navigate — reduces ATP/status flicker false triggers.">
+            </div>
+            <div class="monitor-field">
+              <label class="field-label" for="stockConfirmWindow">Confirm window (M)</label>
+              <input type="number" id="stockConfirmWindow" value="3" min="2" max="6" title="Last M poll samples checked for N-of-M confirmation (default 2-of-3).">
+            </div>
+          </div>
           <div class="monitor-grid">
             <div class="monitor-field">
               <label class="field-label" for="refreshInterval">Poll every (sec)</label>
@@ -645,6 +664,18 @@
           <li>Do <strong>not</strong> wait for Discord — the background poll navigates on the same RedSky flip</li>
           <li>One Target tab discipline; don't toggle settings mid-window</li>
           <li>Check monitor status for <strong>Flip</strong> timestamps if you want post-drop proof we saw stock</li>
+          <li><strong>Phase 2:</strong> set <strong>Confirm polls</strong> to 2-of-3 (default) to ignore ATP/status flicker; use <strong>Keyword watch</strong> when you don't have the TCIN yet</li>
+        </ol>
+      </details>
+
+      <details class="card guide-section">
+        <summary class="tips-summary">Target — Keyword watch (unannounced SKU)</summary>
+        <p class="guide-note">When cook groups haven't published a TCIN yet, enter a Target search phrase. The extension polls <code>plp_search_v2</code> every 5 minutes and adds discovered TCINs to the same RedSky monitor loop.</p>
+        <ol class="guide-steps">
+          <li>Set <strong>Keyword watch</strong> (e.g. product name from announcement)</li>
+          <li>Optionally add known URLs too — keyword hits merge with your list</li>
+          <li>Keep <strong>Confirm polls</strong> at 2-of-3 unless you need faster (more flicker risk)</li>
+          <li>Start monitoring — discovered SKUs appear in status as they are polled</li>
         </ol>
       </details>
 

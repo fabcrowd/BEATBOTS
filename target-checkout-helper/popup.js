@@ -1085,6 +1085,10 @@ const dropCountdownEl    = $('dropCountdown');
 const monitorWindowStartIn = $('monitorWindowStart');
 const monitorWindowEndIn = $('monitorWindowEnd');
 const aggressiveWhileMonitorOnIn = $('aggressiveWhileMonitorOn');
+const keywordWatchIn = $('keywordWatch');
+const keywordWatchMaxIn = $('keywordWatchMax');
+const stockConfirmRequiredIn = $('stockConfirmRequired');
+const stockConfirmWindowIn = $('stockConfirmWindow');
 
 let products = [];
 let monitorActive = false;
@@ -1275,6 +1279,11 @@ function readAggressiveWhileMonitorOn() {
   return !!aggressiveWhileMonitorOnIn?.checked;
 }
 
+function readKeywordWatchValue() {
+  const v = (keywordWatchIn?.value || '').trim();
+  return v || null;
+}
+
 function isDropTensionNow(dropIso) {
   if (!dropIso || typeof isInDropTensionWindow !== 'function') return false;
   return isInDropTensionWindow({ dropExpectedAt: dropIso });
@@ -1343,6 +1352,18 @@ async function saveProducts() {
   if (winEnd) next.monitorWindowEnd = winEnd;
   else delete next.monitorWindowEnd;
   next.aggressiveWhileMonitorOn = readAggressiveWhileMonitorOn();
+  const kw = readKeywordWatchValue();
+  if (kw) next.keywordWatch = kw;
+  else delete next.keywordWatch;
+  next.keywordWatchMax = keywordWatchMaxIn
+    ? parseIntInRange(keywordWatchMaxIn.value, 1, 24, 8)
+    : 8;
+  next.stockConfirmRequired = stockConfirmRequiredIn
+    ? parseIntInRange(stockConfirmRequiredIn.value, 1, 5, 2)
+    : 2;
+  next.stockConfirmWindow = stockConfirmWindowIn
+    ? parseIntInRange(stockConfirmWindowIn.value, 2, 6, 3)
+    : 3;
   await chrome.storage.local.set({ monitor: next });
 }
 
@@ -1655,7 +1676,7 @@ async function toggleMonitor(retailerFilter) {
     const filtered = retailerFilter
       ? products.filter(p => retailerFilter.test(p.url))
       : products;
-    if (!filtered.length) {
+    if (!filtered.length && !readKeywordWatchValue()) {
       showToast('No matching products to monitor');
       return;
     }
@@ -1670,6 +1691,16 @@ async function toggleMonitor(retailerFilter) {
       monitorWindowStart: readMonitorWindowStartValue(),
       monitorWindowEnd: readMonitorWindowEndValue(),
       aggressiveWhileMonitorOn: readAggressiveWhileMonitorOn(),
+      keywordWatch: readKeywordWatchValue(),
+      keywordWatchMax: keywordWatchMaxIn
+        ? parseIntInRange(keywordWatchMaxIn.value, 1, 24, 8)
+        : 8,
+      stockConfirmRequired: stockConfirmRequiredIn
+        ? parseIntInRange(stockConfirmRequiredIn.value, 1, 5, 2)
+        : 2,
+      stockConfirmWindow: stockConfirmWindowIn
+        ? parseIntInRange(stockConfirmWindowIn.value, 2, 6, 3)
+        : 3,
       walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
       highStockOnly: !!$('highStockOnly')?.checked,
       highStockThreshold: $('highStockThreshold')
@@ -1692,7 +1723,7 @@ async function toggleMonitor(retailerFilter) {
 function updateMonitorUI() {
   monitorBtn.textContent = monitorActive ? 'Stop monitoring' : 'Start monitoring';
   monitorBtn.classList.toggle('active', monitorActive);
-  monitorBtn.disabled = !monitorActive && !products.length;
+  monitorBtn.disabled = !monitorActive && !products.length && !readKeywordWatchValue();
   productUrlInput.disabled = monitorActive;
   addProductBtn.disabled = monitorActive;
   refreshIntervalIn.disabled = monitorActive;
@@ -1700,6 +1731,10 @@ function updateMonitorUI() {
   if (monitorWindowStartIn) monitorWindowStartIn.disabled = monitorActive;
   if (monitorWindowEndIn) monitorWindowEndIn.disabled = monitorActive;
   if (aggressiveWhileMonitorOnIn) aggressiveWhileMonitorOnIn.disabled = monitorActive;
+  if (keywordWatchIn) keywordWatchIn.disabled = monitorActive;
+  if (keywordWatchMaxIn) keywordWatchMaxIn.disabled = monitorActive;
+  if (stockConfirmRequiredIn) stockConfirmRequiredIn.disabled = monitorActive;
+  if (stockConfirmWindowIn) stockConfirmWindowIn.disabled = monitorActive;
   const hsOnlyEl = $('highStockOnly');
   if (hsOnlyEl) hsOnlyEl.disabled = monitorActive;
   const hsThrEl = $('highStockThreshold');
@@ -1843,6 +1878,16 @@ async function loadMonitorData() {
   if (aggressiveWhileMonitorOnIn) {
     aggressiveWhileMonitorOnIn.checked = !!monitor.aggressiveWhileMonitorOn;
   }
+  if (keywordWatchIn && monitor.keywordWatch) keywordWatchIn.value = monitor.keywordWatch;
+  if (keywordWatchMaxIn && monitor.keywordWatchMax != null) {
+    keywordWatchMaxIn.value = String(monitor.keywordWatchMax);
+  }
+  if (stockConfirmRequiredIn && monitor.stockConfirmRequired != null) {
+    stockConfirmRequiredIn.value = String(monitor.stockConfirmRequired);
+  }
+  if (stockConfirmWindowIn && monitor.stockConfirmWindow != null) {
+    stockConfirmWindowIn.value = String(monitor.stockConfirmWindow);
+  }
   // Sync Walmart tab drop time
   const wmDrop = $('wmDropExpectedAt');
   if (wmDrop && monitor.dropExpectedAt) {
@@ -1871,6 +1916,9 @@ for (const el of [monitorWindowStartIn, monitorWindowEndIn]) {
   el?.addEventListener('change', () => saveProducts());
 }
 aggressiveWhileMonitorOnIn?.addEventListener('change', () => saveProducts());
+for (const el of [keywordWatchIn, keywordWatchMaxIn, stockConfirmRequiredIn, stockConfirmWindowIn]) {
+  el?.addEventListener('change', () => saveProducts());
+}
 
 setInterval(() => {
   formatDropCountdown(readDropExpectedAtValue() || '');

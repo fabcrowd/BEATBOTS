@@ -124,6 +124,54 @@ section('isInMonitorWindow / isAggressivePoll');
   assert(outsideSandbox.computeBackgroundPollSleepMs({}) === 500, '500ms default outside');
 }
 
+section('parseBatchFulfillmentMap + batch fallback');
+{
+  const { parseBatchFulfillmentMap } = loadScript('target-checkout-helper/core/redskyFulfillment.js');
+  const { tcinsNeedingSingleFallback } = loadScript('target-checkout-helper/core/stockNavigateGate.js');
+  const batch = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/redsky-batch-summary.json'), 'utf8'));
+  const map = parseBatchFulfillmentMap(batch);
+  assert(map['94300072']?.stock === true, 'batch TCIN in stock');
+  assert(map['88888888']?.stock === false, 'batch TCIN oos');
+  const missing = tcinsNeedingSingleFallback(['94300072', '99999999'], map);
+  assert(missing.length === 1 && missing[0] === '99999999', 'missing TCIN needs single fallback');
+}
+
+section('buildPlpSearchUrl + parsePlpSearchTcins');
+{
+  const { buildPlpSearchUrl, parsePlpSearchTcins } = loadScript('target-checkout-helper/core/redskyFulfillment.js');
+  const url = buildPlpSearchUrl('pokemon cards', { apiKey: 'k', zip: '10001' });
+  assert(url && url.includes('plp_search_v2'), 'plp endpoint');
+  assert(url.includes('keyword=pokemon'), 'keyword param');
+  assert(url.includes('zip=10001'), 'zip on search');
+
+  const plp = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/redsky-plp-search-sample.json'), 'utf8'));
+  const tcins = parsePlpSearchTcins(plp, 8);
+  assert(tcins.length === 2 && tcins[0] === '94300072', 'valid TCINs only');
+}
+
+section('stock navigate gate N-of-M');
+{
+  const {
+    pushStockPollSample,
+    stockConfirmedForNavigate,
+    isAtpStatusFlicker,
+  } = loadScript('target-checkout-helper/core/stockNavigateGate.js');
+
+  let buf = [];
+  buf = pushStockPollSample(buf, { stock: true, qty: 0 });
+  assert(!stockConfirmedForNavigate(buf, { required: 2, window: 3 }), '1 sample not enough');
+  buf = pushStockPollSample(buf, { stock: true, qty: 12 });
+  assert(stockConfirmedForNavigate(buf, { required: 2, window: 3 }), '2-of-3 confirmed');
+
+  const flicker = [
+    { stock: true, qty: 0 },
+    { stock: true, qty: 0 },
+    { stock: true, qty: 0 },
+  ];
+  assert(isAtpStatusFlicker(flicker, { window: 3 }), 'ATP/status flicker detected');
+  assert(!isAtpStatusFlicker([{ stock: true, qty: 5 }], { window: 3 }), 'qty>0 not flicker');
+}
+
 if (process.exitCode === 1) {
   console.error('\nSome stock-monitor assertions failed.');
   process.exit(1);
