@@ -241,6 +241,35 @@ async function main() {
     'WM-4: navigationLock alone must not populate inQueueUrls (sacred lock only via WALMART_IN_QUEUE)'
   );
 
+  // ─── WM-6: NAV_FAILED while not in queue — poll can retry ────────────────
+  const wm6BeforeFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !wm6BeforeFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-6 setup: not in queue before NAV_FAILED'
+  );
+
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: MON3_WM });
+  const wm6AfterFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !wm6AfterFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-6: NAV_FAILED must not arm inQueueUrls when not in queue'
+  );
+  assert.ok(
+    !wm6AfterFail.navigationLock?.includes(MON3_NORM),
+    'WM-6: NAV_FAILED clears navigationLock for poll retry'
+  );
+
+  await new Promise((r) => setTimeout(r, 2500));
+  const wm6AfterPoll = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    wm6AfterPoll.navigationLock?.includes(MON3_NORM),
+    'WM-6: poll re-arms navigationLock after error-path NAV_FAILED'
+  );
+  assert.ok(
+    !wm6AfterPoll.inQueueUrls?.includes(MON3_NORM),
+    'WM-6: poll retry must not arm inQueueUrls without WALMART_IN_QUEUE'
+  );
+
   await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
   const inQueue = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.ok(inQueue.inQueueUrls?.includes(MON3_NORM), 'MON-3: WALMART_IN_QUEUE adds inQueueUrls');

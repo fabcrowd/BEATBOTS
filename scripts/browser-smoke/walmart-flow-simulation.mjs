@@ -99,6 +99,32 @@ function wmIsVisible(el) {
   return !!(el && el.visible);
 }
 
+/** Mirrors wmIsPxPage() — walmart-content.js */
+function wmIsPxPage(page) {
+  const text = (page.bodyText || '').toLowerCase();
+  return (
+    (text.includes('hang tight') && text.includes('loading')) ||
+    text.includes("we're loading your experience") ||
+    !!page.querySelector('#px-captcha') ||
+    !!page.querySelector('[class*="px-block"]') ||
+    !!page.querySelector('[id*="px-captcha"]')
+  );
+}
+
+/**
+ * Mirrors wmInit PX guard — early return, 2min timeout → WALMART_NAV_FAILED if still PX.
+ * Returns scheduled messages (timeout path simulated synchronously for WM-6).
+ */
+function wmSimulatePxInitGuard(page, productUrl, { simulateTimeout = false } = {}) {
+  const messages = [];
+  if (!wmIsPxPage(page)) return { earlyReturn: false, messages };
+  messages.push({ phase: 'px_wait' });
+  if (simulateTimeout && wmIsPxPage(page)) {
+    messages.push({ type: 'WALMART_NAV_FAILED', url: productUrl });
+  }
+  return { earlyReturn: true, messages };
+}
+
 /** Mirrors wmHasQueueIndicators() — walmart-content.js */
 function wmHasQueueIndicators(page) {
   if (page.pathname.startsWith('/qp')) return true;
@@ -586,6 +612,78 @@ function runWm4SacredLockTests() {
   );
 }
 
+function runWm6ErrorPathTests() {
+  const productUrl = 'https://www.walmart.com/ip/wm6-error-path/444555666';
+  const norm = normalizeProductUrl(productUrl);
+
+  const pxPage = makePage({
+    pathname: '/ip/wm6-px/111',
+    bodyText: "Hang tight! We're loading your experience.",
+  });
+  assert.equal(wmIsPxPage(pxPage), true, 'WM-6: PX hang-tight page detected');
+  assert.equal(
+    wmHasQueueIndicators(pxPage),
+    false,
+    'WM-6: PX page must not match queue indicators'
+  );
+  assert.equal(
+    wmShouldEnterSacredQueueWait(pxPage),
+    false,
+    'WM-6: PX page must not arm sacred queue wait'
+  );
+
+  const pxGuard = wmSimulatePxInitGuard(pxPage, productUrl, { simulateTimeout: true });
+  assert.equal(pxGuard.earlyReturn, true, 'WM-6: PX guard early-returns from wmInit');
+  assert.ok(
+    !pxGuard.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-6: PX guard must not emit WALMART_IN_QUEUE'
+  );
+  assert.ok(
+    pxGuard.messages.some((m) => m.type === 'WALMART_NAV_FAILED'),
+    'WM-6: PX timeout emits WALMART_NAV_FAILED'
+  );
+
+  const pxCaptchaPage = makePage({
+    pathname: '/ip/wm6-px-captcha/222',
+    bodyText: 'Verify you are human',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  assert.equal(wmIsPxPage(pxCaptchaPage), true, 'WM-6: #px-captcha element detected');
+
+  const inQ = new Set();
+  const navL = new Set([norm]);
+  for (const m of pxGuard.messages.filter((x) => x.type)) {
+    bgApplyWalmartMessage(inQ, navL, m);
+  }
+  assert.ok(!inQ.has(norm), 'WM-6: PX NAV_FAILED must not arm inQueueUrls');
+  assert.ok(!navL.has(norm), 'WM-6: PX NAV_FAILED clears navigationLock');
+
+  const atcFailPage = makePage({
+    pathname: '/ip/wm6-atc-fail/333',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const atcEntry = wmDecideProductPageEntry(atcFailPage);
+  assert.equal(atcEntry.action, 'atc_unavailable', 'WM-6: ATC unavailable → NAV_FAILED path');
+  const atcInQ = new Set();
+  const atcNav = new Set([norm]);
+  for (const m of atcEntry.messages) {
+    bgApplyWalmartMessage(atcInQ, atcNav, { ...m, url: productUrl });
+  }
+  assert.ok(!atcInQ.has(norm), 'WM-6: ATC NAV_FAILED while not in queue must not arm inQueueUrls');
+  assert.ok(!atcNav.has(norm), 'WM-6: ATC NAV_FAILED releases navigationLock for poll retry');
+
+  const afterFailPoll = bgPollCycle(atcInQ, atcNav, productUrl);
+  assert.equal(afterFailPoll.skipped, false, 'WM-6: poll can re-navigate after NAV_FAILED when not in queue');
+  assert.ok(atcNav.has(norm), 'WM-6: poll re-arms navigationLock after error-path NAV_FAILED');
+}
+
 function runWm5SacredLockBlockTests() {
   const productUrl = 'https://www.walmart.com/ip/wm5-sacred-block/111222333';
   const norm = normalizeProductUrl(productUrl);
@@ -625,8 +723,9 @@ async function main() {
   await runWm2FlowTests();
   runWm4SacredLockTests();
   runWm5SacredLockBlockTests();
+  runWm6ErrorPathTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4 + WM-5): page type, flow, pre-drop queue, sacred lock'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4 + WM-5 + WM-6): page type, flow, queue, error paths'
   );
 }
 
