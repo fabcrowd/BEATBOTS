@@ -83,7 +83,7 @@ run_overnight() {
 
   touch "$NOTES_FILE"
 
-  export AUTOPILOT_PROMPT_TEMPLATE="$ROOT/scripts/autopilot-cursor/session-prompt-overnight.md"
+  export AUTOPILOT_PROMPT_TEMPLATE="$ROOT/docs/autopilot/IT_LOOP_PROMPT.md"
   export AUTOPILOT_STATE_DIR="$ROOT/$FEATURE_DIR"
 
   local incomplete

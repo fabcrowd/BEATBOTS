@@ -6,7 +6,7 @@
 
 **Decision:** Quality gate is `scripts/verify.sh` (Linux/macOS) and `scripts/verify.ps1` (Windows); both wrap syntax-check, signin-step-test, checkout-speed-test, and integration tests.
 
-**Decision:** `@it` is the offline boss persona; overnight `session-prompt-overnight.md` loads `senior-singulr-dev` skill first.
+**Decision:** `@it` is the offline boss persona; overnight loads **`docs/autopilot/IT_LOOP_PROMPT.md`** (canonical; mirrors Telegram-bot `docs/autopilot/IT_LOOP_PROMPT.md`).
 
 **Decision:** Active task pointer lives in `.autopilot/active-task.json` (gitignored). Default task: `docs/autopilot/overnight/repo-health.json`.
 

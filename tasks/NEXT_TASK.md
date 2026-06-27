@@ -1,30 +1,38 @@
 # Next task
 
-**Boss agent:** `@it` — **SHIP READY for 10pm** (see `docs/autopilot/overnight/SHIP-10PM.md`)
+**Boss agent:** `@it` — overnight loop uses **`docs/autopilot/IT_LOOP_PROMPT.md`**
 
-## Ship
-
-Merge PR [#17](https://github.com/fabcrowd/BEATBOTS/pull/17) → reload extension in Chrome.
+## Start overnight loop
 
 ```bash
-bash scripts/verify.sh   # must PASS before you rely on build
+export CURSOR_API_KEY=...   # required on host — or: agent login
+export PATH="$HOME/.local/bin:$PATH"
+./scripts/loop.sh --detach
+tmux -f /exec-daemon/tmux.portal.conf attach -t autopilot-overnight
 ```
 
-## Active task (complete except req 6 stuck)
+Default task: `docs/autopilot/overnight/repo-health.json` (refreshed by `refresh-overnight-tasks.mjs`).
 
-`docs/autopilot/overnight/drop-prep-4am.json` — 6/7 pass, req 6 stuck (cloud checkout modal)
+Custom task example:
 
 ```bash
-python -m orchestrator autopilot use docs/autopilot/overnight/drop-prep-4am.json
-python -m orchestrator autopilot status
+./scripts/loop.sh --task docs/autopilot/stock-monitor-research/stock-monitor-phase2.json --detach
 ```
 
-## Overnight gates (optional)
+## Pre-flight (must pass before loop)
 
 ```bash
-./scripts/drop-prep-tonight.sh --continuous --detach
+bash scripts/verify.sh
+python3 -m orchestrator autopilot use docs/autopilot/overnight/repo-health.json
+python3 -m orchestrator autopilot status
 ```
 
-## Before ~4am drop
+## Active PRs (merge when green)
 
-One Target tab, clear cart, extension ON, manual sign-in at checkout if prompted, auto place order OFF.
+- [#33](https://github.com/fabcrowd/BEATBOTS/pull/33) — stock monitor Phase 2 (v2.5.0)
+- [#32](https://github.com/fabcrowd/BEATBOTS/pull/32) — stock monitor Phase 1 (v2.4.0)
+
+## Logs
+
+- Runner: `docs/autopilot/overnight/logs/`
+- Gate journal: `docs/autopilot/overnight/it-live.md`

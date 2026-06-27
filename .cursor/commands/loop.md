@@ -84,7 +84,7 @@ export CURSOR_API_KEY=...   # if not already set
 If user is watching or API key unavailable for subprocess:
 
 1. Read `.cursor/commands/autopilot.md` TDD rules
-2. Set `AUTOPILOT_PROMPT_TEMPLATE=scripts/autopilot-cursor/session-prompt-overnight.md`
+2. Set `AUTOPILOT_PROMPT_TEMPLATE=docs/autopilot/IT_LOOP_PROMPT.md`
 3. Execute **one** incomplete requirement from the task file (lowest id)
 4. Run feedback loops before each commit:
    - `node scripts/checkout-speed-test.mjs`
