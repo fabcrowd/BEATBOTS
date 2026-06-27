@@ -600,3 +600,166 @@ Last [TCH] lines:
 ```
 - **dropExpectedAt env:** 2026-06-26T08:00:23.891Z
 - **cycle:** ALL GATES GREEN
+
+### Cycle 2026-06-26T00:05:12.419Z
+
+- **verify.sh:** PASS
+- **test:extension:** PASS
+- **untested-areas:** PASS
+- **checkout-rehearsal:** FAIL (see log)
+```
+d: /home/ubuntu/.tch-rehearsal-chrome/rehearsal-failures/review_timeout-1782432312237.png
+
+CHECKOUT REHEARSAL FAIL
+blockedReason: review_timeout
+Timed out waiting for [TCH] review reached (120000ms).
+Last [TCH] lines:
+[TCH] checkout pending: unknown — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: step 1 — filling email via CDP
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] timing init_total: 18777ms (done:checkout)
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+```
+- **dropExpectedAt env:** 2026-06-26T08:00:23.891Z
+- **cycle:** ALL GATES GREEN
+
+### Cycle 2026-06-26T00:08:39.497Z
+
+- **verify.sh:** PASS
+- **test:extension:** PASS
+- **untested-areas:** PASS
+- **checkout-rehearsal:** FAIL (see log)
+```
+d: /home/ubuntu/.tch-rehearsal-chrome/rehearsal-failures/review_timeout-1782432519302.png
+
+CHECKOUT REHEARSAL FAIL
+blockedReason: review_timeout
+Timed out waiting for [TCH] review reached (120000ms).
+Last [TCH] lines:
+[TCH] checkout pending: unknown — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: step 1 — filling email via CDP
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] timing init_total: 18573ms (done:checkout)
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+```
+- **dropExpectedAt env:** 2026-06-26T08:00:23.891Z
+- **cycle:** ALL GATES GREEN
+
+### Cycle 2026-06-26T00:12:08.986Z
+
+- **verify.sh:** PASS
+- **test:extension:** PASS
+- **untested-areas:** PASS
+- **checkout-rehearsal:** FAIL (see log)
+```
+d: /home/ubuntu/.tch-rehearsal-chrome/rehearsal-failures/review_timeout-1782432728764.png
+
+CHECKOUT REHEARSAL FAIL
+blockedReason: review_timeout
+Timed out waiting for [TCH] review reached (120000ms).
+Last [TCH] lines:
+[TCH] checkout pending: unknown — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: step 1 — filling email via CDP
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] timing init_total: 18679ms (done:checkout)
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+```
+- **dropExpectedAt env:** 2026-06-26T08:00:23.891Z
+- **cycle:** ALL GATES GREEN
+
+### Cycle 2026-06-26T00:15:38.719Z
+
+- **verify.sh:** PASS
+- **test:extension:** PASS
+- **untested-areas:** PASS
+- **checkout-rehearsal:** FAIL (see log)
+```
+d: /home/ubuntu/.tch-rehearsal-chrome/rehearsal-failures/review_timeout-1782432938508.png
+
+CHECKOUT REHEARSAL FAIL
+blockedReason: review_timeout
+Timed out waiting for [TCH] review reached (120000ms).
+Last [TCH] lines:
+[TCH] checkout pending: unknown — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: step 1 — filling email via CDP
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] timing init_total: 18544ms (done:checkout)
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+```
+- **dropExpectedAt env:** 2026-06-26T08:00:23.891Z
+- **cycle:** ALL GATES GREEN
+
+### Cycle 2026-06-26T00:31:48.130Z
+
+- **verify.sh:** PASS
+- **test:extension:** PASS
+- **untested-areas:** PASS
+- **checkout-rehearsal:** FAIL (see log)
+```
+uing, you agree to Target's terms and privacy policy\n\nEmail or mobile phone\nContinue\nor\nSign in with passkey\nWhat's a passkey?\nKeep me signed in\nClose"
+  ]
+}
+Screenshot saved: /home/ubuntu/.tch-rehearsal-chrome/rehearsal-failures/review_timeout-1782433907732.png
+
+CHECKOUT REHEARSAL FAIL
+blockedReason: review_timeout
+Timed out waiting for [TCH] review reached (120000ms).
+Last [TCH] lines:
+[TCH] timing start init_total: /checkout
+[TCH] init: checkout enabled: true monitor: false
+[TCH] API key received from main world, caching for SW
+[TCH] timing nav_product_to_checkout: 101ms
+[TCH] timing checkout_flow_start: 0ms
+[TCH] timing checkout_page_ready: 0ms
+[TCH] checkout step: unknown
+[TCH] checkout pending: unknown — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: step 1 — filling email via CDP
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] timing init_total: 18547ms (done:checkout)
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+[TCH] auto sign-in: email already submitted — waiting for password step
+[TCH] auto sign-in: timed out waiting for password step
+[TCH] checkout pending: signin — waiting for shipping/payment (no reload)
+```
+- **dropExpectedAt env:** 2026-06-26T08:00:23.891Z
+- **cycle:** ALL GATES GREEN
