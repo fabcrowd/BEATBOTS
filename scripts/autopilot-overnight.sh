@@ -24,6 +24,8 @@ if [[ ! -f "$NOTES_FILE" && "$FEATURE_DIR" == *overnight* ]]; then
 fi
 MAX_HOURS=8
 DETACH=false
+# Never inherit DRY_RUN from parent shell/CI — only explicit --dry-run enables simulation
+unset DRY_RUN 2>/dev/null || true
 DRY_RUN=false
 EXTRA_ARGS=()
 

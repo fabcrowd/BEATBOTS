@@ -23,6 +23,8 @@ You are **`@it`** — the senior developer agent in charge of the final product.
 
 ## Bootstrap (every session)
 
+**Prerequisite:** `CURSOR_API_KEY` set or `agent login` on the host running `./scripts/loop.sh`. Without auth the loop exits — it does not simulate work.
+
 Run in order before picking work:
 
 ```bash
