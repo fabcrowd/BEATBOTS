@@ -503,6 +503,23 @@ function bgPollNavigate(navigationLock, productUrl) {
   return navigationLock;
 }
 
+/** Mirrors background.js poll loop skip checks (inQueueUrls before navigationLock). */
+function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return true;
+  if (navigationLock.has(normUrl)) return true;
+  return false;
+}
+
+/** Simulated poll cycle — skip navigate when locked; else arm navigationLock. */
+function bgPollCycle(inQueueUrls, navigationLock, productUrl) {
+  const norm = normalizeProductUrl(productUrl);
+  if (!norm || pollWouldSkipNavigation(norm, inQueueUrls, navigationLock)) {
+    return { skipped: true, inQueueUrls, navigationLock };
+  }
+  navigationLock.add(norm);
+  return { skipped: false, inQueueUrls, navigationLock };
+}
+
 function runWm4SacredLockTests() {
   const productUrl = 'https://www.walmart.com/ip/wm4-sacred-lock/555666777';
   const norm = normalizeProductUrl(productUrl);
@@ -569,6 +586,37 @@ function runWm4SacredLockTests() {
   );
 }
 
+function runWm5SacredLockBlockTests() {
+  const productUrl = 'https://www.walmart.com/ip/wm5-sacred-block/111222333';
+  const norm = normalizeProductUrl(productUrl);
+  const inQ = new Set();
+  const navL = new Set();
+
+  bgApplyWalmartMessage(inQ, navL, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  bgPollNavigate(navL, productUrl);
+  assert.ok(inQ.has(norm), 'WM-5 setup: inQueueUrls armed');
+  assert.ok(navL.has(norm), 'WM-5 setup: navigationLock armed');
+  assert.equal(
+    pollWouldSkipNavigation(norm, inQ, navL),
+    true,
+    'WM-5: inQueueUrls blocks poll navigate'
+  );
+
+  bgApplyWalmartMessage(inQ, navL, { type: 'WALMART_NAV_FAILED', url: productUrl });
+  assert.ok(!navL.has(norm), 'WM-5: NAV_FAILED clears navigationLock');
+  assert.ok(inQ.has(norm), 'WM-5: NAV_FAILED must not clear inQueueUrls');
+  assert.equal(
+    pollWouldSkipNavigation(norm, inQ, navL),
+    true,
+    'WM-5: sacred lock still blocks poll after NAV_FAILED'
+  );
+
+  const afterPoll = bgPollCycle(inQ, navL, productUrl);
+  assert.equal(afterPoll.skipped, true, 'WM-5: poll cycle skips navigate while sacred lock holds');
+  assert.ok(!navL.has(norm), 'WM-5: poll must not re-arm navigationLock while inQueueUrls holds');
+  assert.ok(inQ.has(norm), 'WM-5: inQueueUrls unchanged after skipped poll cycle');
+}
+
 async function main() {
   runPageTypeTests();
   runDispatchTests();
@@ -576,8 +624,9 @@ async function main() {
   runWm2PredropQueueTests();
   await runWm2FlowTests();
   runWm4SacredLockTests();
+  runWm5SacredLockBlockTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4): page type, flow, pre-drop queue, sacred lock'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4 + WM-5): page type, flow, pre-drop queue, sacred lock'
   );
 }
 

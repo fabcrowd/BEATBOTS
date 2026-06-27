@@ -110,8 +110,8 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Sacred lock blocks background re-navigation; WALMART_NAV_FAILED clears navigationLock only, not inQueueUrls',
     impl: ['target-checkout-helper/background.js', 'target-checkout-helper/walmart-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs', 'extension-functional.mjs'],
   },
   'WM-6': {
     id: 'WM-6',
@@ -205,9 +205,9 @@ export const INVARIANTS = {
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
-  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4'],
+  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
-  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4'],
+  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
 };
 

@@ -253,7 +253,27 @@ async function main() {
   );
   assert.ok(
     afterNavFail.inQueueUrls?.includes(MON3_NORM),
-    'MON-3: WALMART_NAV_FAILED must not clear inQueueUrls (WM-5)'
+    'WM-5: WALMART_NAV_FAILED must not clear inQueueUrls'
+  );
+
+  {
+    const inQ = new Set(afterNavFail.inQueueUrls || []);
+    const navL = new Set(afterNavFail.navigationLock || []);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'WM-5: poll skips when inQueueUrls holds after NAV_FAILED'
+    );
+  }
+  await new Promise((r) => setTimeout(r, 2500));
+  const afterSacredWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    afterSacredWait.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: inQueueUrls persists across poll cycles after NAV_FAILED'
+  );
+  assert.ok(
+    !afterSacredWait.navigationLock?.includes(MON3_NORM),
+    'WM-5: poll must not re-arm navigationLock while sacred lock holds'
   );
 
   await sendBg(popup, { type: 'STOP_MONITOR' });
