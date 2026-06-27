@@ -470,13 +470,115 @@ async function runWm2FlowTests() {
   );
 }
 
+/** Mirrors background.js normalizeProductUrl */
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Mirrors background.js WALMART_IN_QUEUE / WALMART_NAV_FAILED handlers (WM-4).
+ * Returns updated { inQueueUrls, navigationLock } sets.
+ */
+function bgApplyWalmartMessage(inQueueUrls, navigationLock, message) {
+  const norm = normalizeProductUrl(message.url || '');
+  if (!norm) return { inQueueUrls, navigationLock };
+  if (message.type === 'WALMART_IN_QUEUE') {
+    inQueueUrls.add(norm);
+  }
+  if (message.type === 'WALMART_NAV_FAILED') {
+    navigationLock.delete(norm);
+  }
+  return { inQueueUrls, navigationLock };
+}
+
+/** Mirrors poll navigate side-effect — sets navigationLock only, not inQueueUrls. */
+function bgPollNavigate(navigationLock, productUrl) {
+  const norm = normalizeProductUrl(productUrl);
+  if (norm) navigationLock.add(norm);
+  return navigationLock;
+}
+
+function runWm4SacredLockTests() {
+  const productUrl = 'https://www.walmart.com/ip/wm4-sacred-lock/555666777';
+  const norm = normalizeProductUrl(productUrl);
+
+  // Poll navigate arms navigationLock only — not sacred lock (WM-4).
+  const inQ = new Set();
+  const navL = new Set();
+  bgPollNavigate(navL, productUrl);
+  assert.ok(navL.has(norm), 'WM-4 setup: poll sets navigationLock');
+  assert.ok(!inQ.has(norm), 'WM-4: navigationLock alone must not populate inQueueUrls');
+
+  // Pre-drop disabled ATC → NAV_FAILED, never WALMART_IN_QUEUE → no sacred lock.
+  const predrop = makePage({
+    pathname: '/ip/wm4-predrop/111',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const predropEntry = wmDecideProductPageEntry(predrop);
+  assert.equal(predropEntry.action, 'atc_unavailable', 'WM-4: pre-drop sends NAV_FAILED path');
+  for (const m of predropEntry.messages) {
+    bgApplyWalmartMessage(inQ, navL, { type: m.type, url: productUrl });
+  }
+  assert.ok(!inQ.has(norm), 'WM-4: NAV_FAILED path must not arm inQueueUrls');
+
+  // Queue confirmed → WALMART_IN_QUEUE → sacred lock (WM-4).
+  const queuePage = makePage({
+    pathname: '/ip/wm4-queue/222',
+    bodyText: "You're in line — estimated wait time 2 minutes",
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const queueEntry = wmDecideProductPageEntry(queuePage);
+  assert.equal(queueEntry.action, 'sacred_queue_wait', 'WM-4: confirmed queue arms sacred wait');
+  const queueMsg = queueEntry.messages.find((m) => m.type === 'WALMART_IN_QUEUE');
+  assert.ok(queueMsg, 'WM-4: confirmed queue emits WALMART_IN_QUEUE');
+  bgApplyWalmartMessage(inQ, navL, { type: queueMsg.type, url: productUrl });
+  assert.ok(inQ.has(norm), 'WM-4: WALMART_IN_QUEUE populates inQueueUrls after queue confirmed');
+
+  // /qp waiting room uses productUrl for lock — not /qp href (WM-4).
+  const qpInQ = new Set();
+  const qpNav = new Set();
+  const monitoredProduct = 'https://www.walmart.com/ip/wm4-qp-product/888999000';
+  const qpNorm = normalizeProductUrl(monitoredProduct);
+  bgApplyWalmartMessage(qpInQ, qpNav, {
+    type: 'WALMART_IN_QUEUE',
+    url: monitoredProduct,
+  });
+  assert.ok(qpInQ.has(qpNorm), 'WM-4: /qp handler locks monitored productUrl in inQueueUrls');
+  assert.ok(
+    !qpInQ.has(normalizeProductUrl('https://www.walmart.com/qp/waiting-room')),
+    'WM-4: /qp page URL must not be the sacred lock key'
+  );
+}
+
 async function main() {
   runPageTypeTests();
   runDispatchTests();
   await runFlowTests();
   runWm2PredropQueueTests();
   await runWm2FlowTests();
-  console.log('walmart-flow-simulation PASS (WM-1 + WM-2): page type, flow, pre-drop queue semantics');
+  runWm4SacredLockTests();
+  console.log(
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4): page type, flow, pre-drop queue, sacred lock'
+  );
 }
 
 main().catch((e) => {

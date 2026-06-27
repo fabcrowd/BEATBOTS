@@ -236,6 +236,10 @@ async function main() {
     'navigationLock after poll navigate'
   );
   assert.ok(withNavLock.navigationLock.includes(MON3_NORM), 'MON-3: poll sets navigationLock');
+  assert.ok(
+    !withNavLock.inQueueUrls?.includes(MON3_NORM),
+    'WM-4: navigationLock alone must not populate inQueueUrls (sacred lock only via WALMART_IN_QUEUE)'
+  );
 
   await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
   const inQueue = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
