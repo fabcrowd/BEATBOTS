@@ -206,12 +206,12 @@ async function maybeAutoRecoverTargetSession() {
     return { ok: false, reason: 'streak_below_threshold', streak: redskyErrorStreak };
   }
 
-  // Guard 2: never wipe site data while the user is in an active checkout flow.
-  // Clearing cookies mid-checkout is worse than a stale session — the user would
-  // be logged out at the payment or review step.
-  const checkoutTabs = await chrome.tabs.query({ url: '*://*.target.com/checkout*' }).catch(() => []);
-  if (checkoutTabs.length > 0) {
-    console.warn('[TCH bg] session recovery suppressed — checkout in progress on', checkoutTabs.length, 'tab(s)');
+  // Guard 2: never wipe site data while the user is in cart, checkout, sign-in, etc.
+  // Clearing cookies mid-flow is worse than a stale session — cart and auth are lost.
+  const targetTabs = await chrome.tabs.query({ url: '*://*.target.com/*' }).catch(() => []);
+  const protectedTabs = targetTabs.filter((t) => isProtectedFromSessionRecovery(t.url));
+  if (protectedTabs.length > 0) {
+    console.warn('[TCH bg] session recovery suppressed — protected flow on', protectedTabs.length, 'tab(s)');
     notifyTargetTabsSessionHint();
     return { ok: false, reason: 'checkout_in_progress' };
   }
@@ -326,6 +326,16 @@ function isInCheckoutFlow(url) {
   try {
     const path = new URL(url).pathname;
     return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch { return false; }
+}
+
+/** Cart, checkout, thank-you, and account sign-in — never auto-wipe during these flows. */
+function isProtectedFromSessionRecovery(url) {
+  if (isInCheckoutFlow(url)) return true;
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(?:account\/)?(?:login|signin)/i.test(path);
   } catch { return false; }
 }
 

@@ -485,6 +485,21 @@ await test('Checkout step detection — all Target checkout phases', () => {
   assert.ok(!isInCheckoutFlow(''));
   assert.ok(!isInCheckoutFlow('not-a-url'));
 
+  function isProtectedFromSessionRecovery(url) {
+    if (isInCheckoutFlow(url)) return true;
+    if (!url) return false;
+    try {
+      const path = new URL(url).pathname;
+      return /^\/(?:account\/)?(?:login|signin)/i.test(path);
+    } catch { return false; }
+  }
+
+  assert.ok(isProtectedFromSessionRecovery('https://www.target.com/cart'));
+  assert.ok(isProtectedFromSessionRecovery('https://www.target.com/checkout'));
+  assert.ok(isProtectedFromSessionRecovery('https://www.target.com/account/login'));
+  assert.ok(isProtectedFromSessionRecovery('https://www.target.com/login'));
+  assert.ok(!isProtectedFromSessionRecovery('https://www.target.com/p/product/-/A-123'));
+
   // Stock status parsing should treat these as "do not navigate"
   function stockEntryMeansAvailable(entry) {
     if (entry == null) return false;
