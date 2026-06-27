@@ -6,7 +6,7 @@
 //   3. Token is a JWT, store in Account record, re-use for all API calls
 //   4. On 401 from any cart/checkout endpoint: re-login
 
-import { getById, getWhere, upsert } from '../storage/db'
+import { getById, getWhere, getAll, upsert } from '../storage/db'
 import { Account, ImapProfile } from '../../shared/types'
 import { EventEmitter } from 'events'
 import { adjustedNow } from '../utils/drop-timing'
@@ -132,6 +132,32 @@ export async function createGuestSession(apiKey = DEFAULT_API_KEY): Promise<Sess
   }
   setCachedSession(ctx)
   return ctx
+}
+
+/** Build a session from browser cookie jar forwarded by the Chrome extension. */
+export function sessionFromTargetCookies(
+  cookies: Record<string, string>,
+  apiKey = DEFAULT_API_KEY
+): SessionContext | null {
+  const accessToken =
+    cookies.accessToken ||
+    cookies.AccessToken ||
+    cookies['access_token'] ||
+    ''
+  if (!accessToken) return null
+  const visitorId =
+    cookies.visitorId ||
+    cookies.VisitorId ||
+    generateVisitorId()
+  return {
+    accountId: GUEST_ACCOUNT_ID,
+    email: cookies.email || cookies.Email || 'browser',
+    accessToken,
+    tokenExpiresAt: adjustedNow() + 3600_000,
+    visitorId,
+    apiKey: apiKey || DEFAULT_API_KEY,
+    proxy: null,
+  }
 }
 
 // ─── Session Manager ──────────────────────────────────────────────────────────
@@ -426,6 +452,29 @@ function imapEscape(s: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
+}
+
+/** Poll configured IMAP profiles for a Target OTP (extension WS bridge). */
+export async function readOtpFromConfiguredImap(
+  opts: { targetEmail?: string; timeoutMs?: number } = {}
+): Promise<string | null> {
+  const profiles = getAll<ImapProfile>('imap_profiles')
+  if (!profiles.length) return null
+
+  const profile = profiles[0]
+  const deadline = Date.now() + (opts.timeoutMs ?? 90_000)
+  const targetEmail = opts.targetEmail || profile.user
+
+  while (Date.now() < deadline) {
+    try {
+      const otp = await pollImapForOtp(profile, targetEmail)
+      if (otp) return otp
+    } catch (e) {
+      console.warn('[SessionManager] IMAP OTP poll error:', e)
+    }
+    await sleep(3000)
+  }
+  return null
 }
 
 // Singleton

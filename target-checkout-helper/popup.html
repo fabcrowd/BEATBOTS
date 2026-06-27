@@ -70,6 +70,7 @@
           <button type="button" id="harvestClearBtn" class="harvest-btn harvest-btn-danger" title="Deletes all stored cookie snapshots from the pool. Use when you want a fresh start or if sessions are stale.">Clear harvested</button>
         </div>
         <p id="harvestCountText" class="harvest-count" role="status">Snapshots ready: —</p>
+        <p id="beatbotsPoolText" class="harvest-count" role="status">BEATBOTS app: —</p>
         <p id="harvestNextText" class="field-hint">Next harvest: —</p>
         <div id="harvestDiagBox" class="guide-explainer" style="margin-top:8px;padding:8px 10px">
           <summary style="font-weight:600;font-size:12px;list-style:none">Harvest diagnostics</summary>
@@ -99,7 +100,37 @@
             <label class="field-label" for="dropExpectedAt">Expected drop / restock (local time)</label>
             <input type="datetime-local" id="dropExpectedAt" class="input-datetime" step="1" aria-describedby="dropHint" title="If you know when the item goes live, enter that time here. The poll speeds up to 250ms in the 10 minutes before this time and holds fast for 3 minutes after. Leave blank for unknown restocks — the poll runs at a steady rate. For Walmart drops, set 10 seconds before actual drop time (e.g. 8:59:50 for 9:00 PM).">
             <p id="dropCountdown" class="drop-countdown" aria-live="polite"></p>
-            <p id="dropHint" class="field-hint">Optional. Polling speeds up in the 10 minutes before this time (and briefly after). Leave blank if you don't know when it restocks.</p>
+            <p id="dropHint" class="field-hint">Optional point-in-time drop: poll speeds up ±10m around this time. For <strong>hours-long window drops</strong>, set the monitor window below or enable aggressive polling.</p>
+          </div>
+          <div class="drop-block" style="margin-top:8px">
+            <label class="field-label" for="monitorWindowStart">Monitor window start (local)</label>
+            <input type="datetime-local" id="monitorWindowStart" class="input-datetime" step="1" title="Start of a multi-hour Target restock window. Poll runs at 250ms inside this span.">
+            <label class="field-label" for="monitorWindowEnd" style="margin-top:6px">Monitor window end (local)</label>
+            <input type="datetime-local" id="monitorWindowEnd" class="input-datetime" step="1" title="End of the restock window. Outside this span, polling returns to normal unless aggressive mode is on.">
+          </div>
+          <label class="option-row" style="margin-top:8px" title="When ON and no point drop time is set, background poll stays at 250ms for the whole monitor session — beats waiting on Discord/Zephyr pings.">
+            <input type="checkbox" id="aggressiveWhileMonitorOn">
+            <span class="option-label">Aggressive poll while monitor ON (unknown window)</span>
+          </label>
+          <p class="option-hint">Use for overnight / unknown-window SKUs. Leave OFF if you set a monitor window or point drop time.</p>
+          <div class="monitor-field" style="margin-top:8px">
+            <label class="field-label" for="keywordWatch">Keyword watch (Target search)</label>
+            <input type="text" id="keywordWatch" placeholder="e.g. pokemon 151 binder" autocomplete="off" title="Optional. Polls RedSky plp_search_v2 to discover TCINs for unannounced SKUs — merges with your URL list. Refreshes every 5 min.">
+            <span class="inline-hint">Discovers TCINs via plp_search_v2 — no URL needed if results match your drop.</span>
+          </div>
+          <div class="monitor-grid" style="margin-top:4px">
+            <div class="monitor-field">
+              <label class="field-label" for="keywordWatchMax">Keyword max SKUs</label>
+              <input type="number" id="keywordWatchMax" value="8" min="1" max="24" title="Max TCINs to poll from keyword search results (first page).">
+            </div>
+            <div class="monitor-field">
+              <label class="field-label" for="stockConfirmRequired">Confirm polls (N)</label>
+              <input type="number" id="stockConfirmRequired" value="2" min="1" max="5" title="In-stock readings required before navigate — reduces ATP/status flicker false triggers.">
+            </div>
+            <div class="monitor-field">
+              <label class="field-label" for="stockConfirmWindow">Confirm window (M)</label>
+              <input type="number" id="stockConfirmWindow" value="3" min="2" max="6" title="Last M poll samples checked for N-of-M confirmation (default 2-of-3).">
+            </div>
           </div>
           <div class="monitor-grid">
             <div class="monitor-field">
@@ -134,6 +165,11 @@
             <input type="number" id="targetMaxPrice" value="0" min="0" step="0.01" title="Price ceiling. The bot will not proceed if the item's retail price is above this amount. Set to 0 for no limit. Useful when products show inflated prices before a drop.">
             <span class="inline-hint">0 = no limit. Bot skips if retail price is above this.</span>
           </div>
+          <label class="option-row" style="margin-top:8px" title="When ON, opens checkout in a new tab after monitor ATC instead of navigating the monitor tab. Keeps the product tab on the page — light session separation (Stellar-style). Apply before checkout harvest still runs in the new tab context.">
+            <input type="checkbox" id="checkoutInNewTab">
+            <span class="option-label">Checkout in new tab (keep monitor tab)</span>
+          </label>
+          <p class="option-hint">Opens <code>/checkout</code> in a fresh tab after restock ATC. Monitor tab stays on the product page.</p>
           <button type="button" id="monitorBtn" class="btn-monitor" title="Opens a background tab for each product and begins polling Target's inventory API. When stock is detected, automatically navigates to the page and runs checkout.">Start monitoring</button>
         </div>
         <div id="monitorStatus" class="monitor-status-panel" role="status" aria-live="polite"></div>
@@ -141,6 +177,18 @@
 
       <section class="card" aria-labelledby="optionsHeading">
         <h2 id="optionsHeading">Checkout options</h2>
+
+        <details class="card guide-section" style="margin-bottom:10px">
+          <summary class="tips-summary">Pre-drop checklist (30 sec)</summary>
+          <ol class="guide-steps" style="margin-top:6px">
+            <li><strong>One</strong> Target tab · <strong>empty cart</strong> · extension <strong>ON</strong></li>
+            <li>Sign in <strong>30+ min early</strong> — avoid checkout auth modal under load</li>
+            <li><strong>Saved payment</strong> ON · <strong>Fresh tab checkout</strong> ON for monitor</li>
+            <li>Cookie pool <strong>3+</strong> if hype · BEATBOTS Shape harvester optional</li>
+            <li>If cart won’t load: extension uses <strong>cart API bypass</strong> before reload</li>
+            <li>Do <strong>not</strong> toggle settings in the last minute before drop</li>
+          </ol>
+        </details>
 
         <div class="acct-status" id="acctStatus">
           <div class="acct-status-header">
@@ -231,6 +279,12 @@
           <button type="button" id="debuggerDetachBtn" class="harvest-btn" title="Detaches the debugger from the tab and removes the Chrome debugging banner.">Detach</button>
         </div>
         <p id="debuggerStatusText" class="harvest-count" role="status">Debugger: —</p>
+
+        <label class="option-row" style="margin-top:8px" title="When cart DOM is dead but API confirms items, delegate full checkout to beatbots-app over WebSocket (last resort). Requires app running + Shape pool.">
+          <input type="checkbox" id="beatbotsCheckoutOnDomFailure">
+          <span class="option-label">BeatBots API checkout when cart DOM fails</span>
+        </label>
+        <p class="option-hint">Only triggers after API bypass fails on high-volume cart. Default off — higher API velocity.</p>
 
         <hr class="card-divider">
         <p class="section-lead" style="margin-top:6px"><strong>Auto sign-in</strong> — fills your Target credentials automatically when signed out mid-session or after a session recovery reload. Saves credentials in local storage (not encrypted).</p>
@@ -584,6 +638,47 @@
         </ul>
       </details>
 
+      <!-- ─── TARGET: WINDOW DROP (beat Discord) ─────────────────── -->
+
+      <details class="card guide-section" open>
+        <summary class="tips-summary">Target — Window drop (beat Discord / Zephyr)</summary>
+        <p class="guide-note">Target window drops have <strong>no fixed second</strong> — cook-group pings (often from <strong>Zephyr Monitors</strong>) fire when RedSky flips. Pre-monitoring the same TCIN in this extension skips the Discord click latency.</p>
+
+        <h3 class="guide-subhead">Zephyr path vs our path</h3>
+        <ul class="guide-steps">
+          <li><strong>Their path:</strong> cloud RedSky poll → Discord webhook → you click → ATC</li>
+          <li><strong>Our path:</strong> extension RedSky poll → tab navigates → ATC (no ping wait)</li>
+        </ul>
+        <p class="guide-note">See <code>docs/autopilot/stock-monitor-research/stock-monitor-research.md</code> in the repo for the full research write-up.</p>
+
+        <h3 class="guide-subhead">Step 1: Before the window</h3>
+        <ol class="guide-steps">
+          <li>Add each Target URL to <strong>Product monitor</strong> (hit <strong>+</strong>) — hours before the window opens</li>
+          <li>Build cookie pool (30+ snapshots) on the <strong>Monitor</strong> tab</li>
+          <li>Set <strong>Monitor window start/end</strong> for known multi-hour windows <em>or</em> enable <strong>Aggressive poll while monitor ON</strong> when timing is unknown</li>
+        </ol>
+
+        <h3 class="guide-subhead">Step 2: During the window</h3>
+        <ol class="guide-steps">
+          <li>Click <strong>Start monitoring</strong> — keep Chrome open (minimized OK)</li>
+          <li>Do <strong>not</strong> wait for Discord — the background poll navigates on the same RedSky flip</li>
+          <li>One Target tab discipline; don't toggle settings mid-window</li>
+          <li>Check monitor status for <strong>Flip</strong> timestamps if you want post-drop proof we saw stock</li>
+          <li><strong>Phase 2:</strong> set <strong>Confirm polls</strong> to 2-of-3 (default) to ignore ATP/status flicker; use <strong>Keyword watch</strong> when you don't have the TCIN yet</li>
+        </ol>
+      </details>
+
+      <details class="card guide-section">
+        <summary class="tips-summary">Target — Keyword watch (unannounced SKU)</summary>
+        <p class="guide-note">When cook groups haven't published a TCIN yet, enter a Target search phrase. The extension polls <code>plp_search_v2</code> every 5 minutes and adds discovered TCINs to the same RedSky monitor loop.</p>
+        <ol class="guide-steps">
+          <li>Set <strong>Keyword watch</strong> (e.g. product name from announcement)</li>
+          <li>Optionally add known URLs too — keyword hits merge with your list</li>
+          <li>Keep <strong>Confirm polls</strong> at 2-of-3 unless you need faster (more flicker risk)</li>
+          <li>Start monitoring — discovered SKUs appear in status as they are polled</li>
+        </ol>
+      </details>
+
       <!-- ─── TARGET: UNKNOWN DROP ───────────────────────────────── -->
 
       <details class="card guide-section" open>
@@ -600,13 +695,13 @@
         <ol class="guide-steps">
           <li>Turn <strong>Don't stop harvesting</strong> → <strong>OFF</strong>, <strong>Save settings</strong></li>
           <li>In <strong>Product monitor</strong>: paste product URL(s), hit <strong>+</strong></li>
-          <li>Leave <strong>Expected drop / restock</strong> blank — poll runs flat at 500ms</li>
+          <li>Leave <strong>Expected drop / restock</strong> blank — enable <strong>Aggressive poll while monitor ON</strong> for 250ms polling, or accept ~500ms steady rate</li>
           <li>Click <strong>Start monitoring</strong></li>
         </ol>
 
         <h3 class="guide-subhead">What happens</h3>
         <ol class="guide-steps">
-          <li>Poll runs at a steady 500ms with background keepalive every 5 min</li>
+          <li>Poll runs at 250ms when <strong>Aggressive poll while monitor ON</strong> is enabled; otherwise ~500ms with background keepalive every 5 min</li>
           <li>When stock appears (could be minutes, hours, or overnight), bot navigates → ATC → checkout</li>
           <li>Consider <strong>Endless mode</strong> if you want the monitor to restart after each successful checkout</li>
         </ol>
@@ -698,6 +793,7 @@
     </p>
   </footer>
 
+  <script src="dropPollingTiming.js"></script>
   <script src="core/signinStep.js"></script>
   <script src="popup.js"></script>
 </body>

@@ -229,6 +229,28 @@ section('Boundary edge cases');
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: 12345 }) === 500, 'numeric drop time: bg base');
 }
 
+section('Monitor window + aggressive-while-on');
+{
+  const winStart = new Date(DROP_MS - 2 * 60 * 60 * 1000).toISOString();
+  const winEnd = new Date(DROP_MS + 2 * 60 * 60 * 1000).toISOString();
+  const now = DROP_MS;
+  const { computeBackgroundPollSleepMs, isAggressivePoll, isInMonitorWindow } = loadHelpers(now);
+  const windowMon = { monitorWindowStart: winStart, monitorWindowEnd: winEnd, active: true };
+  assert(isInMonitorWindow(windowMon) === true, 'inside 2h monitor window');
+  assert(isAggressivePoll(windowMon) === true, 'aggressive inside monitor window');
+  assert(computeBackgroundPollSleepMs(windowMon) === 250, '250ms inside monitor window');
+
+  const outsideNow = DROP_MS + 3 * 60 * 60 * 1000;
+  const { computeBackgroundPollSleepMs: sleepOut, isInMonitorWindow: inWinOut } = loadHelpers(outsideNow);
+  assert(inWinOut(windowMon) === false, 'outside monitor window');
+  assert(sleepOut(windowMon) === 500, '500ms outside monitor window without aggressive flag');
+
+  const aggMon = { aggressiveWhileMonitorOn: true, active: true };
+  const { computeBackgroundPollSleepMs: sleepAgg, isAggressivePoll: isAgg } = loadHelpers(DROP_MS);
+  assert(isAgg(aggMon) === true, 'aggressive while monitor on (no drop time)');
+  assert(sleepAgg(aggMon) === 250, '250ms aggressive while on');
+}
+
 {
   // Negative baseSec in getDropAwarePollSeconds — must clamp to 0.25.
   const { getDropAwarePollSeconds } = loadHelpers(DROP_MS);

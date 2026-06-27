@@ -138,10 +138,10 @@ else
   fail "orchestrator autopilot CLI"
 fi
 
-if grep -q 'senior-singulr-dev' scripts/autopilot-cursor/session-prompt-overnight.md; then
-  pass "overnight prompt wired to it"
+if grep -q 'senior-singulr-dev' docs/autopilot/IT_LOOP_PROMPT.md; then
+  pass "overnight prompt wired to it (IT_LOOP_PROMPT.md)"
 else
-  fail "overnight prompt wired to it"
+  fail "overnight prompt wired to it (IT_LOOP_PROMPT.md)"
 fi
 
 echo ""

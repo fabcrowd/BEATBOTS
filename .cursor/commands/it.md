@@ -10,7 +10,7 @@ Read **`.cursor/skills/senior-singulr-dev/SKILL.md`** completely before acting.
 |------|------|
 | `python -m orchestrator autopilot` | **Primary build guide** when task JSON has pending requirements |
 | `bash scripts/verify.sh` | **Quality gate** before claiming done (`powershell -File scripts/verify.ps1` on Windows) |
-| `@loop` / `./scripts/loop.sh` | Overnight unattended TDD |
+| `@loop` / `./scripts/loop.sh` | Overnight unattended TDD — prompt: `docs/autopilot/IT_LOOP_PROMPT.md` |
 | `@autopilot` | In-chat TDD (1–4 requirements) |
 
 You are **not** limited to autopilot — use skills, subagents, web research, and direct TDD as you see fit.
@@ -48,6 +48,8 @@ When the user wants unattended work while sleeping:
 export CURSOR_API_KEY=...   # or agent login
 ./scripts/loop.sh --detach
 ```
+
+Each `agent` session loads **`docs/autopilot/IT_LOOP_PROMPT.md`** (canonical @it overnight prompt).
 
 `@loop` uses the same queue; `@it` is the persona driving each session.
 

@@ -129,6 +129,7 @@ export class MonitorEngine extends EventEmitter {
         const result = await this.checkStock(product.tcin)
 
         if (result.inStock) {
+          const wasOut = !state.inStock
           if (!this.passesFilters(result)) continue
 
           // Honeypot cooldown check
@@ -143,6 +144,14 @@ export class MonitorEngine extends EventEmitter {
 
           console.log('[Monitor] stock detected:', product.tcin, result)
           this.emit('stock', { tcin: product.tcin, product, state })
+          if (wasOut) {
+            this.emit('stock_flip', {
+              tcin: product.tcin,
+              url: `https://www.target.com/p/-/A-${product.tcin}`,
+              at: new Date().toISOString(),
+              qty: result.availableQty ?? 0,
+            })
+          }
           notifyStockDetected(product.tcin, product.name).catch(() => {})
         } else {
           state.inStock = false

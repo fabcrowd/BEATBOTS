@@ -94,6 +94,58 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+assert(S.isAuthWarmupRecent(Date.now() - 1000), 'warmup recent within 30m');
+assert(!S.isAuthWarmupRecent(0), 'no warmup at zero');
+assert(!S.isAuthWarmupRecent(Date.now() - 31 * 60 * 1000), 'warmup stale after 30m');
+
+assert(
+  S.shouldSkipCheckoutEmailFlow({
+    looksLoggedIn: true,
+    isCreateAccountModal: true,
+    warmupAtMs: Date.now() - 5000,
+  }),
+  'skip email when warm + create-account modal'
+);
+assert(
+  !S.shouldSkipCheckoutEmailFlow({ looksLoggedIn: false, isCreateAccountModal: true }),
+  'no skip without warm session'
+);
+assert(
+  S.shouldSkipCheckoutEmailFlow({ checkoutAuthError: true, looksLoggedIn: true }),
+  'skip email on auth error'
+);
+
+assert(
+  S.shouldPreferSignedInContinue({ looksLoggedIn: true }),
+  'prefer continue when logged in'
+);
+assert(
+  S.shouldPreferSignedInContinue({ warmupAtMs: Date.now() - 1000 }),
+  'prefer continue when warmup recent'
+);
+
+assert(!S.shouldAttemptGuest({ useSavedPayment: true, autoSignIn: false, hasCredentials: false, alreadyTried: false }), 'no guest with saved payment');
+
+assert(
+  S.shouldTreatAsLoggedInForCheckoutContinue({ signedInConfirm: true, looksLoggedIn: false, passwordOnlyReauth: false }),
+  'signed-in confirm treats as logged in'
+);
+assert(
+  !S.shouldTreatAsLoggedInForCheckoutContinue({ signedInConfirm: false, looksLoggedIn: true, passwordOnlyReauth: true }),
+  'password-only reauth does not treat header as logged in'
+);
+assert(
+  S.shouldReturnAfterFailedSignedInContinue({ onCheckout: true, signedInConfirm: true }),
+  'stop email after failed continue on confirm screen'
+);
+assert(!S.matchesSignedInContinueNeedle('continue shopping', 'continue'), 'continue shopping excluded');
+assert(S.matchesSignedInContinueNeedle('continue to checkout', 'continue to checkout'), 'explicit continue needle');
+assert(S.isWalmartCheckoutFlowPath('/cart'), 'walmart cart is checkout flow');
+assert(
+  !S.shouldRedirectToWalmartLogin({ useSavedSession: false, isLoggedIn: false, path: '/cart' }),
+  'no walmart login redirect from cart'
+);
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);

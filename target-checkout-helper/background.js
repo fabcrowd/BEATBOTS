@@ -2,7 +2,15 @@
 // Relays messages between popup/content scripts + orchestrates product monitoring.
 // Background TCIN polling runs here — no browser tab throttling.
 
-importScripts('dropPollingTiming.js', 'core/hosts.js', 'core/debuggerBridge.js', 'cookieHarvest.js');
+importScripts(
+  'dropPollingTiming.js',
+  'core/hosts.js',
+  'core/redskyFulfillment.js',
+  'core/stockFlipTelemetry.js',
+  'core/stockNavigateGate.js',
+  'core/debuggerBridge.js',
+  'cookieHarvest.js'
+);
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
@@ -145,7 +153,25 @@ async function gmailFindOtpCode(token) {
 /** Poll Gmail every 4s for up to 3 minutes; send OTP_FOUND or OTP_TIMEOUT to the tab. */
 async function watchForOtp(tabId, startMs) {
   const deadline = startMs + 3 * 60 * 1000;
-  console.log('[TCH bg] Gmail OTP watch started for tab', tabId);
+  console.log('[TCH bg] OTP watch started for tab', tabId);
+
+  if (bbConnected) {
+    try {
+      const { targetEmail } = await chrome.storage.local.get('targetEmail');
+      const msg = await bbSendRequest('otp_watch_request', 95000, {
+        targetEmail: String(targetEmail || '').trim() || undefined,
+      });
+      if (msg?.type === 'otp_found' && msg.ok && msg.code) {
+        chrome.tabs.sendMessage(tabId, { type: 'OTP_FOUND', code: String(msg.code) }).catch(() => {});
+        console.log('[TCH bg] BEATBOTS IMAP OTP found');
+        return;
+      }
+      console.log('[TCH bg] BEATBOTS IMAP OTP unavailable — trying Gmail');
+    } catch (e) {
+      console.warn('[TCH bg] BEATBOTS OTP watch error:', e);
+    }
+  }
+
   while (Date.now() < deadline) {
     try {
       const token = await gmailGetValidToken();
@@ -206,12 +232,13 @@ async function maybeAutoRecoverTargetSession() {
     return { ok: false, reason: 'streak_below_threshold', streak: redskyErrorStreak };
   }
 
-  // Guard 2: never wipe site data while the user is in an active checkout flow.
-  // Clearing cookies mid-checkout is worse than a stale session — the user would
-  // be logged out at the payment or review step.
-  const checkoutTabs = await chrome.tabs.query({ url: '*://*.target.com/checkout*' }).catch(() => []);
-  if (checkoutTabs.length > 0) {
-    console.warn('[TCH bg] session recovery suppressed — checkout in progress on', checkoutTabs.length, 'tab(s)');
+  // Guard 2: never wipe site data while the user is in an active checkout or cart flow.
+  // Clearing cookies mid-checkout or on /cart during a drop is worse than a stale session.
+  const protectedTabs = await chrome.tabs.query({
+    url: ['*://*.target.com/checkout*', '*://*.target.com/cart*'],
+  }).catch(() => []);
+  if (protectedTabs.length > 0) {
+    console.warn('[TCH bg] session recovery suppressed — checkout/cart in progress on', protectedTabs.length, 'tab(s)');
     notifyTargetTabsSessionHint();
     return { ok: false, reason: 'checkout_in_progress' };
   }
@@ -344,7 +371,7 @@ async function checkWalmartItemStock(itemId) {
     const qRaw = json?.product?.productAvailability?.inventoryAvailableQuantity
       ?? json?.product?.productAvailability?.quantity;
     const qty = Number(qRaw);
-    const stock = SELLABLE_STATUSES.has(status);
+    const stock = /^(IN_STOCK|AVAILABLE|LIMITED_STOCK)$/i.test(String(status));
     const price = json?.product?.priceInfo?.currentPrice?.price ?? null;
     return {
       stock,
@@ -355,12 +382,6 @@ async function checkWalmartItemStock(itemId) {
 }
 
 // ─── STOCK STATUS PARSING ────────────────────────────────────────────────────
-
-const SELLABLE_STATUSES = new Set([
-  'IN_STOCK', 'LIMITED_STOCK', 'PRE_ORDER_SELLABLE',
-  'BACKORDER_AVAILABLE', 'BACKORDERED', 'AVAILABLE',
-]);
-const BLOCKED_RE = /(OUT_OF_STOCK|UNSELLABLE|UNAVAILABLE|NOT_AVAILABLE|NO_INVENTORY|INVENTORY_UNAVAILABLE)/i;
 
 /** Best-effort current retail USD from RedSky product node; null when absent (do not gate on unknown). */
 function extractTargetRetailPrice(product) {
@@ -392,20 +413,6 @@ function extractTargetRetailPrice(product) {
   return null;
 }
 
-/** @returns {{ stock: boolean | null, qty: number, price: number | null }} */
-function parseFulfillmentBlock(fulfillment) {
-  if (!fulfillment || typeof fulfillment !== 'object') return { stock: null, qty: 0, price: null };
-  const shipping = fulfillment.shipping_options || {};
-  const status = String(shipping.availability_status || '').toUpperCase();
-  const qty = Number(shipping.available_to_promise_quantity) || 0;
-  const soldOut = fulfillment.sold_out === true;
-  const oosAll  = fulfillment.is_out_of_stock_in_all_store_locations === true;
-  const sellable = qty > 0 || SELLABLE_STATUSES.has(status);
-  const blocked  = soldOut || BLOCKED_RE.test(status) || (oosAll && qty <= 0 && !sellable);
-  if (sellable && !soldOut) return { stock: true, qty, price: null };
-  if (blocked) return { stock: false, qty, price: null };
-  return { stock: null, qty, price: null };
-}
 
 function mergeTargetStockAndPrice(block, productNode) {
   const price = extractTargetRetailPrice(productNode);
@@ -417,6 +424,17 @@ function mergeTargetStockAndPrice(block, productNode) {
 function parseBatchFulfillmentResponse(payload) {
   const out = new Map();
   const products = payload?.data?.products ?? [];
+  const batchMap = typeof parseBatchFulfillmentMap === 'function'
+    ? parseBatchFulfillmentMap(payload)
+    : null;
+  if (batchMap) {
+    for (const p of products) {
+      const tcin = String(p.tcin ?? '');
+      if (!tcin || batchMap[tcin] === undefined) continue;
+      out.set(tcin, mergeTargetStockAndPrice(batchMap[tcin], p));
+    }
+    return out;
+  }
   for (const p of products) {
     const tcin = String(p.tcin ?? '');
     if (tcin) out.set(tcin, mergeTargetStockAndPrice(parseFulfillmentBlock(p.fulfillment), p));
@@ -455,6 +473,15 @@ const inQueueUrls    = new Set();
 // URLs where the background has already navigated the tab to the product page.
 // The content script is now in control — don't reload until it reports back.
 const navigationLock = new Set();
+/** @type {Map<string, number>} */
+const navigationLockAt = new Map();
+const NAV_LOCK_TTL_MS = 30 * 60 * 1000;
+/** @type {Map<string, object|boolean>} */
+const lastPollStockByTcin = new Map();
+/** @type {Map<string, Array<{stock: boolean, qty: number}>>} */
+const pollConfirmBuffers = new Map();
+let keywordWatchCache = { keyword: '', tcins: [], at: 0 };
+const KEYWORD_WATCH_REFRESH_MS = 5 * 60 * 1000;
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
 // NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
@@ -510,10 +537,16 @@ function requestApiKeyFromTabs() {
 // ─── TCIN STOCK CHECK ────────────────────────────────────────────────────────
 
 // Single-TCIN check using product_fulfillment_v1 (known-good for preorders).
-async function checkSingleTcin(tcin, apiKey, redskyBase) {
-  const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
-  const url  = `${base}/redsky_aggregations/v1/web/product_fulfillment_v1`
-    + `?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
+async function checkSingleTcin(tcin, apiKey, redskyBase, geoOpts = {}) {
+  const url = typeof buildRedskyFulfillmentUrl === 'function'
+    ? buildRedskyFulfillmentUrl(tcin, {
+      apiKey,
+      redskyBase,
+      zip: geoOpts.zip,
+      storeId: geoOpts.storeId,
+    })
+    : null;
+  if (!url) return null;
   try {
     const res = await fetch(url, {
       cache: 'no-store',
@@ -540,7 +573,7 @@ async function checkSingleTcin(tcin, apiKey, redskyBase) {
 // returns undefined (batch endpoint returned no data), falls back to the
 // single-TCIN product_fulfillment_v1 endpoint which is authoritative for
 // preorder items.
-async function checkTcinsStock(tcins, apiKey, redskyBase) {
+async function checkTcinsStock(tcins, apiKey, redskyBase, geoOpts = {}) {
   if (!tcins.length || !apiKey) return new Map();
   const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
   const url  = `${base}/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1`
@@ -568,10 +601,13 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
   } catch {}
 
   // For TCINs not covered by the batch endpoint, fall back to individual calls.
-  const missing = tcins.filter(t => out.get(t) === undefined);
+  const batchObj = Object.fromEntries(out);
+  const missing = typeof tcinsNeedingSingleFallback === 'function'
+    ? tcinsNeedingSingleFallback(tcins, batchObj)
+    : tcins.filter(t => out.get(t) === undefined);
   if (missing.length) {
     await Promise.all(missing.map(async (tcin) => {
-      const result = await checkSingleTcin(tcin, apiKey, redskyBase);
+      const result = await checkSingleTcin(tcin, apiKey, redskyBase, geoOpts);
       if (result !== null) out.set(tcin, result);
     }));
   }
@@ -630,6 +666,105 @@ function accurateNow() {
 
 // ─── BACKGROUND POLL LOOP ────────────────────────────────────────────────────
 
+async function maybeRecordStockFlip(tcin, nextEntry) {
+  if (!tcin || typeof detectStockFlip !== 'function') return;
+  const prev = lastPollStockByTcin.get(tcin);
+  lastPollStockByTcin.set(tcin, nextEntry);
+  const flip = detectStockFlip(prev, nextEntry);
+  if (!flip) return;
+
+  const { lastStockFlips } = await chrome.storage.local.get('lastStockFlips').catch(() => ({}));
+  const existing = lastStockFlips?.[tcin];
+  const nowMs = Date.now();
+  if (!shouldRecordStockFlip(existing, flip, nowMs, STOCK_FLIP_DEBOUNCE_MS)) return;
+
+  const updated = applyStockFlipRecord(lastStockFlips || {}, tcin, flip);
+  await chrome.storage.local.set({ lastStockFlips: updated }).catch(() => {});
+}
+
+function getStockConfirmOpts(monitor) {
+  return {
+    required: Math.max(1, Math.min(5, Number(monitor?.stockConfirmRequired) || 2)),
+    window: Math.max(2, Math.min(6, Number(monitor?.stockConfirmWindow) || 3)),
+  };
+}
+
+function passesStockNavigateGate(confirmKey, entry, monitor) {
+  if (!confirmKey || typeof pushStockPollSample !== 'function') return true;
+  const opts = getStockConfirmOpts(monitor);
+  const prev = pollConfirmBuffers.get(confirmKey) || [];
+  const next = pushStockPollSample(prev, entry, 5);
+  pollConfirmBuffers.set(confirmKey, next);
+  if (!stockConfirmedForNavigate(next, opts)) return false;
+  if (typeof isAtpStatusFlicker === 'function' && isAtpStatusFlicker(next, opts)) return false;
+  return true;
+}
+
+async function fetchKeywordWatchTcins(monitor, geoOpts) {
+  const kw = String(monitor?.keywordWatch || '').trim();
+  if (!kw || !cachedApiKey || typeof buildPlpSearchUrl !== 'function') return [];
+
+  const now = Date.now();
+  if (keywordWatchCache.keyword === kw && now - keywordWatchCache.at < KEYWORD_WATCH_REFRESH_MS) {
+    return keywordWatchCache.tcins;
+  }
+
+  const url = buildPlpSearchUrl(kw, {
+    apiKey: cachedApiKey,
+    redskyBase: cachedRedskyBase,
+    zip: geoOpts?.zip,
+    storeId: geoOpts?.storeId,
+  });
+  if (!url) return [];
+
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return keywordWatchCache.keyword === kw ? keywordWatchCache.tcins : [];
+    const json = await res.json();
+    const max = Math.max(1, Math.min(24, Number(monitor?.keywordWatchMax) || 8));
+    const tcins = typeof parsePlpSearchTcins === 'function' ? parsePlpSearchTcins(json, max) : [];
+    keywordWatchCache = { keyword: kw, tcins, at: now };
+    if (tcins.length) console.log('[TCH bg] keyword watch', kw, '→', tcins.length, 'TCINs');
+    return tcins;
+  } catch {
+    return keywordWatchCache.keyword === kw ? keywordWatchCache.tcins : [];
+  }
+}
+
+function keywordProductsFromTcins(tcins, monitor) {
+  const max = Math.max(1, Math.min(24, Number(monitor?.keywordWatchMax) || 8));
+  return (tcins || []).slice(0, max).map((tcin) => ({
+    url: `https://www.target.com/p/-/A-${tcin}`,
+    qty: 1,
+    name: `kw:${tcin}`,
+    fromKeyword: true,
+  }));
+}
+
+async function mergeKeywordTargetProducts(targetProducts, monitor, geoOpts) {
+  const kw = String(monitor?.keywordWatch || '').trim();
+  if (!kw) return targetProducts;
+
+  const tcins = await fetchKeywordWatchTcins(monitor, geoOpts);
+  const kwProds = keywordProductsFromTcins(tcins, monitor);
+  if (!kwProds.length) return targetProducts;
+
+  const merged = [...targetProducts];
+  const seen = new Set(merged.map((p) => extractTcin(p.url) || normalizeProductUrl(p.url)));
+  for (const kp of kwProds) {
+    const key = extractTcin(kp.url) || normalizeProductUrl(kp.url);
+    if (!key || seen.has(key)) continue;
+    merged.push(kp);
+    seen.add(key);
+  }
+  return merged;
+}
+
 async function runBackgroundPoll() {
   bgPollActive = true;
   let pollCycles = 0;
@@ -648,7 +783,11 @@ async function runBackgroundPoll() {
     const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
     if (!monitor?.active) { bgPollActive = false; break; }
 
-    const pendingProducts = (monitor.products || []).filter(p => {
+    const { shipping } = await chrome.storage.local.get('shipping').catch(() => ({}));
+    const geoOpts = { zip: shipping?.zip };
+
+    const catalog = await mergeKeywordTargetProducts([...(monitor.products || [])], monitor, geoOpts);
+    const pendingProducts = catalog.filter(p => {
       const n = normalizeProductUrl(p.url);
       return (monitor.counts?.[n] || 0) < p.qty;
     });
@@ -680,9 +819,12 @@ async function runBackgroundPoll() {
       const tcins = targetProducts.map(p => extractTcin(p.url)).filter(Boolean);
       if (tcins.length) {
         const streakBefore = redskyErrorStreak;
-        const targetMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
+        const targetMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase, geoOpts);
         if (redskyErrorStreak > streakBefore) hadApiError = true;
-        for (const [k, v] of targetMap) stockMap.set(k, v);
+        for (const [k, v] of targetMap) {
+          stockMap.set(k, v);
+          await maybeRecordStockFlip(k, v);
+        }
       }
     }
 
@@ -739,14 +881,27 @@ async function runBackgroundPoll() {
       // the content script is loading; reloading again would restart the
       // Walmart traffic queue ("hang tight" loop).
       if (navigationLock.has(normUrl)) {
-        if (pollCycles % 30 === 0) console.log(`[TCH bg] Skipping ${normUrl} — navigation in progress`);
-        continue;
+        const lockedAt = navigationLockAt.get(normUrl) || 0;
+        if (Date.now() - lockedAt < NAV_LOCK_TTL_MS) {
+          if (pollCycles % 30 === 0) console.log(`[TCH bg] Skipping ${normUrl} — navigation in progress`);
+          continue;
+        }
+        navigationLock.delete(normUrl);
+        navigationLockAt.delete(normUrl);
       }
 
       const tcin = extractTcin(product.url);
       // Prefer TCIN key (Target) then fall back to URL key (Walmart).
       const entry = (tcin && stockMap.has(tcin)) ? stockMap.get(tcin) : stockMap.get(normUrl);
       if (!stockEntryMeansAvailable(entry)) continue;
+
+      const confirmKey = tcin || normUrl;
+      if (!passesStockNavigateGate(confirmKey, entry, monitor)) {
+        if (pollCycles % 60 === 0) {
+          console.log(`[TCH bg] stock confirm pending (${getStockConfirmOpts(monitor).required}-of-${getStockConfirmOpts(monitor).window}):`, confirmKey);
+        }
+        continue;
+      }
 
       // Gate only when API reports a positive quantity below threshold. qty===0 often means
       // "unknown" while status still shows sellable — do not block those restocks.
@@ -824,7 +979,7 @@ async function runBackgroundPoll() {
           const currentTab = await chrome.tabs.get(tabId);
           if (isInCheckoutFlow(currentTab?.url)) {
             console.log(`[TCH bg] Tab ${tabId} already in checkout flow (${currentTab.url}) — not navigating`);
-            break;
+            continue;
           }
         } catch { /* tab closed — fall through to create new one */ }
       }
@@ -851,6 +1006,7 @@ async function runBackgroundPoll() {
       // Lock this URL — content script is now loading on the product page.
       // Don't navigate again until it reports back (ATC_SUCCESS or NAV_FAILED).
       navigationLock.add(normUrl);
+      navigationLockAt.set(normUrl, Date.now());
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
       // Avoid hammering the same product multiple times per cycle.
       break;
@@ -877,9 +1033,12 @@ async function runBackgroundPoll() {
     } catch {}
 
     const dropAggressive = computeBackgroundPollSleepMs(monitor) <= 250;
-    const sleepMs = hadApiError && !dropAggressive
+    const baseSleep = hadApiError && !dropAggressive
       ? (monitor.errorRetryDelayMs || 3500)
       : computeBackgroundPollSleepMs(monitor);
+    const sleepMs = typeof jitterBackgroundPollSleepMs === 'function'
+      ? jitterBackgroundPollSleepMs(baseSleep)
+      : baseSleep;
     await sleep(sleepMs);
   }
   console.log('[TCH bg] background poll stopped');
@@ -1100,6 +1259,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
+          checkoutInNewTab: !!message.checkoutInNewTab,
+          monitorWindowStart: message.monitorWindowStart || null,
+          monitorWindowEnd: message.monitorWindowEnd || null,
+          aggressiveWhileMonitorOn: !!message.aggressiveWhileMonitorOn,
+          keywordWatch: message.keywordWatch || null,
+          keywordWatchMax: Number(message.keywordWatchMax) || 8,
+          stockConfirmRequired: Number(message.stockConfirmRequired) || 2,
+          stockConfirmWindow: Number(message.stockConfirmWindow) || 3,
           resetEndlessSuccessCount: true,
         }
       )
@@ -1116,7 +1283,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normFailUrl = normalizeProductUrl(message.url || '');
       if (normFailUrl) {
         navigationLock.delete(normFailUrl);
+        navigationLockAt.delete(normFailUrl);
         console.log('[TCH bg] Navigation lock released (failed):', normFailUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'TARGET_NAV_FAILED':
+    case 'TARGET_NAV_HANDOFF': {
+      const normNavUrl = normalizeProductUrl(message.url || '');
+      if (normNavUrl) {
+        if (message.type === 'TARGET_NAV_FAILED') {
+          navigationLock.delete(normNavUrl);
+          navigationLockAt.delete(normNavUrl);
+          console.log('[TCH bg] Target navigation lock released:', normNavUrl);
+        } else {
+          navigationLock.add(normNavUrl);
+          navigationLockAt.set(normNavUrl, Date.now());
+        }
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'WALMART_QUEUE_END': {
+      const normQueueEnd = normalizeProductUrl(message.url || '');
+      if (normQueueEnd) {
+        inQueueUrls.delete(normQueueEnd);
+        navigationLock.delete(normQueueEnd);
+        navigationLockAt.delete(normQueueEnd);
+        console.log('[TCH bg] Walmart queue ended — lock released:', normQueueEnd);
       }
       sendResponse({ ok: true });
       return true;
@@ -1128,6 +1325,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normQueueUrl = normalizeProductUrl(message.url || '');
       if (normQueueUrl) {
         inQueueUrls.add(normQueueUrl);
+        navigationLock.add(normQueueUrl);
+        navigationLockAt.set(normQueueUrl, Date.now());
         console.log('[TCH bg] WALMART_IN_QUEUE locked:', normQueueUrl);
       }
       sendResponse({ ok: true });
@@ -1170,11 +1369,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'GET_MONITOR_STATUS':
-      chrome.storage.local.get(['monitor', 'checkoutTelemetry'], ({ monitor, checkoutTelemetry }) => {
+      chrome.storage.local.get(['monitor', 'checkoutTelemetry', 'lastStockFlips'], ({ monitor, checkoutTelemetry, lastStockFlips }) => {
         const baseMonitor = monitor || { active: false, products: [], counts: {} };
         sendResponse({
           ...baseMonitor,
           checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
+          lastStockFlips: lastStockFlips || {},
         });
       });
       return true;
@@ -1313,6 +1513,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false, reason: 'error' }));
       return true;
 
+    case 'BB_APPLY_ATC_COOKIE':
+      bbApplyAppAtcCookie()
+        .then((r) => sendResponse(r))
+        .catch(() => sendResponse({ ok: false, reason: 'error' }));
+      return true;
+
+    case 'BB_REFRESH_POOL':
+      bbRefreshPoolStatus()
+        .then((pool) => sendResponse({ ok: true, beatbots: bbGetBeatbotsStatus(), pool }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case 'BB_CHECKOUT_REQUEST':
+      bbSendCheckoutRequest(message)
+        .then((r) => sendResponse(r))
+        .catch((e) => sendResponse({ ok: false, reason: 'error', error: String(e?.message || e) }));
+      return true;
+
+    case 'OPEN_FRESH_CHECKOUT_TAB':
+      chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true })
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
     case 'HARVEST_GET_STATUS':
       (async () => {
         try {
@@ -1339,6 +1563,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
 
           const allHidden = await computeAllTargetTabsHidden();
+          if (bbConnected && !bbPoolStatus) await bbRefreshPoolStatus();
           sendResponse({
             ...s,
             harvestHidden: allHidden,
@@ -1346,6 +1571,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             lastHarvestCaptureKind,
             nextHarvestInMs,
             nextHarvestMode,
+            beatbots: bbGetBeatbotsStatus(),
           });
         } catch {
           sendResponse({ ok: false });
@@ -1469,11 +1695,14 @@ async function maybeRunDropAwareHarvestKeepalive() {
     return;
   }
 
-  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
-  lastHarvestKeepaliveRunMs = Date.now();
-  lastHarvestCaptureMs = Date.now();
-  lastHarvestCaptureKind = 'keepalive';
-  console.log('[TCH bg] session keep-alive: snapshot captured');
+  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target')
+    .then((snap) => {
+      if (!snap?.ok) return;
+      lastHarvestKeepaliveRunMs = Date.now();
+      lastHarvestCaptureMs = Date.now();
+      lastHarvestCaptureKind = 'keepalive';
+      console.log('[TCH bg] session keep-alive: snapshot captured');
+    });
 }
 
 // ─── BROADCAST ──────────────────────────────────────────────────────────────
@@ -1500,10 +1729,21 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     targetMaxPrice = 0,
     walmartMaxPrice = 0,
     errorRetryDelayMs = 3500,
+    checkoutInNewTab = false,
+    monitorWindowStart = null,
+    monitorWindowEnd = null,
+    aggressiveWhileMonitorOn = false,
+    keywordWatch = null,
+    keywordWatchMax = 8,
+    stockConfirmRequired = 2,
+    stockConfirmWindow = 3,
     resetEndlessSuccessCount = true,
   } = opts;
 
   await stopMonitor();
+  lastPollStockByTcin.clear();
+  pollConfirmBuffers.clear();
+  keywordWatchCache = { keyword: '', tcins: [], at: 0 };
 
   if (resetEndlessSuccessCount) {
     await chrome.storage.local.set({ endlessSuccessCount: 0 });
@@ -1523,12 +1763,26 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   if (dropExpectedAt && String(dropExpectedAt).trim()) {
     monitor.dropExpectedAt = String(dropExpectedAt).trim();
   }
+  if (monitorWindowStart && String(monitorWindowStart).trim()) {
+    monitor.monitorWindowStart = String(monitorWindowStart).trim();
+  }
+  if (monitorWindowEnd && String(monitorWindowEnd).trim()) {
+    monitor.monitorWindowEnd = String(monitorWindowEnd).trim();
+  }
+  monitor.aggressiveWhileMonitorOn = !!aggressiveWhileMonitorOn;
+  if (keywordWatch && String(keywordWatch).trim()) {
+    monitor.keywordWatch = String(keywordWatch).trim();
+  }
+  monitor.keywordWatchMax = Math.max(1, Math.min(24, Number(keywordWatchMax) || 8));
+  monitor.stockConfirmRequired = Math.max(1, Math.min(5, Number(stockConfirmRequired) || 2));
+  monitor.stockConfirmWindow = Math.max(2, Math.min(6, Number(stockConfirmWindow) || 3));
   if (skipMonitoring) monitor.skipMonitoring = true;
   monitor.highStockOnly = !!highStockOnly;
   monitor.highStockThreshold = Math.max(1, Math.min(999, Number(highStockThreshold) || 10));
   monitor.targetMaxPrice = Math.max(0, Number(targetMaxPrice) || 0);
   monitor.walmartMaxPrice = Math.max(0, Number(walmartMaxPrice) || 0);
   monitor.errorRetryDelayMs = Math.max(500, Math.min(30000, Number(errorRetryDelayMs) || 3500));
+  monitor.checkoutInNewTab = !!checkoutInNewTab;
 
   await chrome.storage.local.set({
     monitor,
@@ -1564,10 +1818,14 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
 
 async function stopMonitor() {
   bgPollActive = false;
+  lastPollStockByTcin.clear();
+  pollConfirmBuffers.clear();
+  keywordWatchCache = { keyword: '', tcins: [], at: 0 };
   lastHarvestKeepaliveRunMs = 0;
   redskyErrorStreak = 0;
   inQueueUrls.clear();
   navigationLock.clear();
+  navigationLockAt.clear();
 
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) return;
@@ -1598,7 +1856,11 @@ async function handleATCSuccess(url, tabId) {
     return;
   }
 
+  // Drop CDP as soon as ATC succeeds — checkout form-fill uses native clicks.
+  tchDebuggerDetach().catch(() => {});
+
   navigationLock.delete(normUrl); // release — ATC succeeded
+  navigationLockAt.delete(normUrl);
   inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
   monitor.counts[normUrl] = (monitor.counts[normUrl] || 0) + 1;
   await chrome.storage.local.set({ monitor });
@@ -1609,10 +1871,10 @@ async function handleATCSuccess(url, tabId) {
   const currentCount = monitor.counts[normUrl];
 
   if (product && currentCount < product.qty) {
-    // Detach debugger before reload — next DEBUGGER_CLICK will re-attach on demand.
+    // Detach debugger before next unit — navigate back to product (not reload checkout).
     tchDebuggerDetach().catch(() => {});
     setTimeout(() => {
-      chrome.tabs.reload(tabId).catch(() => {});
+      chrome.tabs.update(tabId, { url: product.url }).catch(() => {});
     }, (monitor.refreshInterval || 1) * 1000);
     return;
   }
@@ -1629,8 +1891,15 @@ async function handleATCSuccess(url, tabId) {
     bgPollActive = false;
     const isWalmart = !!extractWalmartItemId(url);
     if (!isWalmart) {
-      // Target: navigate the ATC tab directly to Target checkout.
-      chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      const useFreshTab = monitor.checkoutInNewTab || !!(product && product.hypeMode);
+      if (useFreshTab) {
+        // Skip harvest replay after DOM ATC — cart is bound to the current session cookies.
+        await chrome.tabs.create({ url: 'https://www.target.com/checkout', active: true });
+        console.log('[TCH bg] fresh-tab checkout opened (monitor tab kept open)', product?.hypeMode ? '(hype)' : '');
+      } else {
+        // Target: navigate the ATC tab directly to Target checkout.
+        chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
+      }
       // Detach debugger — no click simulation needed during checkout form-fill.
       tchDebuggerDetach().catch(() => {});
     }
@@ -1657,13 +1926,231 @@ let bbWs = null;
 let bbWsPort = BB_WS_DEFAULT_PORT;
 let bbReconnectTimer = null;
 let bbConnected = false;
+let bbPoolStatus = null;
+let bbRequestSeq = 0;
+const bbPendingRequests = new Map();
 const BB_RECONNECT_DELAY_MS = 5000;
+const BB_REQUEST_TIMEOUT_MS = 3000;
 
 async function bbGetPort() {
   try {
     const { beatbotsWsPort } = await chrome.storage.local.get('beatbotsWsPort');
     return Number(beatbotsWsPort) || BB_WS_DEFAULT_PORT;
   } catch { return BB_WS_DEFAULT_PORT; }
+}
+
+async function bbHandleStockFlip(msg) {
+  const tcin = String(msg.tcin || '').trim();
+  if (!tcin) return;
+
+  const { monitor, lastStockFlips } = await chrome.storage.local.get(['monitor', 'lastStockFlips']).catch(() => ({}));
+  if (!monitor?.active) return;
+
+  const product = (monitor.products || []).find((p) => extractTcin(p.url) === tcin);
+  if (!product) return;
+
+  const flip = {
+    from: 'OOS',
+    to: 'IN_STOCK',
+    at: msg.at || new Date().toISOString(),
+    qty: Number(msg.qty) || 0,
+  };
+  if (shouldRecordStockFlip(lastStockFlips?.[tcin], flip, Date.now(), STOCK_FLIP_DEBOUNCE_MS)) {
+    const updated = applyStockFlipRecord(lastStockFlips || {}, tcin, flip);
+    await chrome.storage.local.set({ lastStockFlips: updated }).catch(() => {});
+  }
+
+  const normUrl = normalizeProductUrl(product.url);
+  if ((monitor.counts?.[normUrl] || 0) >= product.qty) return;
+  if (inQueueUrls.has(normUrl)) return;
+  if (navigationLock.has(normUrl)) {
+    const lockedAt = navigationLockAt.get(normUrl) || 0;
+    if (Date.now() - lockedAt < NAV_LOCK_TTL_MS) return;
+    navigationLock.delete(normUrl);
+    navigationLockAt.delete(normUrl);
+  }
+
+  const entry = { stock: true, qty: flip.qty };
+  if (monitor.highStockOnly) {
+    const th = Number(monitor.highStockThreshold) || 10;
+    const qty = Number(entry.qty) || 0;
+    if (qty > 0 && qty < th) return;
+  }
+
+  console.log(`[TCH bg] BEATBOTS stock_flip: tcin=${tcin} url=${product.url}`);
+  const tabId = urlToTabId[normUrl];
+  if (tabId) {
+    try {
+      const currentTab = await chrome.tabs.get(tabId);
+      if (isInCheckoutFlow(currentTab?.url)) return;
+    } catch { /* tab closed */ }
+  }
+
+  let navigated = false;
+  if (tabId) {
+    try {
+      await chrome.tabs.update(tabId, { url: product.url, active: true });
+      navigated = true;
+    } catch { /* tab closed */ }
+  }
+  if (!navigated) {
+    const existing = await chrome.tabs.query({}).catch(() => []);
+    const match = existing.find((t) => t.url && normalizeProductUrl(t.url) === normUrl && !isInCheckoutFlow(t.url));
+    if (match) {
+      chrome.tabs.update(match.id, { url: product.url, active: true }).catch(() => {});
+      navigated = true;
+    }
+  }
+  if (!navigated) {
+    chrome.tabs.create({ url: product.url, active: true }).catch(() => {});
+  }
+  navigationLock.add(normUrl);
+  navigationLockAt.set(normUrl, Date.now());
+}
+
+function bbHandleWsMessage(msg) {
+  if (msg?.type === 'hello' && msg?.source === 'beatbots') {
+    if (typeof msg.port === 'number' && msg.port > 0) {
+      bbWsPort = msg.port;
+      chrome.storage.local.set({ beatbotsWsPort: msg.port }).catch(() => {});
+    }
+    return;
+  }
+
+  if (msg?.type === 'stock_flip') {
+    bbHandleStockFlip(msg).catch((e) => console.warn('[TCH] stock_flip handler failed', e));
+    return;
+  }
+
+  if (msg?.type === 'pool_status') {
+    bbPoolStatus = {
+      loginCount: Number(msg.loginCount) || 0,
+      atcCount: Number(msg.atcCount) || 0,
+      totalCount: Number(msg.totalCount) || 0,
+      lastHarvestAt: msg.lastHarvestAt ?? null,
+      generationRate: Number(msg.generationRate) || 0,
+    };
+  }
+
+  if (msg?.requestId && bbPendingRequests.has(msg.requestId)) {
+    const { resolve, timer } = bbPendingRequests.get(msg.requestId);
+    clearTimeout(timer);
+    bbPendingRequests.delete(msg.requestId);
+    resolve(msg);
+  }
+}
+
+function bbSendRequest(type, timeoutMs = BB_REQUEST_TIMEOUT_MS, extra = {}) {
+  return new Promise((resolve) => {
+    if (!bbConnected || !bbWs || bbWs.readyState !== WebSocket.OPEN) {
+      resolve(null);
+      return;
+    }
+    const requestId = `bb-${Date.now()}-${++bbRequestSeq}`;
+    const timer = setTimeout(() => {
+      bbPendingRequests.delete(requestId);
+      resolve(null);
+    }, timeoutMs);
+    bbPendingRequests.set(requestId, { resolve, timer });
+    try {
+      bbWs.send(JSON.stringify({ type, requestId, ...(extra || {}) }));
+    } catch {
+      clearTimeout(timer);
+      bbPendingRequests.delete(requestId);
+      resolve(null);
+    }
+  });
+}
+
+function bbGetBeatbotsStatus() {
+  return {
+    connected: bbConnected,
+    port: bbWsPort,
+    pool: bbPoolStatus,
+  };
+}
+
+async function bbApplyCookieMap(cookies) {
+  const setUrl = 'https://www.target.com';
+  let applied = 0;
+  for (const [name, value] of Object.entries(cookies || {})) {
+    if (!name || value == null) continue;
+    try {
+      await chrome.cookies.set({
+        url: setUrl,
+        name: String(name),
+        value: String(value),
+        domain: '.target.com',
+        path: '/',
+        secure: true,
+      });
+      applied++;
+    } catch { /* skip individual cookie set failures */ }
+  }
+  return applied;
+}
+
+async function bbRefreshPoolStatus() {
+  const msg = await bbSendRequest('pool_status_request');
+  if (msg?.type === 'pool_status') bbHandleWsMessage(msg);
+  return bbPoolStatus;
+}
+
+async function bbApplyAppAtcCookie() {
+  if (!bbConnected) return { ok: false, reason: 'not_connected' };
+  const msg = await bbSendRequest('consume_atc_request');
+  if (!msg || msg.type !== 'consume_atc' || !msg.ok) {
+    return { ok: false, reason: msg?.ok === false ? 'empty' : 'timeout' };
+  }
+  const applied = await bbApplyCookieMap(msg.cookies);
+  if (!applied) return { ok: false, reason: 'apply_failed' };
+  console.log('[TCH] applied BEATBOTS ATC Shape cookie;', applied, 'cookies set');
+  return { ok: true, applied, remaining: bbPoolStatus?.atcCount ?? null };
+}
+
+const BB_CHECKOUT_TIMEOUT_MS = 120000;
+
+async function bbCaptureTargetCookieMap() {
+  const cookies = await tchReadCookiesForRetailer('target');
+  const map = {};
+  for (const c of cookies) {
+    if (c.name && c.value != null) map[c.name] = String(c.value);
+  }
+  return map;
+}
+
+async function bbSendCheckoutRequest(message) {
+  if (!bbConnected) return { ok: false, reason: 'not_connected' };
+  const cookies = await bbCaptureTargetCookieMap();
+  const msg = await bbSendRequest('checkout_request', BB_CHECKOUT_TIMEOUT_MS, {
+    reason: String(message.reason || 'dom_failure'),
+    mode: message.cartId ? 'from_cart' : 'full',
+    cartId: String(message.cartId || ''),
+    tcin: String(message.tcin || ''),
+    qty: Number(message.qty) || 1,
+    pageUrl: String(message.pageUrl || ''),
+    apiKey: String(message.apiKey || ''),
+    profile: message.profile || {},
+    settings: message.settings || {},
+    cookies,
+  });
+  if (!msg) return { ok: false, reason: 'timeout' };
+  if (msg.type !== 'checkout_result') return { ok: false, reason: 'bad_response' };
+  if (!msg.ok) {
+    return {
+      ok: false,
+      reason: 'checkout_failed',
+      error: msg.error,
+      stage: msg.stage,
+      retryable: !!msg.retryable,
+    };
+  }
+  return {
+    ok: true,
+    orderId: msg.orderId,
+    orderTotal: msg.orderTotal,
+    durationMs: msg.durationMs,
+  };
 }
 
 function bbConnect() {
@@ -1676,20 +2163,24 @@ function bbConnect() {
       bbConnected = true;
       console.log('[TCH] BEATBOTS bridge connected on port', bbWsPort);
       if (bbReconnectTimer) { clearTimeout(bbReconnectTimer); bbReconnectTimer = null; }
+      void bbRefreshPoolStatus();
     });
 
     bbWs.addEventListener('message', (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'pong' || msg.type === 'hello') return;
-        console.log('[TCH] BEATBOTS msg:', msg.type);
+        if (msg.type === 'pong') return;
+        bbHandleWsMessage(msg);
+        if (msg.type !== 'hello' && msg.type !== 'pool_status') {
+          console.log('[TCH] BEATBOTS msg:', msg.type);
+        }
       } catch {}
     });
 
     bbWs.addEventListener('close', () => {
       bbConnected = false;
+      bbPoolStatus = null;
       bbWs = null;
-      // Try the +1 port (app retries on port conflict)
       bbScheduleReconnect();
     });
 

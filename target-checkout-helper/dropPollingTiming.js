@@ -1,10 +1,55 @@
 // Shared drop-window polling math. Loaded by:
 // - background.js via importScripts (service worker)
 // - content.js via manifest script order (before content.js)
+// - popup.html for monitor window UX hints
 // Keep Date usage to Date.now() only so Node vm tests can mock time.
+
+function isInDropTensionWindow(monitor) {
+  const raw = monitor?.dropExpectedAt;
+  if (!raw || typeof raw !== 'string') return false;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return false;
+  const now = Date.now();
+  const until = t - now;
+  const afterDrop = now - t;
+  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
+  const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
+  return inPrewindow || inGrace;
+}
+
+/** Hours-long Target window drops — aggressive poll for full configured span. */
+function isInMonitorWindow(monitor) {
+  const startRaw = monitor?.monitorWindowStart;
+  const endRaw = monitor?.monitorWindowEnd;
+  if (!startRaw || !endRaw || typeof startRaw !== 'string' || typeof endRaw !== 'string') {
+    return false;
+  }
+  const s = Date.parse(startRaw);
+  const e = Date.parse(endRaw);
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return false;
+  const now = Date.now();
+  return now >= s && now <= e;
+}
+
+/**
+ * Single gate for 250ms-tier polling (background + content passive watch).
+ * Precedence: point tension → monitor window → aggressive-while-on (no point drop).
+ */
+function isAggressivePoll(monitor) {
+  if (!monitor || typeof monitor !== 'object') return false;
+  if (isInDropTensionWindow(monitor)) return true;
+  if (isInMonitorWindow(monitor)) return true;
+  if (monitor.aggressiveWhileMonitorOn && monitor.active) {
+    const raw = monitor.dropExpectedAt;
+    if (!raw || typeof raw !== 'string' || !String(raw).trim()) return true;
+  }
+  return false;
+}
 
 function computeBackgroundPollSleepMs(monitor) {
   const base = 500;
+  if (isAggressivePoll(monitor)) return 250;
+
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return base;
   const t = Date.parse(raw);
@@ -19,22 +64,10 @@ function computeBackgroundPollSleepMs(monitor) {
   return base;
 }
 
-/** Same 10m pre-drop / 3m post-drop band as aggressive polling — for UX hints only. */
-function isInDropTensionWindow(monitor) {
-  const raw = monitor?.dropExpectedAt;
-  if (!raw || typeof raw !== 'string') return false;
-  const t = Date.parse(raw);
-  if (!Number.isFinite(t)) return false;
-  const now = Date.now();
-  const until = t - now;
-  const afterDrop = now - t;
-  const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
-  const inGrace = until < 0 && afterDrop <= 3 * 60 * 1000;
-  return inPrewindow || inGrace;
-}
-
 function getDropAwarePollSeconds(monitor, baseSec) {
   const b = Math.max(0.25, Number(baseSec) || 1);
+  if (isAggressivePoll(monitor)) return Math.min(b, 1);
+
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return b;
   const t = Date.parse(raw);
@@ -106,4 +139,18 @@ function getHarvestBurstSameUrlDedupMs(monitor) {
   if (inPrewindow || inGrace) return 20 * 1000;
   if (until > 0 && until <= 45 * 60 * 1000) return 45 * 1000;
   return 120 * 1000;
+}
+
+/**
+ * Break exact-interval polling fingerprints during the aggressive (≤250ms) window.
+ * Mean stays at `baseMs`; spread ±15–25% so server-side velocity heuristics see
+ * human-ish variance without slowing the drop window on average.
+ */
+function jitterBackgroundPollSleepMs(baseMs) {
+  const base = Math.max(0, Number(baseMs) || 0);
+  if (base <= 0) return base;
+  if (base > 250) return base;
+  const pct = 0.15 + Math.random() * 0.10;
+  const sign = Math.random() < 0.5 ? -1 : 1;
+  return Math.max(50, Math.round(base * (1 + sign * pct)));
 }
