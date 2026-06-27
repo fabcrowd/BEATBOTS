@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "stock-monitor-phase2",
+  "description": "Phase 2 detection hardening: batch fixtures, plp_search keyword watch, N-of-M navigate gate",
+  "goals": [
+    "Fixture-test batch vs single-TCIN fallback",
+    "Keyword discovery via plp_search_v2",
+    "Debounce ATP/status flicker before navigate"
+  ],
+  "nonGoals": [
+    "Discord webhooks",
+    "Proxy farm",
+    "beatbots-app duplicate poller changes"
+  ],
+  "_tdd": true,
+  "requirements": [
+    {
+      "id": "1",
+      "category": "functional",
+      "priority": "high",
+      "description": "Batch fulfillment fixture tests + tcinsNeedingSingleFallback helper",
+      "acceptance": [
+        "parseBatchFulfillmentMap tested with redsky-batch-summary.json",
+        "Missing TCINs identified for single-TCIN fallback"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "functional",
+      "priority": "high",
+      "description": "plp_search_v2 keyword watch discovers TCINs for monitor poll loop",
+      "acceptance": [
+        "buildPlpSearchUrl + parsePlpSearchTcins in core/redskyFulfillment.js",
+        "Popup keyword field; monitor can start with keyword only",
+        "Keyword results refresh every 5 min"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "critical",
+      "description": "N-of-M stock confirmation before navigate (default 2-of-3) + ATP flicker hold",
+      "acceptance": [
+        "stockNavigateGate.js pure functions tested",
+        "runBackgroundPoll gates navigation until confirmed",
+        "BEATBOTS stock_flip bypasses gate"
+      ],
+      "passes": true
+    }
+  ]
+}

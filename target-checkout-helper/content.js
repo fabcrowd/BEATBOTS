@@ -58,6 +58,7 @@ async function getSettings() {
       'highStockOnly',
       'highStockThreshold',
       'targetMaxPrice',
+      'beatbotsCheckoutOnDomFailure',
     ]);
   }
   return settingsCache;
@@ -71,14 +72,41 @@ let harvestBurstInProgress = false;
 let harvestBurstUrl = '';
 let harvestBurstAt = 0;
 
-async function maybeApplyHarvestedSession(settings) {
+async function maybeApplyHarvestedSession(settings, { skipAfterFreshAtc = false } = {}) {
   try {
+    if (skipAfterFreshAtc) {
+      console.log('[TCH] harvest apply skipped — fresh ATC keeps cart session');
+      return;
+    }
     if (!settings?.harvestConfig?.applyNextBeforeCheckout) return;
     const r = await chrome.runtime.sendMessage({ type: 'HARVEST_APPLY_NEXT' });
     if (r?.ok) console.log('[TCH] applied harvested cookie snapshot; remaining:', r.remaining);
   } catch (e) {
     console.warn('[TCH] harvest apply skipped', e);
   }
+}
+
+/** Prefer BEATBOTS app Shape pool for monitor ATC; fall back to extension harvest pool. */
+async function maybeApplyShapeCookieForAtc(settings, { hypeOnly = false } = {}) {
+  try {
+    const bb = await chrome.runtime.sendMessage({ type: 'BB_APPLY_ATC_COOKIE' });
+    if (bb?.ok) {
+      console.log('[TCH] applied BEATBOTS Shape cookie before ATC; remaining app pool:', bb.remaining);
+      return true;
+    }
+    if (hypeOnly) return false;
+    await maybeApplyHarvestedSession(settings);
+    return !!settings?.harvestConfig?.applyNextBeforeCheckout;
+  } catch (e) {
+    console.warn('[TCH] Shape cookie apply skipped', e);
+    return false;
+  }
+}
+
+function hasShapePoolForHype(poolStatus) {
+  const extCount = Number(poolStatus?.count) || 0;
+  const appAtc = Number(poolStatus?.beatbots?.pool?.atcCount) || 0;
+  return extCount > 0 || appAtc > 0;
 }
 
 /** Refract-style: on product/login while harvesting is on, snapshot after page settles.
@@ -185,6 +213,10 @@ async function handleSignInPage(settings, opts = {}) {
     autoSignInInFlight = true;
   }
   try {
+  if (getPageType() === 'checkout' && hasCheckoutAuthError()) {
+    console.warn('[TCH] auto sign-in: Target error banner present — skip');
+    return;
+  }
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
   const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
@@ -236,9 +268,26 @@ async function handleSignInPage(settings, opts = {}) {
 
   // Step 1: email field only visible — Target's two-step login flow.
   if (emailInput && !passInput) {
-    if (getPageType() === 'checkout' && (isCheckoutSignedInConfirm() || looksLoggedInOnTarget())) {
-      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      if (await tryCheckoutSignedInContinue()) return;
+    if (getPageType() === 'checkout') {
+      const signedInConfirm = isCheckoutSignedInConfirm();
+      const treatLoggedIn = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue
+        ? TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue({
+          signedInConfirm,
+          looksLoggedIn: looksLoggedInOnTarget(),
+          passwordOnlyReauth: isCheckoutPasswordOnlyReauth(),
+        })
+        : signedInConfirm || looksLoggedInOnTarget();
+      if (treatLoggedIn) {
+        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+        if (await tryCheckoutSignedInContinue()) return;
+        const stopAfterContinue = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldReturnAfterFailedSignedInContinue
+          ? TCH_SIGNIN_STEP.shouldReturnAfterFailedSignedInContinue({ onCheckout: true, signedInConfirm })
+          : signedInConfirm;
+        if (stopAfterContinue) {
+          console.log('[TCH] auto sign-in: signed-in confirm — waiting (no email re-entry)');
+          return;
+        }
+      }
     }
     console.log('[TCH] auto sign-in: step 1 — filling email via CDP');
     showToast('Auto sign-in: entering email…', 'persistent');
@@ -440,10 +489,18 @@ function fillSelect(select, value) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
-// Click via the debugger (human-like mouse movement + press/release).
-// Falls back to .click() if the background rejects (e.g. debugger not attached).
-async function debuggerClick(el) {
+function detachDebugger() {
+  chrome.runtime.sendMessage({ type: 'DEBUGGER_DETACH' }).catch(() => {});
+}
+
+// Click via CDP for high-risk actions (ATC, sign-in, place order).
+// Low-risk buttons (Continue, decline coverage) use native .click() first.
+async function debuggerClick(el, { preferNative = false } = {}) {
   if (!el) return;
+  if (preferNative) {
+    el.click();
+    return;
+  }
   try {
     const r = el.getBoundingClientRect();
     const x = Math.round(r.left + r.width / 2);
@@ -509,6 +566,71 @@ function isCheckoutSignedInConfirm() {
   return false;
 }
 
+function hasCheckoutAuthError() {
+  const root = getCheckoutAuthRoot() || document;
+  const tx = (root.innerText || document.body?.innerText || '').toLowerCase();
+  return tx.includes('something went wrong') || tx.includes('try again later');
+}
+
+function isCheckoutCreateAccountModal() {
+  if (getPageType() !== 'checkout') return false;
+  const root = getCheckoutAuthRoot() || document;
+  const tx = (root.innerText || document.body?.innerText || '').slice(0, 8000).toLowerCase();
+  return tx.includes('sign in or create account') || tx.includes('create account');
+}
+
+function readAuthWarmupAtMs() {
+  try {
+    return parseInt(sessionStorage.getItem(AUTH_WARMUP_AT_KEY) || '0', 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function markAuthWarmup() {
+  try { sessionStorage.setItem(AUTH_WARMUP_AT_KEY, String(Date.now())); } catch {}
+}
+
+function isAuthWarmupRecent() {
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.isAuthWarmupRecent) {
+    return TCH_SIGNIN_STEP.isAuthWarmupRecent(readAuthWarmupAtMs());
+  }
+  const at = readAuthWarmupAtMs();
+  return at > 0 && Date.now() - at < 30 * 60 * 1000;
+}
+
+function shouldSkipCheckoutEmailAutomation() {
+  if (typeof TCH_SIGNIN_STEP === 'undefined' || !TCH_SIGNIN_STEP.shouldSkipCheckoutEmailFlow) return false;
+  return TCH_SIGNIN_STEP.shouldSkipCheckoutEmailFlow({
+    looksLoggedIn: looksLoggedInOnTarget(),
+    warmupAtMs: readAuthWarmupAtMs(),
+    checkoutAuthError: hasCheckoutAuthError(),
+    isCreateAccountModal: isCheckoutCreateAccountModal(),
+    isSignedInConfirm: isCheckoutSignedInConfirm(),
+  });
+}
+
+/** After successful /login, visit /account once to warm session cookies before checkout. */
+async function maybeCompleteAuthWarmup(settings) {
+  if (!looksLoggedInOnTarget()) return;
+  markAuthWarmup();
+  let navDone = false;
+  try { navDone = sessionStorage.getItem(AUTH_WARMUP_NAV_KEY) === '1'; } catch {}
+  const path = location.pathname;
+  if (!navDone && !/^\/account/i.test(path)) {
+    try { sessionStorage.setItem(AUTH_WARMUP_NAV_KEY, '1'); } catch {}
+    console.log('[TCH] auth warmup: navigating to /account');
+    showToast('Session warmed — checkout should skip sign-in', 'persistent');
+    await sleep(400);
+    window.location.href = 'https://www.target.com/account';
+    return;
+  }
+  if (/^\/account/i.test(path)) {
+    console.log('[TCH] auth warmup: account page ready');
+    showToast('Signed in — ready for checkout', 'success');
+  }
+}
+
 async function tryCheckoutSignedInContinue() {
   const root = getCheckoutAuthRoot();
   const scope = root || document;
@@ -524,7 +646,10 @@ async function tryCheckoutSignedInContinue() {
         ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
         : (b.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
       if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesGuestCheckoutText?.(raw)) return false;
-      return raw === needle || raw.includes(needle);
+      const matches = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesSignedInContinueNeedle
+        ? TCH_SIGNIN_STEP.matchesSignedInContinueNeedle(raw, needle)
+        : (raw === needle || raw.includes(needle));
+      return matches;
     });
     if (el) {
       console.log('[TCH] checkout auth: clicking signed-in continue —', needle);
@@ -734,9 +859,13 @@ const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
 const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
 const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; cleared on checkout load
+const CHECKOUT_FLOW_ACTIVE_KEY = 'tch:checkoutFlowActive';
+const CHECKOUT_INIT_ID_KEY = 'tch:checkoutInitId';
+const CART_HV_RELOAD_KEY = 'tch:cartHighVolumeReloads';
 let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
+let lastCheckoutRetryReason = '';
 let stockWatchTimer = null;
 let stockWatchActive = false;
 let stockWatchPolls = 0;
@@ -799,6 +928,7 @@ function clearCheckoutRetryState() {
   try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
   try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
   try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+  try { sessionStorage.removeItem(CHECKOUT_FLOW_ACTIVE_KEY); } catch {}
   try { sessionStorage.removeItem(EXTRA_ATC_STATE_KEY); } catch {}
 }
 
@@ -808,6 +938,266 @@ function markCartReady() {
 
 function isCartReady() {
   try { return sessionStorage.getItem(CART_READY_KEY) === '1'; } catch { return false; }
+}
+
+function markCheckoutFlowActive() {
+  try { sessionStorage.setItem(CHECKOUT_FLOW_ACTIVE_KEY, String(Date.now())); } catch {}
+}
+
+function isCheckoutFlowActive() {
+  try {
+    const ts = parseInt(sessionStorage.getItem(CHECKOUT_FLOW_ACTIVE_KEY) || '0', 10);
+    return ts > 0 && Date.now() - ts < 30 * 60 * 1000;
+  } catch { return false; }
+}
+
+function getPageBodyText() {
+  return (document.body?.innerText || '').toLowerCase();
+}
+
+function hasHighVolumeBlock() {
+  const R = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined' ? TCH_CHECKOUT_RELIABILITY : null;
+  if (R) return R.hasHighVolumeBlock(getPageBodyText());
+  const text = getPageBodyText();
+  return ['high volume', 'something went wrong', 'try again later'].some((n) => text.includes(n));
+}
+
+function isCartEmptyOnPage() {
+  const R = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined' ? TCH_CHECKOUT_RELIABILITY : null;
+  const text = getPageBodyText();
+  if (R && R.isCartEmptyText(text)) return true;
+  if (getPageType() !== 'cart') return false;
+  const lineItems = document.querySelectorAll(
+    '[data-test="cartItem"], [data-test="cart-item"], [data-test="cartLineItem"]'
+  );
+  const hasProductLink = document.querySelectorAll('a[href*="/p/"]').length > 0;
+  const hasCheckoutBtn = !!document.querySelector(SEL.cartCheckout);
+  if (lineItems.length > 0 || hasProductLink) return false;
+  if (hasHighVolumeBlock()) return false;
+  if (/empty/i.test(text)) return true;
+  if (!hasCheckoutBtn && text.length < 800) return true;
+  return false;
+}
+
+function isProductInCartOnPage() {
+  return !!(
+    Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find((el) => /\bin cart\b/i.test(el.textContent))
+    || document.querySelector('[data-test="cartButton"]')
+  );
+}
+
+async function probeCartHasItems(timeoutMs = 4000) {
+  const p = await probeTargetCart(timeoutMs);
+  if (!p.ok) return null;
+  return p.hasItems;
+}
+
+async function getTargetWebApiKey() {
+  try {
+    const cfg = window.__CONFIG__?.services || {};
+    const fromPage = cfg.auth?.apiKey || cfg.apiPlatform?.apiKey || '';
+    if (fromPage) return fromPage;
+  } catch { /* page config unavailable */ }
+  try {
+    const { bgApiKey } = await chrome.storage.local.get('bgApiKey');
+    return String(bgApiKey || '');
+  } catch { return ''; }
+}
+
+function parseCartProbePayload(data) {
+  if (typeof TCH_CHECKOUT_RELIABILITY !== 'undefined' && TCH_CHECKOUT_RELIABILITY.parseCartProbePayload) {
+    return TCH_CHECKOUT_RELIABILITY.parseCartProbePayload(data);
+  }
+  const cart = data?.cart || data || {};
+  const items = cart?.cart_items || data?.cart_items || [];
+  const cartId = cart?.cart_id || data?.cart_id || '';
+  const itemCount = Array.isArray(items) ? items.length : 0;
+  return { hasItems: itemCount > 0, cartId: String(cartId || ''), itemCount };
+}
+
+/** GET cart API — returns { ok, hasItems, cartId, itemCount }. */
+async function probeTargetCart(timeoutMs = 4000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const apiKey = await getTargetWebApiKey();
+    const headers = { 'Cache-Control': 'no-cache', accept: 'application/json' };
+    if (apiKey) headers['x-api-key'] = apiKey;
+    const res = await fetch('https://api.target.com/web_checkouts/v1/cart', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.status === 204 || res.status === 404) {
+      return { ok: true, hasItems: false, cartId: '', itemCount: 0 };
+    }
+    if (!res.ok) return { ok: false, hasItems: false, cartId: '', itemCount: 0 };
+    const data = await res.json();
+    return { ok: true, ...parseCartProbePayload(data) };
+  } catch {
+    return { ok: false, hasItems: false, cartId: '', itemCount: 0 };
+  }
+}
+
+/** POST /checkout with cart_id — server-side init before DOM navigation (Stellar-style warm init). */
+async function warmInitTargetCheckout(cartId) {
+  if (!cartId) return { ok: false, reason: 'no_cart_id' };
+  try {
+    const apiKey = await getTargetWebApiKey();
+    const headers = {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'x-application-name': 'web',
+    };
+    if (apiKey) headers['x-api-key'] = apiKey;
+    const res = await fetch('https://api.target.com/web_checkouts/v1/checkout', {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      body: JSON.stringify({ cart_id: cartId }),
+    });
+    if (!res.ok) {
+      console.warn('[TCH] warm init checkout HTTP', res.status);
+      return { ok: false, status: res.status };
+    }
+    const data = await res.json();
+    const checkoutId = data?.checkout?.checkout_id || data?.checkout_id || '';
+    if (checkoutId) {
+      try { sessionStorage.setItem(CHECKOUT_INIT_ID_KEY, checkoutId); } catch {}
+      console.log('[TCH] warm init checkout ok:', checkoutId);
+    }
+    return { ok: true, checkoutId };
+  } catch (e) {
+    return { ok: false, reason: String(e?.message || e) };
+  }
+}
+
+async function pollCartApiUntilReady(maxAttempts = 6, intervalMs = 2000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const cart = await probeTargetCart(3000);
+    if (cart.ok) return cart;
+    await sleep(intervalMs);
+  }
+  return { ok: false, hasItems: false, cartId: '', itemCount: 0 };
+}
+
+/** API-confirmed bypass: warm-init checkout then navigate (avoids cart SPA reload loop). */
+async function goToCheckoutViaApiBypass(settings, { skipHarvestAfterAtc = false, mark = 'cart_to_checkout' } = {}) {
+  const cart = await probeTargetCart(5000);
+  if (!cart.ok || !cart.hasItems) return false;
+  if (cart.cartId) await warmInitTargetCheckout(cart.cartId);
+  markCartReady();
+  markCheckoutFlowActive();
+  setNavigationMark(mark);
+  await maybeApplyHarvestedSession(settings, { skipAfterFreshAtc: skipHarvestAfterAtc });
+  showToast('Cart API confirmed → checkout (no reload)…', 'persistent');
+  window.location.href = 'https://www.target.com/checkout';
+  return true;
+}
+
+/** Last resort when cart DOM is dead but API confirms items — delegates to beatbots-app. */
+async function maybeBeatbotsCheckoutOnDomFailure(settings, { reason, cart }) {
+  if (!settings?.beatbotsCheckoutOnDomFailure) return false;
+  if (!cart?.ok || !cart?.hasItems) return false;
+  const tcin = extractTcinFromUrl(getRememberedProductUrl() || location.href);
+  const ship = settings.shipping || {};
+  const pay = settings.payment || {};
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'BB_CHECKOUT_REQUEST',
+      reason,
+      cartId: cart.cartId || '',
+      tcin: tcin || '',
+      qty: 1,
+      pageUrl: location.href,
+      apiKey: document.documentElement.dataset.tchKey || '',
+      settings: {
+        autoPlaceOrder: !!settings.autoPlaceOrder,
+        useGuestCheckout: false,
+        addExtraProduct: !!settings.addExtraProduct,
+        extraProductTcin: settings.extraProductTcin || '',
+      },
+      profile: {
+        email: settings.targetEmail || ship.email || '',
+        firstName: ship.firstName || '',
+        lastName: ship.lastName || '',
+        address1: ship.address1 || '',
+        address2: ship.address2 || '',
+        city: ship.city || '',
+        state: ship.state || '',
+        zip: ship.zip || '',
+        phone: ship.phone || '',
+        cardNumber: pay.cardNumber || '',
+        expMonth: pay.expMonth || '',
+        expYear: pay.expYear || '',
+        cvv: pay.cvv || '',
+        billingZip: pay.billingZip || ship.zip || '',
+        jigIndex: settings.jigIndex ?? 0,
+      },
+    });
+    if (r?.ok) {
+      const msg = r.orderId
+        ? `BeatBots order placed: ${r.orderId}`
+        : 'BeatBots checkout reached review (check app)';
+      showToast(msg, r.orderId ? 'success' : 'persistent');
+      return true;
+    }
+    console.warn('[TCH] BeatBots checkout fallback:', r?.reason || r?.error);
+  } catch (e) {
+    console.warn('[TCH] BeatBots checkout fallback failed', e);
+  }
+  return false;
+}
+
+async function waitForCartConfirmation(timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (isProductInCartOnPage()) return true;
+    const modal = document.querySelector(SEL.viewCart)
+      || Array.from(document.querySelectorAll('button, a')).find((el) =>
+        /view cart|item added|added to cart/i.test(el.textContent || ''));
+    if (modal) return true;
+    const api = await probeCartHasItems(2500);
+    if (api === true) return true;
+    if (api === false) return false;
+    await sleep(250);
+  }
+  const finalApi = await probeCartHasItems(3000);
+  if (finalApi === true) return true;
+  if (finalApi === false) return false;
+  return isProductInCartOnPage();
+}
+
+async function navigateToCheckout(settings, { skipHarvestAfterAtc = false, requireCartConfirm = false } = {}) {
+  if (requireCartConfirm) {
+    const confirmed = await waitForCartConfirmation(6000);
+    if (!confirmed) {
+      console.warn('[TCH] cart not confirmed before checkout navigation');
+      showToast('Cart not confirmed — retrying add-to-cart…', 'persistent');
+      try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+      chrome.runtime.sendMessage({
+        type: 'TARGET_NAV_FAILED',
+        url: location.href,
+        reason: 'Cart not confirmed before checkout',
+      }).catch(() => {});
+      await scheduleCheckoutRetry(settings, 'Cart not confirmed before checkout');
+      return false;
+    }
+  }
+  markCartReady();
+  markCheckoutFlowActive();
+  setNavigationMark('product_to_checkout');
+  await maybeApplyHarvestedSession(settings, { skipAfterFreshAtc: skipHarvestAfterAtc });
+  const cart = await probeTargetCart(4000);
+  if (cart.ok && cart.hasItems && cart.cartId) {
+    await warmInitTargetCheckout(cart.cartId);
+  }
+  window.location.href = 'https://www.target.com/checkout';
+  return true;
 }
 
 function rememberProductUrl(url = location.href) {
@@ -888,9 +1278,17 @@ function performRetryNavigation() {
     return;
   }
 
-  // If we already added to cart (ATC succeeded), go straight to cart → checkout
-  // to avoid re-landing on the product page where the button shows "1 in cart".
+  // If we already added to cart (ATC succeeded), prefer product re-ATC when cart was empty.
   if (isCartReady()) {
+    const remembered = getRememberedProductUrl();
+    const retryProduct = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined'
+      ? TCH_CHECKOUT_RELIABILITY.shouldRetryFromProductAfterCartFailure(lastCheckoutRetryReason)
+      : /cart empty|not confirmed/i.test(lastCheckoutRetryReason);
+    if (retryProduct && remembered) {
+      markRetryNavigation(remembered);
+      window.location.href = remembered;
+      return;
+    }
     markRetryNavigation('https://www.target.com/cart');
     window.location.href = 'https://www.target.com/cart';
     return;
@@ -909,6 +1307,7 @@ function performRetryNavigation() {
 
 async function scheduleCheckoutRetry(settings, reason, details = {}) {
   if (!runtimeEnabled) return false;
+  lastCheckoutRetryReason = String(reason || '');
   // Do not schedule reload / cart redirect while on checkout — user must sign in or fix the step locally.
   if (getPageType() === 'checkout') {
     console.warn('[TCH] navigation retry suppressed on checkout:', reason);
@@ -1203,7 +1602,7 @@ function findContinueButton(enabledOnly = false) {
 
 async function clickContinue() {
   const btn = findContinueButton(true);
-  if (btn) { await debuggerClick(btn); return true; }
+  if (btn) { await debuggerClick(btn, { preferNative: true }); return true; }
   return false;
 }
 
@@ -1211,7 +1610,7 @@ async function waitAndClickContinue(timeout = 5000) {
   if (await clickContinue()) return true;
   try {
     const btn = await waitForEnabled(() => findContinueButton(true), timeout);
-    await debuggerClick(btn);
+    await debuggerClick(btn, { preferNative: true });
     return true;
   } catch {
     return false;
@@ -1253,6 +1652,7 @@ function markCheckoutStart(mode) {
   try {
     sessionStorage.setItem(CHECKOUT_START_KEY, String(Date.now()));
     sessionStorage.setItem(CHECKOUT_MODE_KEY, mode);
+    markCheckoutFlowActive();
   } catch {}
 }
 
@@ -1333,11 +1733,8 @@ async function handleProductPage(settings) {
   ) || document.querySelector('[data-test="cartButton"]');
   if (inCartEl) {
     console.log('[TCH] item already in cart — navigating to checkout');
-    markCartReady();
     showToast('Item in cart → checkout…');
-    setNavigationMark('product_to_checkout');
-    await maybeApplyHarvestedSession(settings);
-    window.location.href = 'https://www.target.com/checkout';
+    await navigateToCheckout(settings);
     return;
   }
 
@@ -1373,11 +1770,8 @@ async function handleProductPage(settings) {
     // (disabled because item is already in cart, not because it's OOS).
     if (/\bin cart\b/i.test(addBtn.textContent)) {
       console.log('[TCH] ATC button shows "in cart" — navigating to checkout');
-      markCartReady();
       showToast('Item in cart → checkout…');
-      setNavigationMark('product_to_checkout');
-      await maybeApplyHarvestedSession(settings);
-      window.location.href = 'https://www.target.com/checkout';
+      await navigateToCheckout(settings);
       return;
     }
     const altEnabled = findFirstEnabledAtcButton();
@@ -1411,6 +1805,7 @@ async function handleProductPage(settings) {
   await debuggerClick(addBtn);
 
   await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
+  detachDebugger();
 
   if (settings.useSavedPayment) {
     // For preorder/ATC: wait for the "View Cart & Check Out" modal button, which routes
@@ -1421,16 +1816,14 @@ async function handleProductPage(settings) {
     setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
     try {
       const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
-      markCartReady(); // modal confirmed — item is in cart
+      markCartReady();
       setNavigationMark('product_to_checkout');
       await debuggerClick(viewCartBtn);
+      detachDebugger();
       return;
     } catch {
       console.log('[TCH] viewCart modal not found; navigating to checkout directly');
-      markCartReady(); // optimistic — modal may not appear even on a successful ATC
-      setNavigationMark('product_to_checkout');
-      await maybeApplyHarvestedSession(settings);
-      window.location.href = 'https://www.target.com/checkout';
+      await navigateToCheckout(settings, { skipHarvestAfterAtc: true, requireCartConfirm: true });
       return;
     }
   }
@@ -1451,28 +1844,107 @@ async function handleProductPage(settings) {
     }
   }
 
-  markCartReady(); // about to navigate — item should be in cart
   showToast('ATC → checkout…');
-  setNavigationMark('product_to_checkout');
-  await maybeApplyHarvestedSession(settings);
-  window.location.href = 'https://www.target.com/checkout';
+  await navigateToCheckout(settings, { skipHarvestAfterAtc: true, requireCartConfirm: true });
 }
 
 async function handleCartPage(settings) {
   console.log('[TCH] handleCartPage');
+  markCheckoutFlowActive();
+
+  if (hasHighVolumeBlock()) {
+    showToast('Cart: high volume — polling cart API (skip reload if possible)…', 'persistent');
+    await reportRetryEvent({ status: 'high_volume', page: 'cart', url: location.href, ts: Date.now() });
+    const cart = await pollCartApiUntilReady(6, 2000);
+    if (cart.ok && cart.hasItems) {
+      try { sessionStorage.removeItem(CART_HV_RELOAD_KEY); } catch {}
+      if (await goToCheckoutViaApiBypass(settings)) return;
+      if (await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'cart_dom_failure', cart })) return;
+    }
+    if (cart.ok && !cart.hasItems) {
+      showToast('Cart API empty — re-adding item…', 'persistent');
+      try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+      await scheduleCheckoutRetry(settings, 'Cart empty on cart page');
+      return;
+    }
+    let reloads = 0;
+    try { reloads = parseInt(sessionStorage.getItem(CART_HV_RELOAD_KEY) || '0', 10); } catch {}
+    const maxReloads = 3;
+    if (reloads < maxReloads) {
+      const delay = typeof TCH_CHECKOUT_RELIABILITY !== 'undefined'
+        ? TCH_CHECKOUT_RELIABILITY.cartApiReloadDelayMs(reloads)
+        : 4000 + reloads * 4000;
+      try { sessionStorage.setItem(CART_HV_RELOAD_KEY, String(reloads + 1)); } catch {}
+      showToast(`Cart blocked — reload in ${Math.round(delay / 1000)}s (fallback ${reloads + 1}/${maxReloads})…`, 'persistent');
+      setTimeout(() => { if (runtimeEnabled) location.reload(); }, delay);
+      return;
+    }
+    showToast('Cart still blocked — trying BeatBots API checkout or fresh tab…', 'persistent');
+    const lastCart = await probeTargetCart(5000);
+    if (await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'high_volume_exhausted', cart: lastCart })) return;
+    chrome.runtime.sendMessage({ type: 'OPEN_FRESH_CHECKOUT_TAB' }).catch(() => {});
+    return;
+  }
+
+  await sleep(400);
+
+  const earlyCart = await probeTargetCart(4000);
+  if (earlyCart.ok && earlyCart.hasItems) {
+    const checkoutBtn = document.querySelector(SEL.cartCheckout);
+    const btnReady = checkoutBtn && !checkoutBtn.disabled;
+    if (!btnReady) {
+      console.log('[TCH] cart API has items — bypassing slow cart DOM');
+      if (await goToCheckoutViaApiBypass(settings)) return;
+    }
+  }
+
+  if (isCartEmptyOnPage()) {
+    const apiEmpty = await probeCartHasItems();
+    if (apiEmpty === false) {
+      console.warn('[TCH] cart page empty — returning to product for re-ATC');
+      showToast('Cart empty (drop load?) — re-adding item…', 'persistent');
+      try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+      await scheduleCheckoutRetry(settings, 'Cart empty on cart page');
+      return;
+    }
+  }
+
+  const hydrateMs = isCheckoutFlowActive() ? 12000 : 8000;
   const stopCartCheckout = startTiming('cart_wait_for_checkout_button');
   try {
     const btn = await waitForAny([
       { sel: SEL.cartCheckout }, { text: 'check out' }, { text: 'sign in to check out' },
-    ], 6000);
+    ], hydrateMs);
+    if (isCartEmptyOnPage()) {
+      stopCartCheckout('empty_cart');
+      await scheduleCheckoutRetry(settings, 'Cart empty — checkout button visible but no items');
+      return;
+    }
     stopCartCheckout('clicked');
     setNavigationMark('cart_to_checkout');
+    await maybeApplyHarvestedSession(settings);
     await debuggerClick(btn);
   } catch {
-    stopCartCheckout('fallback_redirect');
-    setNavigationMark('cart_to_checkout');
-    await maybeApplyHarvestedSession(settings);
-    window.location.href = 'https://www.target.com/checkout';
+    const cart = await probeTargetCart(5000);
+    if (cart.ok && !cart.hasItems) {
+      stopCartCheckout('empty_timeout');
+      await scheduleCheckoutRetry(settings, 'Cart empty — checkout button timeout');
+      return;
+    }
+    if (hasHighVolumeBlock()) {
+      stopCartCheckout('high_volume');
+      if (cart.ok && cart.hasItems && await goToCheckoutViaApiBypass(settings)) return;
+      showToast('Cart slow — trying API bypass…', 'persistent');
+      if (await goToCheckoutViaApiBypass(settings)) return;
+      if (cart.ok && cart.hasItems && await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'cart_dom_failure', cart })) return;
+    }
+    if ((cart.ok && cart.hasItems) || isProductInCartOnPage()) {
+      stopCartCheckout('api_bypass_redirect');
+      if (await goToCheckoutViaApiBypass(settings)) return;
+      if (cart.ok && cart.hasItems && await maybeBeatbotsCheckoutOnDomFailure(settings, { reason: 'checkout_button_timeout', cart })) return;
+    }
+    stopCartCheckout('no_cart');
+    await scheduleCheckoutRetry(settings, 'Cart checkout button not found');
   }
 }
 
@@ -1498,6 +1970,7 @@ function markCheckoutFlow(step) {
 }
 
 async function handleCheckoutPage(settings) {
+  markCheckoutFlowActive();
   markCheckoutFlow('page_ready');
   // If a monitor Buy It Now click was pending confirmation, fire ATC_SUCCESS now that
   // checkout has loaded (the only reliable signal we have after cross-page navigation).
@@ -1508,6 +1981,19 @@ async function handleCheckoutPage(settings) {
       chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: binUrl }).catch(() => {});
     }
   } catch {}
+
+  if (hasHighVolumeBlock()) {
+    console.warn('[TCH] checkout high-volume block detected');
+    const cart = await probeTargetCart(4000);
+    if (cart.ok && cart.hasItems && cart.cartId) {
+      await warmInitTargetCheckout(cart.cartId);
+      showToast('Checkout: high volume — API warm-init done; stay on this page.', 'persistent');
+    } else {
+      showToast('Checkout: Target high volume — wait on this page; do not reload.', 'persistent');
+    }
+    await reportRetryEvent({ status: 'high_volume', page: 'checkout', url: location.href, ts: Date.now() });
+  }
+
   const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
   if (step === 'shipping')    return handleShippingStep(settings);
@@ -1522,19 +2008,48 @@ async function handleCheckoutPage(settings) {
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
 const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
 const SIGNIN_EMAIL_STEP_KEY = 'tch:signInEmailStepDone';
+const AUTH_WARMUP_AT_KEY = 'tch:authWarmupAt';
+const AUTH_WARMUP_NAV_KEY = 'tch:authWarmupNavDone';
 const PENDING_RETRY_INTERVAL_MS = 3000;
 const PENDING_MAX_RETRIES = 15;
 
 async function runCheckoutPendingActions(settings, step, options = {}) {
   console.log('[TCH] checkout pending:', step, '— waiting for shipping/payment (no reload)');
+  if (getPageType() === 'checkout' && hasCheckoutAuthError()) {
+    console.warn('[TCH] checkout auth: Target error banner — pausing auto sign-in');
+    if (!options.silent) {
+      showToast('Target sign-in error — wait and sign in manually or retry in a minute.', 'persistent');
+    }
+    return;
+  }
+  const preferContinue = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldPreferSignedInContinue
+    ? TCH_SIGNIN_STEP.shouldPreferSignedInContinue({
+      looksLoggedIn: looksLoggedInOnTarget(),
+      warmupAtMs: readAuthWarmupAtMs(),
+      isSignedInConfirm: isCheckoutSignedInConfirm(),
+    })
+    : looksLoggedInOnTarget() || isCheckoutSignedInConfirm();
+  if (preferContinue) {
+    try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+    if (await tryCheckoutSignedInContinue()) {
+      showToast('Checkout: continuing with signed-in account…', 'persistent');
+      await sleep(800);
+      return;
+    }
+  }
   const hasCredentials = !!(settings.autoSignIn && settings.targetEmail && settings.targetPassword);
   let alreadyTried = false;
   try {
     alreadyTried = sessionStorage.getItem(GUEST_CHECKOUT_ATTEMPT_KEY) === '1';
   } catch {}
   const attemptGuest = typeof TCH_SIGNIN_STEP !== 'undefined'
-    ? TCH_SIGNIN_STEP.shouldAttemptGuest({ autoSignIn: !!settings.autoSignIn, hasCredentials, alreadyTried })
-    : !hasCredentials && !alreadyTried;
+    ? TCH_SIGNIN_STEP.shouldAttemptGuest({
+      autoSignIn: !!settings.autoSignIn,
+      hasCredentials,
+      alreadyTried,
+      useSavedPayment: !!settings.useSavedPayment,
+    })
+    : !hasCredentials && !alreadyTried && !settings.useSavedPayment;
   if (attemptGuest && tryGuestCheckoutClick()) {
     try { sessionStorage.setItem(GUEST_CHECKOUT_ATTEMPT_KEY, '1'); } catch {}
     showToast('Guest checkout…');
@@ -1546,11 +2061,23 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
-    if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
+    const signedInConfirm = isCheckoutSignedInConfirm();
+    const treatLoggedIn = typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue
+      ? TCH_SIGNIN_STEP.shouldTreatAsLoggedInForCheckoutContinue({
+        signedInConfirm,
+        looksLoggedIn: looksLoggedInOnTarget(),
+        passwordOnlyReauth: isCheckoutPasswordOnlyReauth(),
+      })
+      : signedInConfirm || looksLoggedInOnTarget();
+    if (treatLoggedIn) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) {
         showToast('Checkout: continuing with signed-in account…', 'persistent');
         await sleep(800);
+        return;
+      }
+      if (signedInConfirm || isCheckoutPasswordOnlyReauth()) {
+        console.log('[TCH] auto sign-in: signed-in confirm or password re-auth — waiting');
         return;
       }
       console.log('[TCH] auto sign-in: session looks logged in — waiting for checkout to advance');
@@ -1589,7 +2116,8 @@ function watchForCheckoutStep(settings, options = {}) {
 
   let handled = false;
   let pendingRetryCount = 0;
-  let lastPendingRetryMs = 0;
+  let lastPendingRetryMs = Date.now();
+  let pendingEscalated = false;
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
@@ -1610,6 +2138,17 @@ function watchForCheckoutStep(settings, options = {}) {
         lastPendingRetryMs = Date.now();
         pendingRetryCount++;
         await runCheckoutPendingActions(settings, step, { silent: pendingRetryCount > 1 });
+      } else if (pendingRetryCount >= PENDING_MAX_RETRIES && !pendingEscalated) {
+        pendingEscalated = true;
+        showToast(
+          'Checkout stuck — opening fresh checkout tab; finish sign-in there if needed.',
+          'persistent'
+        );
+        await maybeApplyShapeCookieForAtc(settings, { hypeOnly: false });
+        await tryCheckoutSignedInContinue();
+        const cart = await probeTargetCart(4000);
+        if (cart.ok && cart.hasItems && cart.cartId) await warmInitTargetCheckout(cart.cartId);
+        chrome.runtime.sendMessage({ type: 'OPEN_FRESH_CHECKOUT_TAB' }).catch(() => {});
       }
       return;
     }
@@ -1980,18 +2519,20 @@ function extractTcinFromUrl(url) {
   }
 }
 
-function buildFulfillmentApiUrl(productUrl) {
+function buildFulfillmentApiUrl(productUrl, opts = {}) {
   const tcin = extractTcinFromUrl(productUrl);
   if (!tcin) return null;
 
   const cfg = window.__CONFIG__?.services || {};
   const baseUrl = (cfg.redsky?.baseUrl || 'https://redsky.target.com').replace(/\/$/, '');
-  const endpoint = (cfg.redsky?.apis?.redskyAggregations?.endpointPaths?.productFulfillment
-    || 'redsky_aggregations/v1/web/product_fulfillment_v1').replace(/^\/+/, '');
   const apiKey = cfg.auth?.apiKey || cfg.apiPlatform?.apiKey || '';
   if (!apiKey) return null;
 
-  return `${baseUrl}/${endpoint}?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
+  if (typeof buildRedskyFulfillmentUrl === 'function') {
+    return buildRedskyFulfillmentUrl(tcin, { apiKey, redskyBase: baseUrl, zip: opts.zip });
+  }
+
+  return `${baseUrl}/redsky_aggregations/v1/web/product_fulfillment_v1?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
 }
 
 /** Same logic as background extractTargetRetailPrice — fulfillment-only responses often omit this. */
@@ -2134,7 +2675,8 @@ function parseFulfillmentStockStatus(payload) {
 }
 
 async function checkStockFromFulfillmentApi(url, timeoutMs = 3000, stockOpts = null) {
-  const fulfillmentUrl = buildFulfillmentApiUrl(url);
+  const settings = await getSettings();
+  const fulfillmentUrl = buildFulfillmentApiUrl(url, { zip: settings?.shipping?.zip });
   if (!fulfillmentUrl) return null;
 
   const controller = new AbortController();
@@ -2265,12 +2807,13 @@ async function handleMonitoredATC(monitor, product) {
 
   if (currentCount >= product.qty) return;
 
-  // Hype mode: require at least one cookie snapshot in pool before ATC.
+  // Hype mode: require at least one cookie snapshot in extension or BEATBOTS app pool before ATC.
   if (product.hypeMode) {
     try {
       const poolStatus = await chrome.runtime.sendMessage({ type: 'HARVEST_GET_STATUS' });
-      if (!poolStatus?.count) {
-        showToast('Hype mode: no cookie snapshots in pool — waiting for harvest…', 'persistent');
+      if (!hasShapePoolForHype(poolStatus)) {
+        const bbHint = poolStatus?.beatbots?.connected ? '' : ' (start beatbots-app Shape harvester)';
+        showToast(`Hype mode: no Shape cookies in pool — waiting for harvest…${bbHint}`, 'persistent');
         return;
       }
     } catch { /* no-op if SW is inactive */ }
@@ -2329,6 +2872,7 @@ async function handleMonitoredATC(monitor, product) {
       showToast(`Price above max ($${Number(settings.targetMaxPrice).toFixed(2)}) — waiting…`, 'persistent');
     } else {
       showToast(`Monitor: ATC (${currentCount + 1}/${product.qty})…`);
+      await maybeApplyShapeCookieForAtc(settings, { hypeOnly: !!product.hypeMode });
       await debuggerClick(addBtn);
       await captureAtcSnapshot(); // highest-value harvest moment: item is now in cart
 
@@ -2336,36 +2880,56 @@ async function handleMonitoredATC(monitor, product) {
       setTimeout(() => { const c = document.querySelector(SEL.declineCoverage); if (c) c.click(); }, 200);
 
       if (settings.useSavedPayment) {
-        // With saved payment: click "View Cart & Check Out" from the ATC modal for fastest path.
         let cartConfirmed = false;
         try {
-          const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
+          const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 3500);
           setNavigationMark('product_to_checkout');
           await debuggerClick(viewCartBtn);
           cartConfirmed = true;
         } catch {
-          // Modal didn't appear; navigate to checkout directly.
-          setNavigationMark('product_to_checkout');
-          await maybeApplyHarvestedSession(settings);
-          window.location.href = 'https://www.target.com/checkout';
-          cartConfirmed = true;
+          cartConfirmed = await waitForCartConfirmation(5000);
+          if (cartConfirmed) {
+            setNavigationMark('product_to_checkout');
+            await navigateToCheckout(settings, { skipHarvestAfterAtc: true });
+          }
         }
+        if (!cartConfirmed) {
+          showToast('Monitor: ATC clicked but cart not confirmed — retrying…', 'persistent');
+          chrome.runtime.sendMessage({
+            type: 'TARGET_NAV_FAILED',
+            url: normUrl,
+            reason: 'Monitor ATC cart not confirmed',
+          }).catch(() => {});
+          return;
+        }
+        markCartReady();
         showToast(`Monitor: Added! → checkout (${currentCount + 1}/${product.qty})`, 'success');
-        console.log(`[TCH] monitor ATC (saved): navigating to checkout`);
+        console.log('[TCH] monitor ATC (saved): cart confirmed');
         chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl }).catch(() => {});
         return;
       }
 
-      // Without saved payment: navigate directly to checkout to skip the cart page round-trip.
       let cartConfirmed = false;
       try {
         await waitForAny([
           { sel: SEL.viewCart },
           { text: 'view cart' }, { text: 'view cart & check out' },
           { text: 'item added' }, { text: 'added to cart' },
-        ], 2500);
+        ], 3500);
         cartConfirmed = true;
-      } catch { /* modal didn't appear — item may still have been added */ }
+      } catch {
+        cartConfirmed = await waitForCartConfirmation(5000);
+      }
+
+      if (!cartConfirmed) {
+        showToast('Monitor: ATC clicked but cart not confirmed — retrying…', 'persistent');
+        chrome.runtime.sendMessage({
+          type: 'TARGET_NAV_FAILED',
+          url: normUrl,
+          reason: 'Monitor ATC cart not confirmed',
+        }).catch(() => {});
+        return;
+      }
 
       markCartReady();
       chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normUrl }).catch(() => {});
@@ -2394,6 +2958,9 @@ async function handleMonitoredATC(monitor, product) {
   let pollInProgress = false;
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
+  try {
+    chrome.runtime.sendMessage({ type: 'TARGET_NAV_HANDOFF', url: normUrl }).catch(() => {});
+  } catch {}
 
   const pollId = setInterval(async () => {
     if (!runtimeEnabled) { clearInterval(pollId); return; }
@@ -2547,6 +3114,11 @@ async function init() {
     showToast('Signing in…');
     await sleep(500);
     await handleSignInPage(settings);
+    await sleep(1500);
+    await maybeCompleteAuthWarmup(settings);
+  } else if (/^\/account/i.test(location.pathname) && looksLoggedInOnTarget()) {
+    markAuthWarmup();
+    console.log('[TCH] auth warmup: on account page with active session');
   } else if (page === 'confirmation') {
     await markCheckoutSuccess();
     showToast('Order placed!', 'success');
@@ -2559,6 +3131,7 @@ async function init() {
 let lastUrl = location.href;
 new MutationObserver(() => {
   if (location.href === lastUrl) return;
+  const prevUrl = lastUrl;
   lastUrl = location.href;
   invalidateCache();
   document.getElementById('tch-toast')?.remove();
@@ -2567,6 +3140,19 @@ new MutationObserver(() => {
       ? TCH_HOSTS.detectRetailer(location.href)
       : null;
   if (r !== 'target' && r !== 'walmart') return;
+  if (/\/checkout/.test(prevUrl) && /\/cart/.test(location.pathname) && isCheckoutFlowActive()) {
+    requestAnimationFrame(async () => {
+      const data = await getSettings();
+      const empty = isCartEmptyOnPage() || (await probeCartHasItems()) === false;
+      if (empty) {
+        showToast('Kicked to empty cart — re-adding item…', 'persistent');
+        try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
+        await scheduleCheckoutRetry(data, 'Checkout ejected to empty cart');
+      } else {
+        showToast('Returned to cart — continuing checkout…', 'persistent');
+      }
+    });
+  }
   requestAnimationFrame(init);
 }).observe(document, { subtree: true, childList: true });
 

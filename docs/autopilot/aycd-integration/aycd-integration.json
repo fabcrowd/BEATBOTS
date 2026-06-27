@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "aycd-integration",
+  "description": "Research and wire AYCD (TabSentry, Inbox, AutoSolve, Profile Builder) with BEATBOTS extension",
+  "goals": [
+    "Document Tier 0 operational stack (TabSentry + extension + AutoSolve AI)",
+    "Spike Inbox Mail Tasks API as OTP provider",
+    "Runbook and popup guide links; no rebuild of AYCD products"
+  ],
+  "nonGoals": [
+    "AutoSolve supported-bot registration without AYCD partnership",
+    "Traffic Pass / OneClick farming in extension",
+    "Replacing TabSentry with extension-only multi-account"
+  ],
+  "technicalNotes": "Brainstorm: docs/autopilot/aycd-integration/AYCD-RESEARCH-BRAINSTORM.md. PRD: aycd-integration.md. Boss: @it. Tier 0 = no code.",
+  "_tdd": true,
+  "requirements": [
+    {
+      "id": "1",
+      "category": "testing",
+      "priority": "high",
+      "description": "Baseline: bash scripts/verify.sh exits 0",
+      "verification": ["bash scripts/verify.sh"],
+      "acceptance": ["verify.sh ALL PASSED"],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "docs",
+      "priority": "high",
+      "description": "AYCD research brainstorm + product crosswalk vs extension",
+      "dependsOn": ["1"],
+      "acceptance": [
+        "AYCD-RESEARCH-BRAINSTORM.md complete with Tier 0/A/B/C",
+        "Every AYCD app mapped to extension gap",
+        "aycd-integration-notes.md updated"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "docs",
+      "priority": "high",
+      "description": "TabSentry deployment runbook (load unpacked extension + AutoSolve AI)",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "TABSENTRY-RUNBOOK.md with Chrome/Brave task steps",
+        "Notes copy-with-browser-data and extension verify flow",
+        "Target overnight checklist section"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Inbox Mail Tasks API spike — design + optional Node probe script",
+      "dependsOn": ["2"],
+      "acceptance": [
+        "INBOX-API-SPIKE.md documents auth, template ID, OTP extraction",
+        "scripts/inbox-api-spike.mjs or documented curl examples",
+        "Comparison vs Gmail OAuth and native IMAP host"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5",
+      "category": "functional",
+      "priority": "medium",
+      "description": "Popup Guide section + Profile Builder import spec",
+      "dependsOn": ["3"],
+      "acceptance": [
+        "Guide tab links to AYCD runbook path",
+        "PROFILE-IMPORT-SPEC.md maps AYCD export columns to popup fields",
+        "node --check green if popup.js touched"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6",
+      "category": "functional",
+      "priority": "low",
+      "description": "Optional: Inbox OTP provider behind feature flag in background.js",
+      "dependsOn": ["4"],
+      "acceptance": [
+        "Settings aycdInboxApiKey + mailTemplateId in popup Advanced",
+        "START_OTP_WATCH can call Inbox API when configured",
+        "Falls back to Gmail OAuth when Inbox unset",
+        "signin-step or node test for OTP parser helper"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7",
+      "category": "testing",
+      "priority": "high",
+      "description": "Final verify + aycd-integration-notes summary",
+      "dependsOn": ["3", "4", "5"],
+      "acceptance": ["verify.sh ALL PASSED", "Summary in aycd-integration-notes.md"],
+      "passes": false
+    }
+  ]
+}

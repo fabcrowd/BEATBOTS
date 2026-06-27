@@ -1,0 +1,15 @@
+{
+  "data": {
+    "product": {
+      "tcin": "94300072",
+      "fulfillment": {
+        "sold_out": false,
+        "is_out_of_stock_in_all_store_locations": true,
+        "shipping_options": {
+          "availability_status": "OUT_OF_STOCK",
+          "available_to_promise_quantity": 0
+        }
+      }
+    }
+  }
+}

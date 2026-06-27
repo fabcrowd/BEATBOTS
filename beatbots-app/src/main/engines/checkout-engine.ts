@@ -44,6 +44,8 @@ export interface CheckoutConfig {
   taskId: number
   onStatus: (text: string) => void
   abortSignal: AbortSignal
+  /** When set, skip clear+ATC and init checkout on this cart (browser session must match cookies). */
+  existingCartId?: string
 }
 
 export interface CheckoutResult {
@@ -92,49 +94,62 @@ export class CheckoutEngine {
   private async runInternal(cfg: CheckoutConfig): Promise<CheckoutResult> {
     const startMs = Date.now()
     const { session, profile, tcin, qty, settings, onStatus, abortSignal } = cfg
+    const fromCart = !!cfg.existingCartId
 
-    // ── Step 0: Clear any open cart to avoid "cart in use" errors ─────────
+    let cartId: string
+    let atcCookie: Awaited<ReturnType<typeof consumeCookie>>
 
-    onStatus('Clearing cart...')
-    await this.clearCart(session, abortSignal).catch(() => {
-      // Non-fatal — if there's no cart or clearing fails, proceed anyway
-    })
-
-    // ── Step 1: Wait for / consume Shape cookie ────────────────────────────
-
-    onStatus('Waiting for Shape cookie...')
-    const COOKIE_WAIT_TIMEOUT_MS = 30_000
-    const atcCookie = await this.waitForCookie(COOKIE_WAIT_TIMEOUT_MS, abortSignal)
-
-    if (!atcCookie) {
-      return { ok: false, error: 'No ATC cookie available in pool', retryable: false, durationMs: Date.now() - startMs }
-    }
-
-    // ── Step 2a: Add extra product (filler item, reduces cart-only block risk) ─
-
-    if (settings.addExtraProduct && settings.extraProductTcin) {
-      onStatus(`Adding filler item: ${settings.extraProductTcin}`)
-      await this.addToCart(session, settings.extraProductTcin, 1, atcCookie.cookies, atcCookie.shapeHeaders, abortSignal)
-        .catch(() => { /* filler failure is non-fatal */ })
-    }
-
-    // ── Step 2b: Add target item to Cart ──────────────────────────────────
-
-    onStatus(`ATC: ${tcin}`)
-    const atcResult = await this.addToCart(session, tcin, qty, atcCookie.cookies, atcCookie.shapeHeaders, abortSignal)
-
-    if (!atcResult.ok) {
-      if (atcResult.shapeBlocked) {
-        return { ok: false, error: 'Shape block on ATC', shapeBlocked: true, retryable: true, durationMs: Date.now() - startMs }
+    if (fromCart) {
+      cartId = cfg.existingCartId!
+      onStatus('Using existing browser cart...')
+      atcCookie = consumeCookie('atc') || consumeCookie('login')
+      if (!atcCookie) {
+        return { ok: false, error: 'No Shape cookie in pool for checkout steps', retryable: false, durationMs: Date.now() - startMs }
       }
-      if (atcResult.outOfStock) {
-        return { ok: false, error: 'Out of stock at ATC', retryable: false, durationMs: Date.now() - startMs }
-      }
-      return { ok: false, error: atcResult.error, retryable: atcResult.retryable ?? true, durationMs: Date.now() - startMs }
-    }
+    } else {
+      // ── Step 0: Clear any open cart to avoid "cart in use" errors ─────────
 
-    const cartId = atcResult.cartId!
-    onStatus('ATC success — initializing checkout...')
+      onStatus('Clearing cart...')
+      await this.clearCart(session, abortSignal).catch(() => {
+        // Non-fatal — if there's no cart or clearing fails, proceed anyway
+      })
+
+      // ── Step 1: Wait for / consume Shape cookie ────────────────────────────
+
+      onStatus('Waiting for Shape cookie...')
+      const COOKIE_WAIT_TIMEOUT_MS = 30_000
+      atcCookie = await this.waitForCookie(COOKIE_WAIT_TIMEOUT_MS, abortSignal)
+
+      if (!atcCookie) {
+        return { ok: false, error: 'No ATC cookie available in pool', retryable: false, durationMs: Date.now() - startMs }
+      }
+
+      // ── Step 2a: Add extra product (filler item, reduces cart-only block risk) ─
+
+      if (settings.addExtraProduct && settings.extraProductTcin) {
+        onStatus(`Adding filler item: ${settings.extraProductTcin}`)
+        await this.addToCart(session, settings.extraProductTcin, 1, atcCookie.cookies, atcCookie.shapeHeaders, abortSignal)
+          .catch(() => { /* filler failure is non-fatal */ })
+      }
+
+      // ── Step 2b: Add target item to Cart ──────────────────────────────────
+
+      onStatus(`ATC: ${tcin}`)
+      const atcResult = await this.addToCart(session, tcin, qty, atcCookie.cookies, atcCookie.shapeHeaders, abortSignal)
+
+      if (!atcResult.ok) {
+        if (atcResult.shapeBlocked) {
+          return { ok: false, error: 'Shape block on ATC', shapeBlocked: true, retryable: true, durationMs: Date.now() - startMs }
+        }
+        if (atcResult.outOfStock) {
+          return { ok: false, error: 'Out of stock at ATC', retryable: false, durationMs: Date.now() - startMs }
+        }
+        return { ok: false, error: atcResult.error, retryable: atcResult.retryable ?? true, durationMs: Date.now() - startMs }
+      }
+
+      cartId = atcResult.cartId!
+      onStatus('ATC success — initializing checkout...')
+    }
 
     // ── Step 3: Init checkout ──────────────────────────────────────────────
 

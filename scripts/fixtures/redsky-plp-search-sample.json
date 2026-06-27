@@ -1,0 +1,12 @@
+{
+  "data": {
+    "search": {
+      "products": [
+        { "tcin": "94300072" },
+        { "tcin": "85978609" },
+        { "tcin": "invalid" },
+        { "tcin": "12345" }
+      ]
+    }
+  }
+}
