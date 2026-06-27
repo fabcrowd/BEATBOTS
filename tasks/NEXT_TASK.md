@@ -2,6 +2,13 @@
 
 **Boss agent:** `@it` — overnight loop uses **`docs/autopilot/IT_LOOP_PROMPT.md`**
 
+**LLM handoff:** [`docs/autopilot/HANDOFF.md`](../docs/autopilot/HANDOFF.md) — read before picking up work.
+
+## Merge first
+
+- Open PR: `cursor/release-handoff-4bbd` → `main` (consolidates #28, #29, #32, #33, #34)
+- After merge: close superseded PRs; reload extension at `chrome://extensions` (v2.5.0)
+
 ## Start overnight loop
 
 ```bash
@@ -27,12 +34,13 @@ python3 -m orchestrator autopilot use docs/autopilot/overnight/repo-health.json
 python3 -m orchestrator autopilot status
 ```
 
-## Active PRs (merge when green)
+## Deferred
 
-- [#33](https://github.com/fabcrowd/BEATBOTS/pull/33) — stock monitor Phase 2 (v2.5.0)
-- [#32](https://github.com/fabcrowd/BEATBOTS/pull/32) — stock monitor Phase 1 (v2.4.0)
+- Stock monitor Phase 3 (headless poller at scale) — PRD only
+- Live Target checkout rehearsal in cloud (auth modal)
 
 ## Logs
 
 - Runner: `docs/autopilot/overnight/logs/`
 - Gate journal: `docs/autopilot/overnight/it-live.md`
+- Session notes: `docs/autopilot/overnight/overnight-notes.md`

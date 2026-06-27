@@ -92,17 +92,17 @@
       "tdd": {
         "test": {
           "description": "Identify failing scenario or code smell with file:line",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Minimal fix",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     },
     {
       "id": "4",
@@ -121,17 +121,17 @@
       "tdd": {
         "test": {
           "description": "Document issue with reproduction steps in notes",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Fix with surgical diff",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     },
     {
       "id": "5",
@@ -150,17 +150,17 @@
       "tdd": {
         "test": {
           "description": "Identify issue in walmart flow",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Fix",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     },
     {
       "id": "6",
@@ -179,17 +179,17 @@
       "tdd": {
         "test": {
           "description": "Identify duplication",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Extract or remove",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     },
     {
       "id": "7",
@@ -209,17 +209,17 @@
       "tdd": {
         "test": {
           "description": "Run browser-smoke",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Fix or mark stuck",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     },
     {
       "id": "8",
@@ -241,17 +241,17 @@
       "tdd": {
         "test": {
           "description": "Collect session outcomes",
-          "passes": true
+          "passes": false
         },
         "implement": {
           "description": "Write summary and commit",
-          "passes": true
+          "passes": false
         },
         "refactor": {
-          "passes": true
+          "passes": false
         }
       },
-      "passes": true
+      "passes": false
     }
   ]
 }

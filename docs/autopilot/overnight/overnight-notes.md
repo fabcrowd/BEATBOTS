@@ -2,6 +2,8 @@
 
 Append-only log for unattended Autopilot sessions.
 
+**LLM handoff (consolidated release):** see [`docs/autopilot/HANDOFF.md`](../HANDOFF.md).
+
 ## Template (agent fills per run)
 
 ### YYYY-MM-DD
@@ -11,6 +13,19 @@ Append-only log for unattended Autopilot sessions.
 - **Stuck:**
 - **Skipped:**
 - **Tests:**
+
+---
+
+### 2026-06-27 — consolidated release handoff PR
+
+- **Branch:** `cursor/release-handoff-4bbd` (superset of `cursor/overnight-20260627`)
+- **PR:** Single PR → `main` (closes #28, #29, #32, #33, #34)
+- **Shipped:** Extension **v2.5.0** — anti-detection 2.3.0, stock monitor Phase 1+2, IT_LOOP_PROMPT, overnight DRY_RUN fix
+- **Handoff doc:** `docs/autopilot/HANDOFF.md`
+- **Tests:** `bash scripts/verify.sh` ALL PASSED
+- **Overnight:** `repo-health.json` reqs 3–6 reset to `passes: false` for next loop cycle
+- **Stuck:** Live Target auth modal in cloud (manual sign-in)
+- **Next:** Merge PR; reload extension; run `./scripts/loop.sh --detach` with `CURSOR_API_KEY` on host
 
 ---
 
