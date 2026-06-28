@@ -236,7 +236,7 @@ async function handleSignInPage(settings, opts = {}) {
 
   // Step 1: email field only visible — Target's two-step login flow.
   if (emailInput && !passInput) {
-    if (getPageType() === 'checkout' && (isCheckoutSignedInConfirm() || looksLoggedInOnTarget())) {
+    if (getPageType() === 'checkout' && isCheckoutSignedInConfirm()) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) return;
     }
@@ -362,9 +362,6 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
     setTimeout(() => {
       obs.disconnect();
       console.log('[TCH] auto sign-in: timed out waiting for password step');
-      if (getPageType() === 'checkout' && (looksLoggedInOnTarget() || isCheckoutSignedInConfirm())) {
-        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      }
       resolve();
     }, timeoutMs);
   });
@@ -1546,15 +1543,24 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
-    if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
+    const skipSignInAttempt = typeof TCH_SIGNIN_STEP !== 'undefined'
+      ? TCH_SIGNIN_STEP.shouldSkipCheckoutSignInAttempt({
+        step,
+        isSignedInConfirm: isCheckoutSignedInConfirm(),
+        looksLoggedIn: looksLoggedInOnTarget(),
+      })
+      : isCheckoutSignedInConfirm() || (step === 'unknown' && looksLoggedInOnTarget());
+    if (skipSignInAttempt) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) {
         showToast('Checkout: continuing with signed-in account…', 'persistent');
         await sleep(800);
         return;
       }
-      console.log('[TCH] auto sign-in: session looks logged in — waiting for checkout to advance');
-      return;
+      if (step === 'unknown' && looksLoggedInOnTarget()) {
+        console.log('[TCH] auto sign-in: session looks logged in — waiting for checkout to advance');
+        return;
+      }
     }
     if (!options.silent) {
       await sleep(800);
