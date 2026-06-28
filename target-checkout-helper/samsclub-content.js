@@ -95,7 +95,7 @@ function scGetPageType() {
 
 /**
  * SC-3: FCFS product-page ATC — wait for enabled button, click, go to cart.
- * Disabled ATC is a stock wait, not a queue hold (SC-5: no sacred lock).
+ * Disabled ATC is a stock wait, not a queue hold (SC-5: no Walmart-style queue lock).
  */
 async function scHandleProductPage(settings) {
   console.log('[SC] handleProductPage — FCFS ATC');
