@@ -161,6 +161,40 @@ function runSc1ManifestTests() {
   );
 }
 
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Mirrors background.js WALMART_IN_QUEUE / WALMART_NAV_FAILED handlers.
+ * Sam's Club FCFS must never emit these message types (SC-5).
+ */
+function bgApplyWalmartMessage(inQueueUrls, navigationLock, message) {
+  const norm = normalizeProductUrl(message.url || '');
+  if (!norm) return { inQueueUrls, navigationLock };
+  if (message.type === 'WALMART_IN_QUEUE') {
+    inQueueUrls.add(norm);
+  }
+  if (message.type === 'WALMART_NAV_FAILED') {
+    navigationLock.delete(norm);
+  }
+  return { inQueueUrls, navigationLock };
+}
+
+/** Mirrors handleATCSuccess lock side-effects only — releases locks, never arms inQueueUrls. */
+function bgApplyAtcSuccess(inQueueUrls, navigationLock, url) {
+  const norm = normalizeProductUrl(url);
+  if (!norm) return { inQueueUrls, navigationLock };
+  navigationLock.delete(norm);
+  inQueueUrls.delete(norm);
+  return { inQueueUrls, navigationLock };
+}
+
 function runSc5NoSacredLockTests() {
   const forbidden = [
     'inQueueUrls',
@@ -182,6 +216,46 @@ function runSc5NoSacredLockTests() {
       CONTENT_SRC.includes('samsclub_handled'),
     'SC-1: content.js delegates samsclub to samsclub-content.js'
   );
+}
+
+/** SC-5: FCFS race — ATC_SUCCESS releases locks; poll never arms inQueueUrls for Sam's Club. */
+function runSc5FcfsRaceTests() {
+  const scProductUrl = 'https://www.samsclub.com/p/member-mark-race/123';
+  const norm = normalizeProductUrl(scProductUrl);
+
+  assert.ok(
+    SC_SRC.includes("type: 'ATC_SUCCESS'"),
+    'SC-5: FCFS race signals ATC_SUCCESS (not WALMART_IN_QUEUE)'
+  );
+  assert.ok(!SC_SRC.includes('WALMART_IN_QUEUE'), 'SC-5: samsclub must not emit WALMART_IN_QUEUE');
+
+  // Poll navigated tab — FCFS ATC success releases navigationLock, never arms sacred lock.
+  const inQ = new Set();
+  const navL = new Set([norm]);
+  bgApplyAtcSuccess(inQ, navL, scProductUrl);
+  assert.ok(!inQ.has(norm), 'SC-5: FCFS ATC_SUCCESS must not arm inQueueUrls');
+  assert.ok(!navL.has(norm), 'SC-5: FCFS ATC_SUCCESS releases navigationLock');
+
+  // FCFS race: repeated poll navigate + ATC cycles must never populate inQueueUrls.
+  for (let i = 0; i < 3; i++) {
+    navL.add(norm);
+    bgApplyAtcSuccess(inQ, navL, scProductUrl);
+    assert.ok(!inQ.has(norm), `SC-5: FCFS race cycle ${i + 1} must not arm inQueueUrls`);
+  }
+
+  // Poll navigationLock alone is not sacred lock (contrast with WM-4).
+  const pollOnly = new Set();
+  const pollNav = new Set();
+  pollNav.add(norm);
+  bgApplyWalmartMessage(pollOnly, pollNav, { type: 'ATC_SUCCESS', url: scProductUrl });
+  assert.ok(!pollOnly.has(norm), 'SC-5: navigationLock alone must not populate inQueueUrls');
+
+  // Contrast: Walmart queue confirmation arms sacred lock — Sam's Club must never do this.
+  const wmUrl = 'https://www.walmart.com/ip/sc5-contrast/999';
+  const wmNorm = normalizeProductUrl(wmUrl);
+  const wmInQ = new Set();
+  bgApplyWalmartMessage(wmInQ, new Set(), { type: 'WALMART_IN_QUEUE', url: wmUrl });
+  assert.ok(wmInQ.has(wmNorm), "SC-5 contrast: Walmart WALMART_IN_QUEUE arms inQueueUrls");
 }
 
 function runSc1PageTypeTests() {
@@ -271,6 +345,7 @@ function main() {
   runSc1HostsTests(hosts);
   runSc1ManifestTests();
   runSc5NoSacredLockTests();
+  runSc5FcfsRaceTests();
   runSc1PageTypeTests();
   runSc3FcfsAtcTests();
   console.log(

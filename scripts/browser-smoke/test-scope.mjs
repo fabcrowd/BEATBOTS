@@ -145,9 +145,9 @@ export const JOURNEYS = {
     id: 'SC-5',
     retailer: 'samsclub',
     summary: "Sam's Club FCFS race — no sacred lock / inQueueUrls",
-    impl: ['(planned)'],
-    coverage: 'missing',
-    tests: [],
+    impl: ['target-checkout-helper/samsclub-content.js (scSignalAtcSuccess → ATC_SUCCESS)'],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs'],
   },
   'SC-6': {
     id: 'SC-6',
