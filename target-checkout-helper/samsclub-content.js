@@ -76,6 +76,14 @@ function scSignalAtcSuccess(productUrl) {
   } catch (_) {}
 }
 
+/** SC-6: release background poll lock on FCFS restock wait — no Walmart queue semantics. */
+function scSignalNavFailed(productUrl) {
+  const url = productUrl || location.href;
+  try {
+    chrome.runtime.sendMessage({ type: 'NAV_FAILED', url });
+  } catch (_) {}
+}
+
 function scShowToast(msg, level = 'info') {
   try {
     chrome.runtime.sendMessage({ type: 'SHOW_TOAST', message: msg, level });
@@ -107,7 +115,8 @@ async function scHandleProductPage(settings) {
 
   if (!atcBtn) {
     scShowToast('ATC not available — waiting for restock', 'persistent');
-    console.log('[SC] ATC button not found or disabled — FCFS restock wait (no queue lock)');
+    console.log('[SC] ATC button not found or disabled — FCFS restock wait, releasing nav lock');
+    scSignalNavFailed(settings.productUrl || location.href);
     return;
   }
 

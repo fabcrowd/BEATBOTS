@@ -98,12 +98,13 @@ function scGetPageType(pathname) {
 
 /**
  * SC-3: FCFS product entry — disabled ATC is restock wait, never queue/sacred lock.
+ * SC-6: restock wait emits NAV_FAILED so background poll can retry.
  * Mirrors scHandleProductPage decision tree (no queue branch).
  */
 function scDecideProductPageEntry(page) {
   const atc = scFindAtcButton(page);
   if (!atc || atc.disabled || !scIsVisible(atc)) {
-    return { action: 'fcfs_restock_wait', messages: [] };
+    return { action: 'fcfs_restock_wait', messages: [{ type: 'NAV_FAILED' }] };
   }
   return { action: 'proceed_atc', messages: [] };
 }
@@ -168,6 +169,26 @@ function normalizeProductUrl(url) {
   } catch {
     return url;
   }
+}
+
+/**
+ * Mirrors background.js NAV_FAILED / WALMART_NAV_FAILED handlers (SC-6).
+ * Releases navigationLock only — never arms inQueueUrls.
+ */
+function bgApplyNavFailed(inQueueUrls, navigationLock, message) {
+  const norm = normalizeProductUrl(message.url || '');
+  if (!norm) return { inQueueUrls, navigationLock };
+  navigationLock.delete(norm);
+  return { inQueueUrls, navigationLock };
+}
+
+/** Mirrors background poll skip + re-navigate after nav lock released. */
+function bgPollCycle(inQueueUrls, navigationLock, productUrl) {
+  const norm = normalizeProductUrl(productUrl);
+  if (inQueueUrls.has(norm)) return { skipped: true, navigationLock };
+  if (navigationLock.has(norm)) return { skipped: true, navigationLock };
+  navigationLock.add(norm);
+  return { skipped: false, navigationLock };
 }
 
 /**
@@ -340,6 +361,63 @@ function runSc3FcfsAtcTests() {
   assert.ok(!SC_SRC.includes('walmart-content'), 'SC-3: must not import walmart-content.js');
 }
 
+/** SC-6: FCFS error paths — NAV_FAILED releases poll lock, never arms sacred lock. */
+function runSc6ErrorPathTests() {
+  const scProductUrl = 'https://www.samsclub.com/p/sc6-restock/123';
+  const norm = normalizeProductUrl(scProductUrl);
+
+  assert.ok(
+    SC_SRC.includes("type: 'NAV_FAILED'"),
+    'SC-6: samsclub emits NAV_FAILED on FCFS restock wait'
+  );
+  assert.ok(
+    !SC_SRC.includes('WALMART_NAV_FAILED'),
+    'SC-6: samsclub must not emit WALMART_NAV_FAILED'
+  );
+  assert.ok(SC_SRC.includes('scSignalNavFailed'), 'SC-6: scSignalNavFailed helper defined');
+
+  const restockPage = makePage({
+    pathname: '/p/sc6-restock/123',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+  const restockEntry = scDecideProductPageEntry(restockPage);
+  assert.equal(restockEntry.action, 'fcfs_restock_wait', 'SC-6: disabled ATC → restock wait');
+  assert.ok(
+    restockEntry.messages.some((m) => m.type === 'NAV_FAILED'),
+    'SC-6: restock wait must emit NAV_FAILED for poll retry'
+  );
+  assert.ok(
+    !restockEntry.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'SC-6: restock wait must not emit WALMART_IN_QUEUE'
+  );
+
+  const inQ = new Set();
+  const navL = new Set([norm]);
+  for (const m of restockEntry.messages) {
+    bgApplyNavFailed(inQ, navL, { type: m.type, url: scProductUrl });
+  }
+  assert.ok(!inQ.has(norm), 'SC-6: NAV_FAILED must not arm inQueueUrls');
+  assert.ok(!navL.has(norm), 'SC-6: NAV_FAILED clears navigationLock for poll retry');
+
+  const afterFailPoll = bgPollCycle(inQ, navL, scProductUrl);
+  assert.equal(afterFailPoll.skipped, false, 'SC-6: poll can re-navigate after NAV_FAILED');
+  assert.ok(navL.has(norm), 'SC-6: poll re-arms navigationLock after error-path NAV_FAILED');
+
+  // FCFS race: repeated restock cycles must never populate inQueueUrls.
+  for (let i = 0; i < 3; i++) {
+    navL.add(norm);
+    bgApplyNavFailed(inQ, navL, { type: 'NAV_FAILED', url: scProductUrl });
+    assert.ok(!inQ.has(norm), `SC-6: restock cycle ${i + 1} must not arm inQueueUrls`);
+    bgPollCycle(inQ, navL, scProductUrl);
+  }
+}
+
 function main() {
   const hosts = loadHosts();
   runSc1HostsTests(hosts);
@@ -348,8 +426,9 @@ function main() {
   runSc5FcfsRaceTests();
   runSc1PageTypeTests();
   runSc3FcfsAtcTests();
+  runSc6ErrorPathTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-3 + SC-5): hosts, manifest, FCFS ATC, no sacred lock"
+    "samsclub-module-simulation PASS (SC-1 + SC-3 + SC-5 + SC-6): hosts, manifest, FCFS ATC, error paths, no sacred lock"
   );
 }
 
