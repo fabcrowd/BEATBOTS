@@ -403,7 +403,28 @@ async function main() {
   await new Promise((r) => setTimeout(r, 8000));
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
-  console.log('FUNCTIONAL PASS: background messages + popup toggle/save + Target content script');
+  // ─── SC-1: Sam's Club content script initializes on samsclub.com ─────────
+  const scPage = await browser.newPage();
+  const scLogs = [];
+  const scCdp = await scPage.createCDPSession();
+  await scCdp.send('Runtime.enable');
+  scCdp.on('Runtime.consoleAPICalled', (ev) => {
+    const parts = (ev.args || []).map((a) => {
+      if (a.value !== undefined) return String(a.value);
+      if (a.unserializableValue) return String(a.unserializableValue);
+      return a.description || '';
+    });
+    const text = parts.join(' ');
+    if (text.includes('[TCH]')) scLogs.push(text);
+  });
+  await scPage.goto('https://www.samsclub.com/', { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+  await new Promise((r) => setTimeout(r, 8000));
+  assert.ok(
+    scLogs.some((l) => l.includes('[TCH] init') && l.includes('samsclub')),
+    `SC-1: expected [TCH] init with samsclub retailer, got: ${scLogs.slice(0, 5).join(' | ') || '(none)'}`
+  );
+
+  console.log('FUNCTIONAL PASS: background messages + popup toggle/save + Target + Sam\'s Club content scripts');
 }
 
 main()

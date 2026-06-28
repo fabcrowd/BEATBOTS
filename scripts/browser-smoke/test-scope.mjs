@@ -124,10 +124,14 @@ export const JOURNEYS = {
   'SC-1': {
     id: 'SC-1',
     retailer: 'samsclub',
-    summary: "Sam's Club retailer module (not yet in manifest)",
-    impl: ['(planned)'],
-    coverage: 'missing',
-    tests: [],
+    summary: "Sam's Club retailer module registered in manifest with FCFS stub content script",
+    impl: [
+      'target-checkout-helper/manifest.json',
+      'target-checkout-helper/core/hosts.js',
+      'target-checkout-helper/samsclub-content.js',
+    ],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs', 'extension-functional.mjs'],
   },
   'SC-3': {
     id: 'SC-3',
@@ -183,7 +187,7 @@ export const INVARIANTS = {
   'SC-5': {
     id: 'SC-5',
     rule: "Sam's Club FCFS drops must not use Walmart-style sacred lock.",
-    code: ['(planned)'],
+    code: ['target-checkout-helper/samsclub-content.js'],
   },
   'TGT-4': {
     id: 'TGT-4',
@@ -205,10 +209,11 @@ export const INVARIANTS = {
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
-  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6'],
+  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6', 'SC-1'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
+  'samsclub-module-simulation.mjs': ['SC-1'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
