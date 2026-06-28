@@ -122,6 +122,21 @@
   }
 
   /**
+   * Skip handleSignInPage when checkout already shows a signed-in confirm UI, or when
+   * step is still unknown but the site header looks logged in (DOM still loading).
+   * Must NOT treat global header login alone as signed-in when step is signin — Target
+   * often shows "Hi, …" while checkout modal still requires password re-auth.
+   * @param {{ step?: string, isSignedInConfirm?: boolean, looksLoggedIn?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldSkipCheckoutSignInAttempt(opts) {
+    opts = opts || {};
+    if (opts.isSignedInConfirm) return true;
+    if (opts.step === 'unknown' && opts.looksLoggedIn) return true;
+    return false;
+  }
+
+  /**
    * Throttled retry while checkout watcher stays on sign-in or loading shell.
    * @param {{
    *   step?: string,
@@ -168,6 +183,7 @@
     isGenericContinueButtonText: isGenericContinueButtonText,
     resolveCheckoutStep: resolveCheckoutStep,
     shouldAutoSignInOnCheckoutPending: shouldAutoSignInOnCheckoutPending,
+    shouldSkipCheckoutSignInAttempt: shouldSkipCheckoutSignInAttempt,
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,

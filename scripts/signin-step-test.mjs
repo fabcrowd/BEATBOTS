@@ -94,6 +94,12 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+assert(S.shouldSkipCheckoutSignInAttempt({ step: 'signin', isSignedInConfirm: true }), 'skip when checkout confirms signed in');
+assert(!S.shouldSkipCheckoutSignInAttempt({ step: 'signin', looksLoggedIn: true }), 'signin step: header login alone must not skip');
+assert(!S.shouldSkipCheckoutSignInAttempt({ step: 'signin', isSignedInConfirm: false, looksLoggedIn: true }), 'password re-auth: no skip on signin step');
+assert(S.shouldSkipCheckoutSignInAttempt({ step: 'unknown', looksLoggedIn: true }), 'unknown step: header login can wait');
+assert(!S.shouldSkipCheckoutSignInAttempt({ step: 'unknown', looksLoggedIn: false }), 'unknown step without header login proceeds');
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);
