@@ -160,6 +160,14 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['samsclub-module-simulation.mjs'],
   },
+  'FIX-1': {
+    id: 'FIX-1',
+    retailer: 'core',
+    summary: 'Offline HTML fixtures (MOCK_URLS) exist with journey-aligned DOM markers',
+    impl: ['scripts/browser-smoke/fixtures/*.html'],
+    coverage: 'strong',
+    tests: ['fixture-smoke.mjs'],
+  },
 };
 
 /**
@@ -217,6 +225,7 @@ export const EXTENSION_SUITE = {
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
+  'fixture-smoke.mjs': ['FIX-1'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
@@ -230,7 +239,7 @@ export const SUPPLEMENTARY_TESTS = {
 };
 
 /**
- * Mock HTML fixtures for future offline retailer e2e (not yet wired into test:extension).
+ * Mock HTML fixtures for future offline retailer e2e (validated by fixture-smoke.mjs).
  * Paths are relative to scripts/browser-smoke/.
  */
 export const MOCK_URLS = {
