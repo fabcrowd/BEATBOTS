@@ -534,6 +534,19 @@ function wmSimulateQueueRoomLock(settings = {}) {
   return { messages, armed: !!lockUrl };
 }
 
+/**
+ * Mirrors wmHandleQueue (checkout-queue) lock emission — productUrl required (WM-4/WM-6).
+ * Must not fall back to /checkout href; poll keys inQueueUrls by /ip/ product URL.
+ */
+function wmSimulateCheckoutQueueLock(settings = {}, locationHref = 'https://www.walmart.com/checkout') {
+  const messages = [];
+  const lockUrl = settings?.productUrl;
+  if (lockUrl) {
+    messages.push({ type: 'WALMART_IN_QUEUE', url: lockUrl });
+  }
+  return { messages, armed: !!lockUrl, locationHref };
+}
+
 /** Mirrors poll navigate side-effect — sets navigationLock only, not inQueueUrls. */
 function bgPollNavigate(navigationLock, productUrl) {
   const norm = normalizeProductUrl(productUrl);
@@ -636,6 +649,31 @@ function runWm4SacredLockTests() {
     bgApplyWalmartMessage(qpLockInQ, qpLockNav, { ...m, url: monitoredProduct });
   }
   assert.ok(qpLockInQ.has(qpNorm), 'WM-4: /qp with productUrl arms inQueueUrls on product key');
+}
+
+function runWm6CheckoutQueueLockTests() {
+  const monitoredProduct = 'https://www.walmart.com/ip/wm6-checkout-queue/777888999';
+  const norm = normalizeProductUrl(monitoredProduct);
+  const checkoutHref = 'https://www.walmart.com/checkout';
+
+  const noProductLock = wmSimulateCheckoutQueueLock({}, checkoutHref);
+  assert.equal(noProductLock.messages.length, 0, 'WM-6: checkout queue without productUrl emits no WALMART_IN_QUEUE');
+  assert.equal(noProductLock.armed, false, 'WM-6: checkout queue without productUrl leaves tab unprotected');
+
+  const withProductLock = wmSimulateCheckoutQueueLock({ productUrl: monitoredProduct }, checkoutHref);
+  assert.equal(withProductLock.messages.length, 1, 'WM-6: checkout queue with productUrl emits WALMART_IN_QUEUE');
+  const lockMsg = withProductLock.messages[0];
+  assert.equal(lockMsg.type, 'WALMART_IN_QUEUE');
+  assert.equal(lockMsg.url, monitoredProduct, 'WM-6: lock uses productUrl not /checkout href');
+
+  const inQ = new Set();
+  const navL = new Set();
+  bgApplyWalmartMessage(inQ, navL, lockMsg);
+  assert.ok(inQ.has(norm), 'WM-6: checkout-queue lock populates inQueueUrls on product key');
+  assert.ok(
+    !inQ.has(normalizeProductUrl(checkoutHref)),
+    'WM-6: /checkout URL must not be the sacred lock key'
+  );
 }
 
 function runWm6ErrorPathTests() {
@@ -774,6 +812,7 @@ async function main() {
   await runWm2FlowTests();
   runWm4SacredLockTests();
   runWm5SacredLockBlockTests();
+  runWm6CheckoutQueueLockTests();
   runWm6ErrorPathTests();
   console.log(
     'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4 + WM-5 + WM-6): page type, flow, queue, error paths'

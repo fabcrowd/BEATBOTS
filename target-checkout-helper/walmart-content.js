@@ -698,12 +698,14 @@ async function wmHandleQueue(settings) {
   wmShowToast('In queue — waiting…', 'persistent');
   console.log('[WMT] Queue detected — passive wait started');
 
-  // Send the monitored product URL (not location.href which is /checkout) so
-  // background.js can match it against the normalised product URL in inQueueUrls.
-  const lockUrl = settings.productUrl || location.href;
-  try {
-    chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl });
-  } catch (_) {}
+  // Lock MUST use the monitored product URL — poll keys inQueueUrls by normalized
+  // /ip/... URL. location.href is /checkout and would never match (WM-4).
+  const lockUrl = settings?.productUrl;
+  if (lockUrl) {
+    try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
+  } else {
+    console.warn('[WMT] wmHandleQueue: no productUrl in settings — background nav lock NOT set');
+  }
 
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();
