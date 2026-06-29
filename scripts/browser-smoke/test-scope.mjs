@@ -166,6 +166,14 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['samsclub-module-simulation.mjs', 'extension-functional.mjs'],
   },
+  'FIX-1': {
+    id: 'FIX-1',
+    retailer: 'core',
+    summary: 'Offline HTML fixtures (MOCK_URLS) exist with journey-aligned DOM markers',
+    impl: ['scripts/browser-smoke/fixtures/*.html'],
+    coverage: 'strong',
+    tests: ['fixture-smoke.mjs'],
+  },
 };
 
 export const INVARIANTS = {
@@ -219,6 +227,31 @@ export const EXTENSION_SUITE = {
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
+  'fixture-smoke.mjs': ['FIX-1'],
+};
+
+/** Offline / manual scripts — not run by test:extension. */
+export const SUPPLEMENTARY_TESTS = {
+  'run.mjs': ['TGT-1'],
+  'untested-areas-test.mjs': ['TGT-1', 'WM-1'],
+  'shape-cookie-test.mjs': [],
+  'beatbots-10round-test.mjs': [],
+  'checkout-rehearsal.mjs': [],
+  'manual-account-test.mjs': [],
+};
+
+/**
+ * Mock HTML fixtures for future offline retailer e2e (validated by fixture-smoke.mjs).
+ * Paths are relative to scripts/browser-smoke/.
+ */
+export const MOCK_URLS = {
+  targetProduct: 'fixtures/target-product.html',
+  targetCheckoutReview: 'fixtures/target-checkout-review.html',
+  walmartProductPreDrop: 'fixtures/walmart-product-predrop.html',
+  walmartProductQueue: 'fixtures/walmart-product-queue.html',
+  walmartQpRoom: 'fixtures/walmart-qp-room.html',
+  walmartCheckoutQueue: 'fixtures/walmart-checkout-queue.html',
+  samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */
