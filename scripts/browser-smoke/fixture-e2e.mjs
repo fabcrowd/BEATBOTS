@@ -28,6 +28,24 @@ function attachTchConsoleCapture(page) {
   return logs;
 }
 
+async function attachCdpConsoleCapture(page) {
+  const logs = [];
+  const cdp = await page.createCDPSession();
+  await cdp.send('Runtime.enable');
+  cdp.on('Runtime.consoleAPICalled', (ev) => {
+    const parts = (ev.args || []).map((a) => {
+      if (a.value !== undefined) return String(a.value);
+      if (a.unserializableValue) return String(a.unserializableValue);
+      return a.description || '';
+    });
+    const text = parts.join(' ');
+    if (text.includes('[TCH]') || text.includes('[WMT]') || text.includes('[SC]')) {
+      logs.push(text);
+    }
+  });
+  return logs;
+}
+
 async function enableExtension(popup, extensionId, timeout) {
   await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
     waitUntil: 'domcontentloaded',
@@ -71,7 +89,7 @@ async function main() {
 
   for (const route of FIXTURE_E2E_ROUTES) {
     const page = await browser.newPage();
-    const logs = attachTchConsoleCapture(page);
+    const logs = await attachCdpConsoleCapture(page);
     const url = `http://${route.host}:${port}${route.path}`;
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
