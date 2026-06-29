@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * FIX-1: Offline HTML fixtures from test-scope.mjs MOCK_URLS — file existence + DOM markers.
- * Not wired to Playwright retailer hostnames (manifest match patterns); prepares future e2e.
+ * DOM-only validation; retailer-hostname e2e is fixture-e2e.mjs (FIX-2).
  *
  * Run: node scripts/browser-smoke/fixture-smoke.mjs
  */

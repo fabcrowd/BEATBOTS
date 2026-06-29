@@ -168,6 +168,14 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['fixture-smoke.mjs'],
   },
+  'FIX-2': {
+    id: 'FIX-2',
+    retailer: 'core',
+    summary: 'Fixture pages on retailer hostnames — content scripts init offline (local server + host aliases)',
+    impl: ['scripts/browser-smoke/fixture-server.mjs', 'scripts/browser-smoke/fixture-e2e.mjs'],
+    coverage: 'strong',
+    tests: ['fixture-e2e.mjs'],
+  },
 };
 
 /**
@@ -226,6 +234,7 @@ export const EXTENSION_SUITE = {
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
   'fixture-smoke.mjs': ['FIX-1'],
+  'fixture-e2e.mjs': ['FIX-2'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
@@ -239,7 +248,7 @@ export const SUPPLEMENTARY_TESTS = {
 };
 
 /**
- * Mock HTML fixtures for future offline retailer e2e (validated by fixture-smoke.mjs).
+ * Mock HTML fixtures for offline retailer e2e (FIX-1: fixture-smoke.mjs; FIX-2: fixture-e2e.mjs).
  * Paths are relative to scripts/browser-smoke/.
  */
 export const MOCK_URLS = {
