@@ -507,7 +507,7 @@ function normalizeProductUrl(url) {
 }
 
 /**
- * Mirrors background.js WALMART_IN_QUEUE / WALMART_NAV_FAILED handlers (WM-4).
+ * Mirrors background.js WALMART_IN_QUEUE / NAV_FAILED / WALMART_NAV_FAILED handlers (WM-4).
  * Returns updated { inQueueUrls, navigationLock } sets.
  */
 function bgApplyWalmartMessage(inQueueUrls, navigationLock, message) {
@@ -516,10 +516,22 @@ function bgApplyWalmartMessage(inQueueUrls, navigationLock, message) {
   if (message.type === 'WALMART_IN_QUEUE') {
     inQueueUrls.add(norm);
   }
-  if (message.type === 'WALMART_NAV_FAILED') {
+  if (message.type === 'NAV_FAILED' || message.type === 'WALMART_NAV_FAILED') {
     navigationLock.delete(norm);
   }
   return { inQueueUrls, navigationLock };
+}
+
+/**
+ * Mirrors wmHandleQueueRoom lock emission — productUrl required for sacred lock (WM-4).
+ */
+function wmSimulateQueueRoomLock(settings = {}) {
+  const messages = [];
+  const lockUrl = settings?.productUrl;
+  if (lockUrl) {
+    messages.push({ type: 'WALMART_IN_QUEUE', url: lockUrl });
+  }
+  return { messages, armed: !!lockUrl };
 }
 
 /** Mirrors poll navigate side-effect — sets navigationLock only, not inQueueUrls. */
@@ -610,6 +622,20 @@ function runWm4SacredLockTests() {
     !qpInQ.has(normalizeProductUrl('https://www.walmart.com/qp/waiting-room')),
     'WM-4: /qp page URL must not be the sacred lock key'
   );
+
+  // /qp without productUrl must not arm sacred lock (WM-4 error path).
+  const noProductLock = wmSimulateQueueRoomLock({});
+  assert.equal(noProductLock.messages.length, 0, 'WM-4: /qp without productUrl emits no WALMART_IN_QUEUE');
+  assert.equal(noProductLock.armed, false, 'WM-4: /qp without productUrl leaves tab unprotected');
+
+  const withProductLock = wmSimulateQueueRoomLock({ productUrl: monitoredProduct });
+  assert.equal(withProductLock.messages.length, 1, 'WM-4: /qp with productUrl emits WALMART_IN_QUEUE');
+  const qpLockInQ = new Set();
+  const qpLockNav = new Set();
+  for (const m of withProductLock.messages) {
+    bgApplyWalmartMessage(qpLockInQ, qpLockNav, { ...m, url: monitoredProduct });
+  }
+  assert.ok(qpLockInQ.has(qpNorm), 'WM-4: /qp with productUrl arms inQueueUrls on product key');
 }
 
 function runWm6ErrorPathTests() {
@@ -713,6 +739,31 @@ function runWm5SacredLockBlockTests() {
   assert.equal(afterPoll.skipped, true, 'WM-5: poll cycle skips navigate while sacred lock holds');
   assert.ok(!navL.has(norm), 'WM-5: poll must not re-arm navigationLock while inQueueUrls holds');
   assert.ok(inQ.has(norm), 'WM-5: inQueueUrls unchanged after skipped poll cycle');
+
+  // Retailer-neutral NAV_FAILED must behave like WALMART_NAV_FAILED while sacred lock holds (WM-5).
+  navL.add(norm);
+  bgApplyWalmartMessage(inQ, navL, { type: 'NAV_FAILED', url: productUrl });
+  assert.ok(!navL.has(norm), 'WM-5: retailer-neutral NAV_FAILED clears navigationLock');
+  assert.ok(inQ.has(norm), 'WM-5: retailer-neutral NAV_FAILED must not clear inQueueUrls');
+  assert.equal(
+    pollWouldSkipNavigation(norm, inQ, navL),
+    true,
+    'WM-5: sacred lock still blocks poll after retailer-neutral NAV_FAILED'
+  );
+
+  // Repeated NAV_FAILED while in queue must never clear sacred lock or re-arm navigationLock (WM-5).
+  for (let i = 0; i < 3; i++) {
+    navL.add(norm);
+    bgApplyWalmartMessage(inQ, navL, {
+      type: i % 2 === 0 ? 'WALMART_NAV_FAILED' : 'NAV_FAILED',
+      url: productUrl,
+    });
+    assert.ok(!navL.has(norm), `WM-5: NAV_FAILED cycle ${i + 1} clears navigationLock`);
+    assert.ok(inQ.has(norm), `WM-5: NAV_FAILED cycle ${i + 1} must not clear inQueueUrls`);
+    const cyclePoll = bgPollCycle(inQ, navL, productUrl);
+    assert.equal(cyclePoll.skipped, true, `WM-5: poll cycle ${i + 1} skips while sacred lock holds`);
+    assert.ok(!navL.has(norm), `WM-5: poll cycle ${i + 1} must not re-arm navigationLock`);
+  }
 }
 
 async function main() {

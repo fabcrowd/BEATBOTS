@@ -305,6 +305,27 @@ async function main() {
     'WM-5: poll must not re-arm navigationLock while sacred lock holds'
   );
 
+  // WM-5: retailer-neutral NAV_FAILED while sacred lock holds — same as WALMART_NAV_FAILED.
+  await sendBg(popup, { type: 'NAV_FAILED', url: MON3_WM });
+  const afterNeutralFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterNeutralFail.navigationLock?.includes(MON3_NORM),
+    'WM-5: retailer-neutral NAV_FAILED clears navigationLock'
+  );
+  assert.ok(
+    afterNeutralFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: retailer-neutral NAV_FAILED must not clear inQueueUrls'
+  );
+  {
+    const inQ = new Set(afterNeutralFail.inQueueUrls || []);
+    const navL = new Set(afterNeutralFail.navigationLock || []);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'WM-5: poll skips when inQueueUrls holds after retailer-neutral NAV_FAILED'
+    );
+  }
+
   await sendBg(popup, { type: 'STOP_MONITOR' });
   const mon3Cleared = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.equal(mon3Cleared.active, false, 'MON-3: STOP_MONITOR clears active');
