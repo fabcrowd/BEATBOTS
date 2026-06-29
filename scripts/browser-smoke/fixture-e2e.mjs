@@ -17,17 +17,6 @@ let browser;
 let userDataDir;
 let fixtureServer;
 
-function attachTchConsoleCapture(page) {
-  const logs = [];
-  page.on('console', (msg) => {
-    const text = msg.text();
-    if (text.includes('[TCH]') || text.includes('[WMT]') || text.includes('[SC]')) {
-      logs.push(text);
-    }
-  });
-  return logs;
-}
-
 async function attachCdpConsoleCapture(page) {
   const logs = [];
   const cdp = await page.createCDPSession();
