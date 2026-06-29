@@ -288,6 +288,11 @@ function wmIsProductQueued() {
   return atc.disabled || atc.getAttribute('aria-disabled') === 'true';
 }
 
+/** WM-2/WM-4: sacred lock only when queue is confirmed — not disabled ATC alone. */
+function wmShouldEnterSacredQueueWait() {
+  return wmHasQueueIndicators();
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -523,6 +528,32 @@ async function wmWaitInProductQueue(settings, oid) {
 }
 
 /**
+ * Pre-drop price guard — poll until live DOM price drops; does NOT arm sacred lock (WM-2).
+ */
+async function wmWaitForPriceDrop(settings) {
+  const maxPrice = parseFloat(settings.walmartMaxPrice) || 0;
+  if (maxPrice <= 0) return;
+
+  wmShowToast(`Price above max $${maxPrice.toFixed(2)} — waiting for drop price`, 'persistent');
+  console.log(`[WMT] Price guard wait — no sacred lock until queue confirmed`);
+
+  const maxWaitMs = 45 * 60 * 1000;
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    await wmSleep(1000);
+    const currentPrice = wmGetCurrentPrice(true);
+    if (currentPrice === null || currentPrice <= maxPrice) {
+      wmShowToast('Drop price reached — continuing', 'success');
+      console.log(`[WMT] Price guard cleared at $${currentPrice ?? 'unknown'}`);
+      return;
+    }
+  }
+
+  wmShowToast('Price wait exceeded 45 min — take over manually', 'error');
+  console.warn('[WMT] Price guard wait timed out after 45 min');
+}
+
+/**
  * Handles Walmart's /qp waiting room page (white-labeled Queue-it).
  * The queue auto-redirects to /checkout when the user's position clears —
  * we must stay on the page and wait, not navigate or reload.
@@ -569,18 +600,16 @@ async function wmHandleProductPage(settings, oid) {
     const currentPrice = wmGetCurrentPrice();
     if (currentPrice !== null && currentPrice > maxPrice) {
       wmShowToast(`Price $${currentPrice.toFixed(2)} > max $${maxPrice.toFixed(2)} — holding position`, 'persistent');
-      console.log(`[WMT] Price guard: $${currentPrice} > max $${maxPrice} — entering queue wait`);
-      // Don't ATC yet, but DO hold position via queue wait (handles both queue + pre-drop price)
-      await wmWaitInProductQueue(settings, oid);
-      return;
+      console.log(`[WMT] Price guard: $${currentPrice} > max $${maxPrice} — waiting for drop price (no sacred lock)`);
+      await wmWaitForPriceDrop(settings);
     }
   }
 
   // ── Check for product-page queue ─────────────────────────────────────────
   // During drops, Walmart's queue appears on the /ip/... product page itself.
-  // The ATC button exists but is disabled until your queue position clears.
-  // Navigating away loses your spot — we must wait here.
-  if (wmHasQueueIndicators() || wmIsProductQueued()) {
+  // Sacred lock only when queue indicators are present (WM-2/WM-4) — disabled
+  // ATC alone before drop is not queue.
+  if (wmShouldEnterSacredQueueWait()) {
     await wmWaitInProductQueue(settings, oid);
     return;
   }
@@ -608,7 +637,7 @@ async function wmHandleProductPage(settings, oid) {
 
   if (!atcBtn) {
     // Re-check: did the queue load while we were waiting?
-    if (wmHasQueueIndicators() || wmIsProductQueued()) {
+    if (wmShouldEnterSacredQueueWait()) {
       await wmWaitInProductQueue(settings, oid);
       return;
     }
@@ -669,12 +698,14 @@ async function wmHandleQueue(settings) {
   wmShowToast('In queue — waiting…', 'persistent');
   console.log('[WMT] Queue detected — passive wait started');
 
-  // Send the monitored product URL (not location.href which is /checkout) so
-  // background.js can match it against the normalised product URL in inQueueUrls.
-  const lockUrl = settings.productUrl || location.href;
-  try {
-    chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl });
-  } catch (_) {}
+  // Lock MUST use the monitored product URL — poll keys inQueueUrls by normalized
+  // /ip/... URL. location.href is /checkout and would never match (WM-4).
+  const lockUrl = settings?.productUrl;
+  if (lockUrl) {
+    try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
+  } else {
+    console.warn('[WMT] wmHandleQueue: no productUrl in settings — background nav lock NOT set');
+  }
 
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();
