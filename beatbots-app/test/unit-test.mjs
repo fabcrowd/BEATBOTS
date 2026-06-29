@@ -664,6 +664,54 @@ await test('Run log — trim to max 100 per task', () => {
   assert.equal(logs.filter(l => l.taskId === 2).length, 1);
 });
 
+// ─── Test: Task runner lifecycle ─────────────────────────────────────────────
+
+await test('Task runner — running map cleared on all exit paths (finally)', async () => {
+  const running = new Map();
+
+  async function runTask(taskId, scenario) {
+    try {
+      if (scenario === 'login_fail') throw new Error('login failed');
+      if (scenario === 'early_return') return;
+    } finally {
+      running.delete(taskId);
+    }
+  }
+
+  running.set(1, {});
+  await runTask(1, 'login_fail').catch(() => {});
+  assert.equal(running.has(1), false, 'login failure clears running');
+
+  running.set(2, {});
+  await runTask(2, 'early_return');
+  assert.equal(running.has(2), false, 'early return clears running');
+});
+
+await test('Task runner — stop keeps running until promise settles', async () => {
+  const running = new Map();
+  let aborted = false;
+
+  function stopTask(id) {
+    aborted = true;
+    // Intentionally do not delete — matches fixed stopTask behavior.
+  }
+
+  async function runTask(id) {
+    try {
+      while (!aborted) await new Promise((r) => setTimeout(r, 5));
+    } finally {
+      running.delete(id);
+    }
+  }
+
+  running.set(1, {});
+  const p = runTask(1);
+  stopTask(1);
+  assert.equal(running.has(1), true, 'still marked running immediately after stop');
+  await p;
+  assert.equal(running.has(1), false, 'cleared after async work finishes');
+});
+
 // ─── Test: WS Bridge — message parsing ───────────────────────────────────────
 
 await test('WS Bridge — handles valid + invalid JSON messages', () => {

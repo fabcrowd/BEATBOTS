@@ -69,7 +69,7 @@ export class TaskRunner extends EventEmitter {
     const rt = this.running.get(taskId)
     if (!rt) return
     rt.abortController.abort()
-    this.running.delete(taskId)
+    // Keep task in `running` until runTask() settles — prevents stop→start double checkout.
     this.setTaskStatus(taskId, 'stopped', 'Stopped')
   }
 
@@ -84,6 +84,7 @@ export class TaskRunner extends EventEmitter {
   // ── Core loop ──────────────────────────────────────────────────────────────
 
   private async runTask(task: Task, signal: AbortSignal): Promise<void> {
+    try {
     const settings: TaskSettings = { ...defaultSettings(), ...task.settings }
     let retryCount = 0
     let successCount = 0
@@ -102,25 +103,21 @@ export class TaskRunner extends EventEmitter {
 
     if (!profile) {
       this.setTaskStatus(task.id, 'error', 'No profile configured')
-      this.running.delete(task.id)
       return
     }
 
     if (!account && task.mode === 'login') {
       this.setTaskStatus(task.id, 'error', 'No account configured for login task')
-      this.running.delete(task.id)
       return
     }
 
     if (!account && task.mode === 'checkout' && !settings.useGuestCheckout) {
       this.setTaskStatus(task.id, 'error', 'No account configured. Enable Guest Checkout or add an account.')
-      this.running.delete(task.id)
       return
     }
 
     if (products.length === 0 && task.mode !== 'login') {
       this.setTaskStatus(task.id, 'error', 'No products in group')
-      this.running.delete(task.id)
       return
     }
 
@@ -349,7 +346,9 @@ export class TaskRunner extends EventEmitter {
       }
     }
 
-    this.running.delete(task.id)
+    } finally {
+      this.running.delete(task.id)
+    }
   }
 
   // ── Login-only task ────────────────────────────────────────────────────────
@@ -362,7 +361,6 @@ export class TaskRunner extends EventEmitter {
     } catch (e: any) {
       this.setTaskStatus(task.id, 'error', `Login failed: ${e.message}`)
     }
-    this.running.delete(task.id)
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
