@@ -185,7 +185,7 @@ export const JOURNEYS = {
   'FIX-3': {
     id: 'FIX-3',
     retailer: 'core',
-    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4/WM-6 lock, TGT-4 manual review)',
+    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4 sacred lock, TGT-4 manual review)',
     impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],

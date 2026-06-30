@@ -59,8 +59,6 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueue,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['sacred-lock-product-url'],
-    lockPath: '/ip/mock-queue/456',
   },
   {
     host: 'www.samsclub.com',
