@@ -2,6 +2,7 @@
 /**
  * FIX-2: Extension content scripts initialize on offline fixture pages served at
  * retailer hostnames (local HTTP + Chrome host-resolver-rules).
+ * FIX-3: Per-route journey invariant assertions (sacred lock, manual review).
  *
  * Run: node scripts/browser-smoke/fixture-e2e.mjs
  */
@@ -16,6 +17,90 @@ import {
 let browser;
 let userDataDir;
 let fixtureServer;
+
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+async function sendBg(page, msg) {
+  return page.evaluate(
+    (m) =>
+      new Promise((resolve, reject) => {
+        try {
+          chrome.runtime.sendMessage(m, (res) => {
+            const err = chrome.runtime.lastError;
+            if (err) reject(new Error(err.message));
+            else resolve(res);
+          });
+        } catch (e) {
+          reject(e);
+        }
+      }),
+    msg
+  );
+}
+
+async function setStorage(popup, data) {
+  await popup.evaluate(
+    (d) =>
+      new Promise((resolve, reject) => {
+        try {
+          chrome.storage.local.set(d, () => {
+            const err = chrome.runtime.lastError;
+            if (err) reject(new Error(err.message));
+            else resolve();
+          });
+        } catch (e) {
+          reject(e);
+        }
+      }),
+    data
+  );
+}
+
+async function resetQueueState(popup) {
+  await sendBg(popup, { type: 'STOP_MONITOR' }).catch(() => {});
+}
+
+const FIXTURE_STORAGE_BASE = {
+  enabled: true,
+  walmartUseSavedSession: true,
+  checkoutSound: false,
+  autoPlaceOrder: false,
+  shipping: {
+    firstName: 'Fixture',
+    lastName: 'Test',
+    address1: '1 Test St',
+    city: 'City',
+    state: 'CA',
+    zip: '90210',
+  },
+};
+
+async function applyRouteStorage(popup, route, port) {
+  await resetQueueState(popup);
+  const pageUrl = `http://${route.host}:${port}${route.path}`;
+  const data = { ...FIXTURE_STORAGE_BASE };
+
+  if (route.invariants?.includes('sacred-lock-product-url')) {
+    const productPath = route.lockPath || route.path;
+    const productUrl = `http://${route.host}:${port}${productPath}`;
+    data.monitor = {
+      active: true,
+      products: [{ url: productUrl, oid: null }],
+      counts: {},
+      tabIds: [],
+    };
+  }
+
+  await setStorage(popup, data);
+  return pageUrl;
+}
 
 async function attachCdpConsoleCapture(page) {
   const logs = [];
@@ -35,6 +120,72 @@ async function attachCdpConsoleCapture(page) {
   return logs;
 }
 
+async function assertRouteInvariants(popup, route, logs, page, port) {
+  const invariants = route.invariants || [];
+  if (!invariants.length) return;
+
+  const status = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const inQueue = status?.inQueueUrls || [];
+  const pageUrl = `http://${route.host}:${port}${route.path}`;
+  const normPageUrl = normalizeProductUrl(pageUrl);
+
+  if (invariants.includes('no-sacred-lock')) {
+    assert.equal(
+      inQueue.length,
+      0,
+      `FIX-3 ${route.journey}: pre-drop/FCFS must not arm sacred lock on ${pageUrl}, got inQueueUrls=${JSON.stringify(inQueue)}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 ${route.journey}: must not enter product-page queue wait on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('sacred-lock')) {
+    assert.ok(
+      inQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 ${route.journey}: expected sacred lock for ${normPageUrl}, got inQueueUrls=${JSON.stringify(inQueue)}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 ${route.journey}: expected product-page queue log on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('sacred-lock-product-url')) {
+    const productPath = route.lockPath || route.path;
+    const normProductUrl = normalizeProductUrl(`http://${route.host}:${port}${productPath}`);
+    assert.ok(
+      inQueue.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 ${route.journey}: checkout queue must lock product URL ${normProductUrl}, got inQueueUrls=${JSON.stringify(inQueue)}`
+    );
+    assert.ok(
+      !inQueue.some((u) => normalizeProductUrl(u).endsWith('/checkout')),
+      `FIX-3 ${route.journey}: sacred lock must use product URL, not /checkout`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue detected')),
+      `FIX-3 ${route.journey}: expected checkout queue log on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('tgt4-manual-review')) {
+    assert.ok(
+      logs.some((l) => l.includes('[TCH] review reached')),
+      `FIX-3 TGT-4: expected review reached on ${pageUrl}, got: ${logs.slice(0, 8).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('autoPlaceOrder: clicking Place Order')),
+      `FIX-3 TGT-4: must not auto-click Place Order when autoPlaceOrder is off`
+    );
+    const clicked = await page.evaluate(() => {
+      const btn = document.querySelector('[data-test="placeOrderButton"]');
+      return btn?.dataset?.tchFixtureClicked === '1';
+    });
+    assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
+  }
+}
+
 async function enableExtension(popup, extensionId, timeout) {
   await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
     waitUntil: 'domcontentloaded',
@@ -45,20 +196,7 @@ async function enableExtension(popup, extensionId, timeout) {
     const toggle = document.getElementById('enableToggle');
     if (toggle && !toggle.checked) toggle.click();
   });
-  await popup.evaluate(
-    () =>
-      new Promise((resolve, reject) => {
-        try {
-          chrome.storage.local.set({ enabled: true, walmartUseSavedSession: true }, () => {
-            const err = chrome.runtime.lastError;
-            if (err) reject(new Error(err.message));
-            else resolve();
-          });
-        } catch (e) {
-          reject(e);
-        }
-      })
-  );
+  await setStorage(popup, FIXTURE_STORAGE_BASE);
 }
 
 async function main() {
@@ -76,7 +214,11 @@ async function main() {
   const popup = await browser.newPage();
   await enableExtension(popup, extensionId, TIMEOUT);
 
+  let invariantRoutes = 0;
+
   for (const route of FIXTURE_E2E_ROUTES) {
+    await applyRouteStorage(popup, route, port);
+
     const page = await browser.newPage();
     const logs = await attachCdpConsoleCapture(page);
     const url = `http://${route.host}:${port}${route.path}`;
@@ -101,11 +243,16 @@ async function main() {
       );
     }
 
+    if (route.invariants?.length) {
+      invariantRoutes += 1;
+      await assertRouteInvariants(popup, route, logs, page, port);
+    }
+
     await page.close();
   }
 
   console.log(
-    `fixture-e2e PASS (FIX-2): ${FIXTURE_E2E_ROUTES.length} retailer fixture pages — content scripts init offline`
+    `fixture-e2e PASS (FIX-2 + FIX-3): ${FIXTURE_E2E_ROUTES.length} retailer fixture pages — init + ${invariantRoutes} invariant routes`
   );
 }
 

@@ -182,6 +182,14 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],
   },
+  'FIX-3': {
+    id: 'FIX-3',
+    retailer: 'core',
+    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4/WM-6 lock, TGT-4 manual review)',
+    impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
+    coverage: 'strong',
+    tests: ['fixture-e2e.mjs'],
+  },
 };
 
 export const INVARIANTS = {
@@ -236,7 +244,7 @@ export const EXTENSION_SUITE = {
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
   'fixture-smoke.mjs': ['FIX-1'],
-  'fixture-e2e.mjs': ['FIX-2'],
+  'fixture-e2e.mjs': ['FIX-2', 'FIX-3'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */

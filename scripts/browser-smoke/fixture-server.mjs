@@ -28,6 +28,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetCheckoutReview,
     initLog: '[TCH] init',
     journey: 'TGT-4',
+    invariants: ['tgt4-manual-review'],
   },
   {
     host: 'www.walmart.com',
@@ -35,6 +36,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPreDrop,
     initLog: '[WMT] init',
     journey: 'WM-2',
+    invariants: ['no-sacred-lock'],
   },
   {
     host: 'www.walmart.com',
@@ -42,6 +44,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductQueue,
     initLog: '[WMT] init',
     journey: 'WM-4',
+    invariants: ['sacred-lock'],
   },
   {
     host: 'www.walmart.com',
@@ -56,6 +59,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueue,
     initLog: '[WMT] init',
     journey: 'WM-6',
+    invariants: ['sacred-lock-product-url'],
+    lockPath: '/ip/mock-queue/456',
   },
   {
     host: 'www.samsclub.com',
@@ -63,6 +68,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.samsclubProductFcfs,
     initLog: '[TCH] init',
     journey: 'SC-3',
+    invariants: ['no-sacred-lock'],
   },
 ];
 
