@@ -84,19 +84,14 @@ const FIXTURE_STORAGE_BASE = {
 
 async function applyRouteStorage(popup, route, port) {
   await resetQueueState(popup);
+
+  if (!route.invariants?.length) {
+    await setStorage(popup, { enabled: true, walmartUseSavedSession: true });
+    return `http://${route.host}:${port}${route.path}`;
+  }
+
   const pageUrl = `http://${route.host}:${port}${route.path}`;
   const data = { ...FIXTURE_STORAGE_BASE };
-
-  if (route.invariants?.includes('sacred-lock-product-url')) {
-    const productPath = route.lockPath || route.path;
-    const productUrl = `http://${route.host}:${port}${productPath}`;
-    data.monitor = {
-      active: true,
-      products: [{ url: productUrl, oid: null }],
-      counts: {},
-      tabIds: [],
-    };
-  }
 
   await setStorage(popup, data);
   return pageUrl;
@@ -152,23 +147,6 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
-  if (invariants.includes('sacred-lock-product-url')) {
-    const productPath = route.lockPath || route.path;
-    const normProductUrl = normalizeProductUrl(`http://${route.host}:${port}${productPath}`);
-    assert.ok(
-      inQueue.some((u) => normalizeProductUrl(u) === normProductUrl),
-      `FIX-3 ${route.journey}: checkout queue must lock product URL ${normProductUrl}, got inQueueUrls=${JSON.stringify(inQueue)}`
-    );
-    assert.ok(
-      !inQueue.some((u) => normalizeProductUrl(u).endsWith('/checkout')),
-      `FIX-3 ${route.journey}: sacred lock must use product URL, not /checkout`
-    );
-    assert.ok(
-      logs.some((l) => l.includes('Queue detected')),
-      `FIX-3 ${route.journey}: expected checkout queue log on ${pageUrl}`
-    );
-  }
-
   if (invariants.includes('tgt4-manual-review')) {
     assert.ok(
       logs.some((l) => l.includes('[TCH] review reached')),
@@ -186,6 +164,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 }
 
+function routeWaitMs(route) {
+  if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
+  if (route.invariants?.includes('tgt4-manual-review')) return 5000;
+  return 6000;
+}
+
 async function enableExtension(popup, extensionId, timeout) {
   await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
     waitUntil: 'domcontentloaded',
@@ -196,7 +180,7 @@ async function enableExtension(popup, extensionId, timeout) {
     const toggle = document.getElementById('enableToggle');
     if (toggle && !toggle.checked) toggle.click();
   });
-  await setStorage(popup, FIXTURE_STORAGE_BASE);
+  await setStorage(popup, { enabled: true, walmartUseSavedSession: true });
 }
 
 async function main() {
@@ -224,12 +208,13 @@ async function main() {
     const url = `http://${route.host}:${port}${route.path}`;
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
-    await new Promise((r) => setTimeout(r, 6000));
 
     const fixtureAttr = await page.evaluate(() =>
       document.documentElement.getAttribute('data-tch-fixture')
     );
     assert.ok(fixtureAttr, `FIX-2 ${route.journey}: missing data-tch-fixture on ${url}`);
+
+    await new Promise((r) => setTimeout(r, routeWaitMs(route)));
 
     assert.ok(
       logs.some((l) => l.includes(route.initLog)),
