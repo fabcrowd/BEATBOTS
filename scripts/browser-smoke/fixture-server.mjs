@@ -51,7 +51,17 @@ export const FIXTURE_E2E_ROUTES = [
     path: '/qp/waiting-room',
     file: MOCK_URLS.walmartQpRoom,
     initLog: '[WMT] init',
-    journey: 'WM-3',
+    journey: 'WM-4',
+    invariants: ['no-sacred-lock', 'wm4-qp-no-producturl'],
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/qp/waiting-room-monitored',
+    file: MOCK_URLS.walmartQpRoom,
+    initLog: '[WMT] init',
+    journey: 'WM-4',
+    invariants: ['sacred-lock-qp', 'wm5-sacred-survives-nav-failed'],
+    sacredLockProductPath: '/ip/mock-qp-product/999',
   },
   {
     host: 'www.walmart.com',

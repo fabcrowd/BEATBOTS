@@ -155,6 +155,38 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('sacred-lock-qp')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      inQueue.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 ${route.journey}: /qp must sacred-lock product ${normProductUrl}, got inQueueUrls=${JSON.stringify(inQueue)}`
+    );
+    assert.ok(
+      !inQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 ${route.journey}: /qp page URL must not be the sacred lock key`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room detected')),
+      `FIX-3 ${route.journey}: expected /qp waiting room log on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 ${route.journey}: monitored /qp must not warn about missing productUrl`
+    );
+  }
+
+  if (invariants.includes('wm4-qp-no-producturl')) {
+    assert.ok(
+      logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-4: /qp without monitor must warn about missing productUrl on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room detected')),
+      `FIX-3 WM-4: expected /qp waiting room log on ${pageUrl}`
+    );
+  }
+
   if (invariants.includes('sacred-lock-checkout')) {
     const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
     const normProductUrl = normalizeProductUrl(productUrl);
@@ -211,17 +243,21 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 
   if (invariants.includes('wm5-sacred-survives-nav-failed')) {
+    const lockUrl = route.sacredLockProductPath
+      ? `http://${route.host}:${port}${route.sacredLockProductPath}`
+      : pageUrl;
+    const normLockUrl = normalizeProductUrl(lockUrl);
     await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: pageUrl });
     const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
     const afterInQueue = after?.inQueueUrls || [];
     const afterNavLock = after?.navigationLock || [];
     assert.ok(
-      afterInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
-      `FIX-3 WM-5: sacred lock must survive WALMART_NAV_FAILED on ${normPageUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+      afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: sacred lock must survive WALMART_NAV_FAILED on ${normLockUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
     );
     assert.ok(
-      !afterNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
-      `FIX-3 WM-5: WALMART_NAV_FAILED must clear navigationLock on ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: WALMART_NAV_FAILED must clear navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
     );
   }
 }
