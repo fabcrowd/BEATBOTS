@@ -36,7 +36,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPreDrop,
     initLog: '[WMT] init',
     journey: 'WM-2',
-    invariants: ['no-sacred-lock'],
+    invariants: ['no-sacred-lock', 'nav-failed-releases-lock'],
   },
   {
     host: 'www.walmart.com',
@@ -44,7 +44,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductQueue,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['sacred-lock'],
+    invariants: ['sacred-lock', 'wm5-sacred-survives-nav-failed'],
   },
   {
     host: 'www.walmart.com',
@@ -69,6 +69,14 @@ export const FIXTURE_E2E_ROUTES = [
     initLog: '[TCH] init',
     journey: 'SC-3',
     invariants: ['no-sacred-lock'],
+  },
+  {
+    host: 'www.samsclub.com',
+    path: '/p/mock-fcfs-restock/790',
+    file: MOCK_URLS.samsclubProductFcfsRestock,
+    initLog: '[TCH] init',
+    journey: 'SC-6',
+    invariants: ['no-sacred-lock', 'nav-failed-releases-lock'],
   },
 ];
 

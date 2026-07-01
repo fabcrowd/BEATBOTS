@@ -72,6 +72,15 @@ const FIXTURE_MARKERS = {
       'data-automation-id="add-to-cart-btn"',
     ],
   },
+  samsclubProductFcfsRestock: {
+    fixtureId: 'samsclub-product-fcfs-restock',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-fcfs-restock"',
+      'data-automation-id="add-to-cart-btn"',
+      'disabled',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

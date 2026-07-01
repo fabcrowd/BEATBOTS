@@ -187,9 +187,47 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     });
     assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
   }
+
+  if (invariants.includes('nav-failed-releases-lock')) {
+    const releasingLog = route.host.includes('samsclub')
+      ? logs.some((l) => l.includes('releasing nav lock'))
+      : logs.some((l) => l.includes('releasing navigation lock'));
+    assert.ok(
+      releasingLog,
+      `FIX-3 ${route.journey}: expected NAV_FAILED release log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 ${route.journey}: NAV_FAILED must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 ${route.journey}: NAV_FAILED must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
+  if (invariants.includes('wm5-sacred-survives-nav-failed')) {
+    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: pageUrl });
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.ok(
+      afterInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-5: sacred lock must survive WALMART_NAV_FAILED on ${normPageUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-5: WALMART_NAV_FAILED must clear navigationLock on ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
 }
 
 function routeWaitMs(route) {
+  if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;
   return 6000;
