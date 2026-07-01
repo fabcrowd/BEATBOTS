@@ -72,8 +72,12 @@ assert(
   'auth gate before shipping/saved'
 );
 assert(
-  S.resolveCheckoutStep({ hasPlaceOrder: true, hasAuthGate: true }) === 'review',
-  'review before signin'
+  S.resolveCheckoutStep({ hasPlaceOrder: true, hasAuthGate: true }) === 'signin',
+  'signin before review when auth gate present'
+);
+assert(
+  S.resolveCheckoutStep({ hasPlaceOrder: true, hasAuthGate: false }) === 'review',
+  'review when place order and no auth gate'
 );
 assert(
   S.resolveCheckoutStep({ useSavedPayment: true, hasEnabledContinueButton: true }) === 'saved',
@@ -81,10 +85,11 @@ assert(
 );
 assert(S.resolveCheckoutStep({}) === 'unknown', 'empty signals unknown');
 
-assert(S.shouldAutoSignInOnCheckoutPending('unknown', true), 'auto signin on unknown with creds');
-assert(S.shouldAutoSignInOnCheckoutPending('signin', true), 'auto signin on signin with creds');
-assert(!S.shouldAutoSignInOnCheckoutPending('unknown', false), 'no auto signin without creds');
-assert(!S.shouldAutoSignInOnCheckoutPending('shipping', true), 'no auto signin on shipping');
+assert(S.shouldAutoSignInOnCheckoutPending('unknown', true, true), 'auto signin on unknown with creds and auth gate');
+assert(!S.shouldAutoSignInOnCheckoutPending('unknown', true, false), 'no auto signin on unknown without auth gate');
+assert(S.shouldAutoSignInOnCheckoutPending('signin', true, false), 'auto signin on signin with creds');
+assert(!S.shouldAutoSignInOnCheckoutPending('unknown', false, true), 'no auto signin without creds');
+assert(!S.shouldAutoSignInOnCheckoutPending('shipping', true, true), 'no auto signin on shipping');
 
 assert(S.shouldAttemptGuest({ autoSignIn: true, hasCredentials: false, alreadyTried: false }), 'guest when auto signin but incomplete creds');
 

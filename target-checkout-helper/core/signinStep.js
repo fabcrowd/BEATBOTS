@@ -92,8 +92,8 @@
    */
   function resolveCheckoutStep(opts) {
     opts = opts || {};
-    if (opts.hasPlaceOrder) return 'review';
     if (opts.hasAuthGate) return 'signin';
+    if (opts.hasPlaceOrder) return 'review';
     if (opts.hasCardNumber) return 'payment';
     if (opts.hasShippingFields) return 'shipping';
     if (opts.useSavedPayment && opts.hasEnabledContinueButton) return 'saved';
@@ -105,9 +105,11 @@
    * @param {boolean} hasCredentials
    * @returns {boolean}
    */
-  function shouldAutoSignInOnCheckoutPending(step, hasCredentials) {
+  function shouldAutoSignInOnCheckoutPending(step, hasCredentials, hasAuthGate) {
     if (!hasCredentials) return false;
-    return step === 'signin' || step === 'unknown';
+    if (step === 'signin') return true;
+    if (step === 'unknown') return !!hasAuthGate;
+    return false;
   }
 
   /**
