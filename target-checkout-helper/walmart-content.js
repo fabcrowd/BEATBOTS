@@ -1111,7 +1111,8 @@ async function _wmInit() {
   // On product pages match by pathname; on cart/checkout use any Walmart product
   // in the monitor list (the background navigated us here, so there's at least one).
   const allProducts = data.monitor?.products || [];
-  const walmartProducts = allProducts.filter(p => /walmart\.com\/ip\//i.test(p.url));
+  // Optional :port supports local fixture e2e (host-resolver-rules + explicit port).
+  const walmartProducts = allProducts.filter(p => /walmart\.com(?::\d+)?\/ip\//i.test(p.url));
   const matchedProduct = page === 'product'
     ? walmartProducts.find(p => {
         try { return new URL(p.url).pathname === location.pathname; } catch { return false; }

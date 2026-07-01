@@ -93,6 +93,14 @@ async function applyRouteStorage(popup, route, port) {
   const pageUrl = `http://${route.host}:${port}${route.path}`;
   const data = { ...FIXTURE_STORAGE_BASE };
 
+  if (route.sacredLockProductPath) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    data.monitor = {
+      active: true,
+      products: [{ url: productUrl, qty: 1, name: 'Fixture WM-6', oid: null }],
+    };
+  }
+
   await setStorage(popup, data);
   return pageUrl;
 }
@@ -144,6 +152,23 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.ok(
       logs.some((l) => l.includes('Product-page queue detected')),
       `FIX-3 ${route.journey}: expected product-page queue log on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('sacred-lock-checkout')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      inQueue.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 ${route.journey}: expected sacred lock on product ${normProductUrl}, got inQueueUrls=${JSON.stringify(inQueue)}`
+    );
+    assert.ok(
+      !inQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 ${route.journey}: checkout URL must not be the sacred lock key`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue detected')),
+      `FIX-3 ${route.journey}: expected checkout queue log on ${pageUrl}`
     );
   }
 
