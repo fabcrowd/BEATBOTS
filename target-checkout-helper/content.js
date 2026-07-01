@@ -215,7 +215,8 @@ async function handleSignInPage(settings, opts = {}) {
   try { emailStepDone = sessionStorage.getItem(SIGNIN_EMAIL_STEP_KEY) === '1'; } catch {}
 
   if (!emailInput && getPageType() === 'checkout') {
-    const root = getCheckoutAuthRoot() || document;
+    const root = getCheckoutAuthRoot();
+    if (!root) return;
     emailInput = Array.from(root.querySelectorAll('input')).find((el) => {
       if (!isVisible(el)) return false;
       const t = (el.type || 'text').toLowerCase();
@@ -362,9 +363,7 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
     setTimeout(() => {
       obs.disconnect();
       console.log('[TCH] auto sign-in: timed out waiting for password step');
-      if (getPageType() === 'checkout' && (looksLoggedInOnTarget() || isCheckoutSignedInConfirm())) {
-        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      }
+      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       resolve();
     }, timeoutMs);
   });
@@ -1279,9 +1278,16 @@ function getPageType() {
   return 'other';
 }
 
+function hasVisiblePlaceOrder() {
+  const bySel = document.querySelector(SEL.placeOrder);
+  if (bySel && isVisible(bySel)) return true;
+  const byText = findByText('place order');
+  return !!(byText && isVisible(byText));
+}
+
 function getCheckoutStep(useSavedPayment = false) {
   const opts = {
-    hasPlaceOrder: !!(document.querySelector(SEL.placeOrder) || findByText('place order')),
+    hasPlaceOrder: hasVisiblePlaceOrder(),
     hasAuthGate: hasCheckoutAuthGate(),
     hasCardNumber: !!document.querySelector(SEL.cardNumber),
     hasShippingFields: ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
@@ -1543,7 +1549,7 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     showToast('Sign in or choose guest checkout — this tab will not auto-refresh.', 'persistent');
   }
   const autoSignIn = typeof TCH_SIGNIN_STEP !== 'undefined'
-    ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
+    ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials, hasCheckoutAuthGate())
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
     if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
@@ -1610,6 +1616,8 @@ function watchForCheckoutStep(settings, options = {}) {
         lastPendingRetryMs = Date.now();
         pendingRetryCount++;
         await runCheckoutPendingActions(settings, step, { silent: pendingRetryCount > 1 });
+      } else if (pendingRetryCount >= PENDING_MAX_RETRIES) {
+        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       }
       return;
     }
