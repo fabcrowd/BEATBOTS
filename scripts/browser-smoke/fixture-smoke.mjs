@@ -64,6 +64,15 @@ const FIXTURE_MARKERS = {
       'estimated wait time',
     ],
   },
+  walmartProductPx: {
+    fixtureId: 'walmart-product-px',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-px"',
+      'hang tight',
+      "we're loading your experience",
+    ],
+  },
   samsclubProductFcfs: {
     fixtureId: 'samsclub-product-fcfs',
     journeys: ['SC-3'],

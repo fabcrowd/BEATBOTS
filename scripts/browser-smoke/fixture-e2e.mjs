@@ -260,9 +260,37 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 WM-5: WALMART_NAV_FAILED must clear navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
     );
   }
+
+  if (invariants.includes('px-timeout-nav-failed')) {
+    assert.ok(
+      logs.some((l) => l.includes('PX/loading page detected')),
+      `FIX-3 WM-6: expected PX guard log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('PX page still showing') && l.includes('releasing nav lock')),
+      `FIX-3 WM-6: expected PX timeout NAV_FAILED log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 WM-6: PX page must not enter product-page queue wait on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-6: PX timeout must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-6: PX timeout must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
 }
 
 function routeWaitMs(route) {
+  if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;

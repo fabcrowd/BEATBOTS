@@ -179,7 +179,7 @@ export const JOURNEYS = {
   'FIX-3': {
     id: 'FIX-3',
     retailer: 'core',
-    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4/WM-5/WM-6 sacred lock + /qp error paths, SC-6 NAV_FAILED, TGT-4 manual review)',
+    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4/WM-5/WM-6 sacred lock + /qp + PX timeout error paths, SC-6 NAV_FAILED, TGT-4 manual review)',
     impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],
@@ -266,6 +266,7 @@ export const MOCK_URLS = {
   walmartProductQueue: 'fixtures/walmart-product-queue.html',
   walmartQpRoom: 'fixtures/walmart-qp-room.html',
   walmartCheckoutQueue: 'fixtures/walmart-checkout-queue.html',
+  walmartProductPx: 'fixtures/walmart-product-px.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
   samsclubProductFcfsRestock: 'fixtures/samsclub-product-fcfs-restock.html',
 };

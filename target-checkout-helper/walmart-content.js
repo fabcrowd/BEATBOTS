@@ -1095,12 +1095,16 @@ async function _wmInit() {
   if (wmIsPxPage()) {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
+    // Offline fixture e2e uses data-tch-fixture to shorten the 2min guard (fixture-e2e.mjs WM-6).
+    const pxTimeoutMs = document.documentElement?.hasAttribute('data-tch-fixture')
+      ? 2000
+      : 2 * 60 * 1000;
     setTimeout(() => {
       if (wmIsPxPage()) {
-        console.log('[WMT] PX page still showing after 2min — releasing nav lock');
+        console.log('[WMT] PX page still showing — releasing nav lock');
         try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
       }
-    }, 2 * 60 * 1000);
+    }, pxTimeoutMs);
     return;
   }
 
