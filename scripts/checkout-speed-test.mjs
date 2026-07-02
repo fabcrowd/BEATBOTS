@@ -267,6 +267,21 @@ section('Sign-in step helpers');
   if (r.status !== 0) process.exitCode = 1;
 }
 
+section('Checkout-flow tab preservation (stopMonitor guard)');
+{
+  function isInCheckoutFlow(url) {
+    if (!url) return false;
+    try {
+      const p = new URL(url).pathname;
+      return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(p);
+    } catch { return false; }
+  }
+  assert(isInCheckoutFlow('https://www.target.com/checkout'), 'checkout path preserved');
+  assert(isInCheckoutFlow('https://www.target.com/cart'), 'cart path preserved');
+  assert(isInCheckoutFlow('https://www.target.com/thank-you'), 'thank-you path preserved');
+  assert(!isInCheckoutFlow('https://www.target.com/p/-/A-12345'), 'product tab may be closed');
+}
+
 section('End-to-end checkout latency');
 console.log('Not measured here (requires Chrome + target.com + your account).');
 console.log('When you reach review, the extension logs: [TCH] timing checkout_total_to_review: …ms');
