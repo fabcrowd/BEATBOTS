@@ -89,6 +89,15 @@ const FIXTURE_MARKERS = {
       'class="px-block-overlay"',
     ],
   },
+  walmartProductPxOverride: {
+    fixtureId: 'walmart-product-px-override',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-px-override"',
+      'data-tch-px-timeout-ms="750"',
+      'hang tight',
+    ],
+  },
   samsclubProductFcfs: {
     fixtureId: 'samsclub-product-fcfs',
     journeys: ['SC-3'],

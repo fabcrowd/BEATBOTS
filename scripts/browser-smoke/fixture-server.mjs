@@ -100,6 +100,16 @@ export const FIXTURE_E2E_ROUTES = [
     sacredLockProductPath: '/ip/mock-px-block/557',
   },
   {
+    host: 'www.walmart.com',
+    path: '/ip/mock-px-override/558',
+    file: MOCK_URLS.walmartProductPxOverride,
+    initLog: '[WMT] PX/loading page detected',
+    journey: 'WM-6',
+    invariants: ['no-sacred-lock', 'px-timeout-nav-failed', 'px-timeout-ms-override'],
+    sacredLockProductPath: '/ip/mock-px-override/558',
+    pxTimeoutMs: 750,
+  },
+  {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,

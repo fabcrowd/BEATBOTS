@@ -266,6 +266,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       logs.some((l) => l.includes('PX/loading page detected')),
       `FIX-3 WM-6: expected PX guard log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
     );
+    if (invariants.includes('px-timeout-ms-override')) {
+      assert.ok(
+        route.pxTimeoutMs > 0,
+        `FIX-3 WM-6: px-timeout-ms-override route must declare pxTimeoutMs on ${pageUrl}`
+      );
+    }
     assert.ok(
       logs.some((l) => l.includes('PX page still showing') && l.includes('releasing nav lock')),
       `FIX-3 WM-6: expected PX timeout NAV_FAILED log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
@@ -290,6 +296,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 }
 
 function routeWaitMs(route) {
+  if (route.pxTimeoutMs > 0) return route.pxTimeoutMs + 900;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
