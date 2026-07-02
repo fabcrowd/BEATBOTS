@@ -293,6 +293,18 @@ function wmShouldEnterSacredQueueWait() {
   return wmHasQueueIndicators();
 }
 
+/** WM-6: PX hang-tight guard duration — fixture default, prod 2min, optional test override. */
+function wmPxTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-px-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  if (root?.hasAttribute('data-tch-fixture')) return 2000;
+  return 2 * 60 * 1000;
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -1095,10 +1107,7 @@ async function _wmInit() {
   if (wmIsPxPage()) {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
-    // Offline fixture e2e uses data-tch-fixture to shorten the 2min guard (fixture-e2e.mjs WM-6).
-    const pxTimeoutMs = document.documentElement?.hasAttribute('data-tch-fixture')
-      ? 2000
-      : 2 * 60 * 1000;
+    const pxTimeoutMs = wmPxTimeoutMs();
     setTimeout(() => {
       if (wmIsPxPage()) {
         console.log('[WMT] PX page still showing — releasing nav lock');

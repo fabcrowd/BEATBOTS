@@ -6,6 +6,14 @@
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const WM_SRC = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../../target-checkout-helper/walmart-content.js'),
+  'utf8'
+);
 
 /** Mirrors WM_SEL in walmart-content.js (subset used by WM-1 flow). */
 const WM_SEL = {
@@ -97,6 +105,17 @@ function wmFindAtcLikeButton(page) {
 
 function wmIsVisible(el) {
   return !!(el && el.visible);
+}
+
+/** Mirrors wmPxTimeoutMs() — walmart-content.js */
+function wmResolvePxTimeoutMs(attrs = {}) {
+  const override = attrs['data-tch-px-timeout-ms'];
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  if (attrs['data-tch-fixture'] != null) return 2000;
+  return 2 * 60 * 1000;
 }
 
 /** Mirrors wmIsPxPage() — walmart-content.js */
@@ -679,6 +698,36 @@ function runWm6CheckoutQueueLockTests() {
 function runWm6ErrorPathTests() {
   const productUrl = 'https://www.walmart.com/ip/wm6-error-path/444555666';
   const norm = normalizeProductUrl(productUrl);
+
+  assert.ok(WM_SRC.includes('function wmPxTimeoutMs'), 'WM-6: wmPxTimeoutMs must exist in walmart-content.js');
+  assert.ok(
+    WM_SRC.includes('2 * 60 * 1000'),
+    'WM-6: prod PX timeout must remain 2 minutes in walmart-content.js'
+  );
+  assert.equal(wmResolvePxTimeoutMs({}), 120000, 'WM-6: prod PX timeout is 2 minutes');
+  assert.equal(
+    wmResolvePxTimeoutMs({ 'data-tch-fixture': 'walmart-product-px' }),
+    2000,
+    'WM-6: fixture PX timeout is 2s'
+  );
+  assert.equal(
+    wmResolvePxTimeoutMs({ 'data-tch-px-timeout-ms': '750' }),
+    750,
+    'WM-6: data-tch-px-timeout-ms override for virtual-time regression'
+  );
+  assert.equal(
+    wmResolvePxTimeoutMs({
+      'data-tch-fixture': 'walmart-product-px',
+      'data-tch-px-timeout-ms': '750',
+    }),
+    750,
+    'WM-6: px-timeout override takes precedence over fixture default'
+  );
+  assert.equal(
+    wmResolvePxTimeoutMs({ 'data-tch-px-timeout-ms': '0' }),
+    120000,
+    'WM-6: invalid px-timeout override falls back to prod default'
+  );
 
   const pxPage = makePage({
     pathname: '/ip/wm6-px/111',
