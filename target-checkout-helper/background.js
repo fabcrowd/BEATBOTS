@@ -1107,6 +1107,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       stopMonitor().then(() => sendResponse({ ok: true }));
       return true;
 
+    case 'NAV_FAILED':
     case 'WALMART_NAV_FAILED': {
       // Content script signals it couldn't proceed (PX timeout, ATC unavailable, etc.)
       // Release the navigation lock so the poll can try again on next cycle.
@@ -1171,6 +1172,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const baseMonitor = monitor || { active: false, products: [], counts: {} };
         sendResponse({
           ...baseMonitor,
+          inQueueUrls: [...inQueueUrls],
+          navigationLock: [...navigationLock],
           checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
         });
       });
