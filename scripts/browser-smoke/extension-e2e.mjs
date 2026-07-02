@@ -47,6 +47,26 @@ async function main() {
   await popupPage.waitForSelector('#enableToggle', { timeout: 10000 });
   assert.ok(await popupPage.$('#enableToggle'));
 
+  // TGT-4: auto place order must be OFF by default (charges real card).
+  await popupPage.waitForSelector('#autoPlaceOrder', { timeout: 10000 });
+  const autoPlaceDefault = await popupPage.$eval('#autoPlaceOrder', (el) => el.checked);
+  assert.equal(autoPlaceDefault, false, 'TGT-4: #autoPlaceOrder unchecked on fresh popup');
+  const storedAutoPlace = await popupPage.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        try {
+          chrome.storage.local.get('autoPlaceOrder', (data) => {
+            const err = chrome.runtime.lastError;
+            if (err) reject(new Error(err.message));
+            else resolve(data.autoPlaceOrder);
+          });
+        } catch (e) {
+          reject(e);
+        }
+      })
+  );
+  assert.ok(!storedAutoPlace, 'TGT-4: storage autoPlaceOrder absent/false on fresh profile');
+
   const statusText = await popupPage.$eval('#statusText', (el) => el.textContent?.trim() || '');
   assert.ok(
     statusText.includes('Extension') || statusText.includes('On') || statusText.includes('Off'),
