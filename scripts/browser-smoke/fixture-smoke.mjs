@@ -81,6 +81,14 @@ const FIXTURE_MARKERS = {
       'id="px-captcha"',
     ],
   },
+  walmartProductPxBlock: {
+    fixtureId: 'walmart-product-px-block',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-px-block"',
+      'class="px-block-overlay"',
+    ],
+  },
   samsclubProductFcfs: {
     fixtureId: 'samsclub-product-fcfs',
     journeys: ['SC-3'],
