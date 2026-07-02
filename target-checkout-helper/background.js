@@ -1573,7 +1573,14 @@ async function stopMonitor() {
   if (!monitor) return;
 
   for (const tabId of monitor.tabIds || []) {
-    try { await chrome.tabs.remove(tabId); } catch {}
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (isInCheckoutFlow(tab.url)) {
+        console.log('[TCH bg] stopMonitor: preserving checkout-flow tab', tabId);
+        continue;
+      }
+      await chrome.tabs.remove(tabId);
+    } catch {}
   }
 
   urlToTabId = {};
