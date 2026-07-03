@@ -100,7 +100,7 @@ const FIXTURE_MARKERS = {
   },
   samsclubProductFcfs: {
     fixtureId: 'samsclub-product-fcfs',
-    journeys: ['SC-3'],
+    journeys: ['SC-3', 'SC-5'],
     markers: [
       'data-tch-fixture="samsclub-product-fcfs"',
       'data-automation-id="add-to-cart-btn"',

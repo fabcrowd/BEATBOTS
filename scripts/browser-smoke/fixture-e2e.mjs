@@ -93,11 +93,12 @@ async function applyRouteStorage(popup, route, port) {
   const pageUrl = `http://${route.host}:${port}${route.path}`;
   const data = { ...FIXTURE_STORAGE_BASE };
 
-  if (route.sacredLockProductPath) {
-    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+  const productPath = route.monitorProductPath || route.sacredLockProductPath;
+  if (productPath) {
+    const productUrl = `http://${route.host}:${port}${productPath}`;
     data.monitor = {
       active: true,
-      products: [{ url: productUrl, qty: 1, name: 'Fixture WM-6', oid: null }],
+      products: [{ url: productUrl, qty: 1, name: `Fixture ${route.journey}`, oid: null }],
     };
   }
 
@@ -258,6 +259,29 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
           `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(cycleNavLock)}`
         );
       }
+    }
+  }
+
+  // SC-5: repeated ATC_SUCCESS cycles must never arm sacred lock (FCFS race).
+  if (invariants.includes('sc5-repeated-atc-success')) {
+    assert.ok(
+      logs.some((l) => l.includes('Clicking ATC button')),
+      `FIX-3 SC-5: expected FCFS ATC click on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    for (let i = 0; i < 3; i++) {
+      await sendBg(popup, { type: 'ATC_SUCCESS', url: pageUrl });
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 SC-5: repeated ATC_SUCCESS cycle ${i + 1} must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(cycleInQueue)}`
+      );
+      assert.ok(
+        !cycleNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
+        `FIX-3 SC-5: ATC_SUCCESS cycle ${i + 1} must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(cycleNavLock)}`
+      );
     }
   }
 
