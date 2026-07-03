@@ -117,6 +117,7 @@ export const FIXTURE_E2E_ROUTES = [
     journey: 'SC-3',
     invariants: ['no-sacred-lock', 'sc5-repeated-atc-success'],
     monitorProductPath: '/p/mock-fcfs/789',
+    monitorQty: 5,
   },
   {
     host: 'www.samsclub.com',

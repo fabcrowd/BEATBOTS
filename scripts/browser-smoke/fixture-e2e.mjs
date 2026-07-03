@@ -45,6 +45,16 @@ async function sendBg(page, msg) {
   );
 }
 
+/** Fire-and-forget bg message (e.g. ATC_SUCCESS from popup — async handler, no tab id). */
+async function sendBgFireAndForget(page, msg) {
+  await page.evaluate((m) => {
+    try {
+      chrome.runtime.sendMessage(m);
+    } catch (_) {}
+  }, msg);
+  await new Promise((r) => setTimeout(r, 150));
+}
+
 async function setStorage(popup, data) {
   await popup.evaluate(
     (d) =>
@@ -98,7 +108,14 @@ async function applyRouteStorage(popup, route, port) {
     const productUrl = `http://${route.host}:${port}${productPath}`;
     data.monitor = {
       active: true,
-      products: [{ url: productUrl, qty: 1, name: `Fixture ${route.journey}`, oid: null }],
+      products: [
+        {
+          url: productUrl,
+          qty: route.monitorQty || 1,
+          name: `Fixture ${route.journey}`,
+          oid: null,
+        },
+      ],
     };
   }
 
@@ -269,7 +286,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 SC-5: expected FCFS ATC click on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
     );
     for (let i = 0; i < 3; i++) {
-      await sendBg(popup, { type: 'ATC_SUCCESS', url: pageUrl });
+      await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: pageUrl });
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
       const cycleNavLock = cycle?.navigationLock || [];
