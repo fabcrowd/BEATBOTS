@@ -27,6 +27,13 @@ function normalizeProductUrl(url) {
   }
 }
 
+/** Mirrors background.js poll loop skip checks (inQueueUrls before navigationLock). */
+function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return true;
+  if (navigationLock.has(normUrl)) return true;
+  return false;
+}
+
 async function sendBg(page, msg) {
   return page.evaluate(
     (m) =>
@@ -281,10 +288,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 
   // SC-5: repeated ATC_SUCCESS cycles must never arm sacred lock (FCFS race).
   if (invariants.includes('sc5-repeated-atc-success')) {
-    assert.ok(
-      logs.some((l) => l.includes('Clicking ATC button')),
-      `FIX-3 SC-5: expected FCFS ATC click on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
-    );
+    if (!invariants.includes('sc6-repeated-nav-failed')) {
+      assert.ok(
+        logs.some((l) => l.includes('Clicking ATC button')),
+        `FIX-3 SC-5: expected FCFS ATC click on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+      );
+    }
     for (let i = 0; i < 3; i++) {
       await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: pageUrl });
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
@@ -322,6 +331,15 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         `FIX-3 WM-5: ${navFailTypes[i]} cycle ${i + 1} must clear navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
       );
     }
+
+    const pollSkipStatus = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const pollInQ = new Set(pollSkipStatus?.inQueueUrls || []);
+    const pollNavL = new Set(pollSkipStatus?.navigationLock || []);
+    assert.equal(
+      pollWouldSkipNavigation(normLockUrl, pollInQ, pollNavL),
+      true,
+      `FIX-3 WM-5: poll must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
   }
 
   if (invariants.includes('px-timeout-nav-failed')) {
