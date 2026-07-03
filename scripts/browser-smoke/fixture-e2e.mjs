@@ -240,6 +240,25 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       !afterNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
       `FIX-3 ${route.journey}: NAV_FAILED must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
     );
+
+    // SC-6 / WM-2: repeated NAV_FAILED cycles must never arm sacred lock.
+    if (invariants.includes('sc6-repeated-nav-failed') || invariants.includes('wm2-repeated-nav-failed')) {
+      for (let i = 0; i < 2; i++) {
+        await sendBg(popup, { type: 'NAV_FAILED', url: pageUrl });
+        const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+        const cycleInQueue = cycle?.inQueueUrls || [];
+        const cycleNavLock = cycle?.navigationLock || [];
+        assert.equal(
+          cycleInQueue.length,
+          0,
+          `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(cycleInQueue)}`
+        );
+        assert.ok(
+          !cycleNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
+          `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(cycleNavLock)}`
+        );
+      }
+    }
   }
 
   if (invariants.includes('wm5-sacred-survives-nav-failed')) {
@@ -247,18 +266,21 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       ? `http://${route.host}:${port}${route.sacredLockProductPath}`
       : pageUrl;
     const normLockUrl = normalizeProductUrl(lockUrl);
-    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: pageUrl });
-    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
-    const afterInQueue = after?.inQueueUrls || [];
-    const afterNavLock = after?.navigationLock || [];
-    assert.ok(
-      afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
-      `FIX-3 WM-5: sacred lock must survive WALMART_NAV_FAILED on ${normLockUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
-    );
-    assert.ok(
-      !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
-      `FIX-3 WM-5: WALMART_NAV_FAILED must clear navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
-    );
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: pageUrl });
+      const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const afterInQueue = after?.inQueueUrls || [];
+      const afterNavLock = after?.navigationLock || [];
+      assert.ok(
+        afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: sacred lock must survive ${navFailTypes[i]} cycle ${i + 1} on ${normLockUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+      );
+      assert.ok(
+        !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: ${navFailTypes[i]} cycle ${i + 1} must clear navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
+      );
+    }
   }
 
   if (invariants.includes('px-timeout-nav-failed')) {
