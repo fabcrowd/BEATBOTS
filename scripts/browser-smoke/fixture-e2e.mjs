@@ -340,6 +340,13 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       true,
       `FIX-3 WM-5: poll must skip navigate while sacred lock holds on ${normLockUrl}`
     );
+  }
+
+  if (invariants.includes('wm5-live-poll-cycle')) {
+    const lockUrl = route.sacredLockProductPath
+      ? `http://${route.host}:${port}${route.sacredLockProductPath}`
+      : pageUrl;
+    const normLockUrl = normalizeProductUrl(lockUrl);
 
     // Live background poll: sacred lock must survive real poll cycles without re-arming navigationLock.
     await sendBg(popup, {
@@ -369,6 +376,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 WM-5: live poll cycle must skip navigate while sacred lock holds on ${normLockUrl}`
     );
     await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
   }
 
   if (invariants.includes('px-timeout-nav-failed')) {
