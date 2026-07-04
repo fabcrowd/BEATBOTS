@@ -368,6 +368,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       true,
       `FIX-3 WM-5: live poll cycle must skip navigate while sacred lock holds on ${normLockUrl}`
     );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
   }
 
   if (invariants.includes('px-timeout-nav-failed')) {
