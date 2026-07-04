@@ -1094,11 +1094,22 @@ async function _wmInit() {
   // in the monitor list (the background navigated us here, so there's at least one).
   const allProducts = data.monitor?.products || [];
   const walmartProducts = allProducts.filter(p => /walmart\.com\/ip\//i.test(p.url));
+  const WM_MONITOR_PRODUCT_URL_KEY = 'wmt:monitorProductUrl';
+  const wmPathname = (url) => {
+    try { return new URL(url).pathname; } catch { return ''; }
+  };
+  let storedMonitorUrl = null;
+  try { storedMonitorUrl = sessionStorage.getItem(WM_MONITOR_PRODUCT_URL_KEY); } catch {}
   const matchedProduct = page === 'product'
-    ? walmartProducts.find(p => {
-        try { return new URL(p.url).pathname === location.pathname; } catch { return false; }
-      })
-    : walmartProducts[0] || null;
+    ? walmartProducts.find(p => wmPathname(p.url) === location.pathname)
+    : (storedMonitorUrl
+        ? walmartProducts.find(p => wmPathname(p.url) === wmPathname(storedMonitorUrl))
+        : null)
+      || walmartProducts[0]
+      || null;
+  if (page === 'product' && matchedProduct?.url) {
+    try { sessionStorage.setItem(WM_MONITOR_PRODUCT_URL_KEY, matchedProduct.url); } catch {}
+  }
   const oid = matchedProduct?.oid || null;
 
   // Data guard: don't automate if there's nothing configured — prevents ATCing

@@ -1609,6 +1609,17 @@ async function handleATCSuccess(url, tabId) {
   const currentCount = monitor.counts[normUrl];
 
   if (product && currentCount < product.qty) {
+    // Content navigates to cart/checkout immediately after ATC (speed path). Reloading
+    // the monitor tab here would abort an in-flight checkout when qty > 1.
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (isInCheckoutFlow(tab?.url)) {
+        console.log(
+          `[TCH bg] qty ${currentCount}/${product.qty} — tab in checkout/cart (${tab.url}), skip reload`
+        );
+        return;
+      }
+    } catch { /* tab closed — fall through to reload */ }
     // Detach debugger before reload — next DEBUGGER_CLICK will re-attach on demand.
     tchDebuggerDetach().catch(() => {});
     setTimeout(() => {

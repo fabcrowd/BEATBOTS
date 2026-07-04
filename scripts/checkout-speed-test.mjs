@@ -267,6 +267,14 @@ section('Sign-in step helpers');
   if (r.status !== 0) process.exitCode = 1;
 }
 
+section('Monitor ATC reload guard');
+{
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'monitor-atc-test.mjs')], {
+    stdio: 'inherit',
+  });
+  if (r.status !== 0) process.exitCode = 1;
+}
+
 section('End-to-end checkout latency');
 console.log('Not measured here (requires Chrome + target.com + your account).');
 console.log('When you reach review, the extension logs: [TCH] timing checkout_total_to_review: …ms');
