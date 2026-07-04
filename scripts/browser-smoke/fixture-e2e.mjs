@@ -379,6 +379,45 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('sc5-sc6-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    // Live background poll: FCFS signals must never arm sacred lock during real poll cycles.
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture SC ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await sendBg(popup, { type: 'NAV_FAILED', url: monitorUrl });
+    await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
+    await sendBg(popup, { type: 'NAV_FAILED', url: monitorUrl });
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 ${route.journey}: live poll must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    assert.ok(
+      !liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+      `FIX-3 ${route.journey}: live poll FCFS signals must release navigationLock on ${normMonitorUrl}, got ${JSON.stringify(liveNavLock)}`
+    );
+    assert.equal(
+      pollWouldSkipNavigation(normMonitorUrl, new Set(liveInQueue), new Set(liveNavLock)),
+      false,
+      `FIX-3 ${route.journey}: FCFS live poll must not skip-navigate via sacred lock on ${normMonitorUrl}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('px-timeout-nav-failed')) {
     assert.ok(
       logs.some((l) => l.includes('PX/loading page detected')),

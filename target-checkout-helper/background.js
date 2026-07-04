@@ -652,14 +652,22 @@ async function runBackgroundPoll() {
     });
     if (!pendingProducts.length) { await sleep(1000); continue; }
 
+    // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
+    const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
+    const dropArmed = !dropMs || accurateNow() >= dropMs;
+
     // Split by retailer — Walmart doesn't need the Target API key.
     const targetProducts  = pendingProducts.filter(p => !extractWalmartItemId(p.url));
     const walmartProducts = pendingProducts.filter(p =>  extractWalmartItemId(p.url));
+    const samsclubProducts = pendingProducts.filter(
+      (p) => typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(p.url) === 'samsclub'
+    );
 
     const hasTargetWork  = targetProducts.length > 0 && !!cachedApiKey;
     const hasWalmartWork = walmartProducts.length > 0;
-    if (!hasTargetWork && !hasWalmartWork) {
-      // No Target API key yet and no Walmart products — wait and try to get key.
+    const hasSamsclubWork = samsclubProducts.length > 0 && !!monitor.skipMonitoring && dropArmed;
+    if (!hasTargetWork && !hasWalmartWork && !hasSamsclubWork) {
+      // No Target API key yet and no Walmart/Sam's skip-monitoring work — wait and try to get key.
       if (targetProducts.length > 0 && !cachedApiKey) requestApiKeyFromTabs();
       await sleep(1000);
       continue;
@@ -689,10 +697,6 @@ async function runBackgroundPoll() {
       syncServerClock().catch(() => {});
     }
 
-    // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
-    const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
-    const dropArmed = !dropMs || accurateNow() >= dropMs;
-
     // Per-product skip monitoring for Target: treat product as in-stock when drop is armed.
     for (const tp of targetProducts) {
       if (!tp.skipMonitoring || !dropArmed) continue;
@@ -711,6 +715,13 @@ async function runBackgroundPoll() {
         // but dropExpectedAt hasn't arrived, this keeps the bot quiet until go-time.
         const res = await checkWalmartItemStock(itemId);
         if (res != null) stockMap.set(normalizeProductUrl(wp.url), res);
+      }
+    }
+
+    // Sam's Club FCFS — skip monitoring arms product URL as in-stock (SC-5: no sacred lock).
+    if (monitor.skipMonitoring && dropArmed) {
+      for (const sp of samsclubProducts) {
+        stockMap.set(normalizeProductUrl(sp.url), { stock: true, qty: 999 });
       }
     }
 
