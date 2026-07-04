@@ -179,7 +179,7 @@ export const JOURNEYS = {
   'FIX-3': {
     id: 'FIX-3',
     retailer: 'core',
-    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4/WM-5/WM-6 sacred lock + /qp + /checkout + PX hang-tight + #px-captcha + px-block + data-tch-px-timeout-ms override timeout error paths, WM-5 repeated NAV_FAILED + poll-skip while sacred lock holds on product + /qp + checkout queue, SC-5 repeated ATC_SUCCESS FCFS race cycles, SC-6 restock repeated NAV_FAILED + SC-5 ATC_SUCCESS combo, TGT-4 manual review)',
+    summary: 'Fixture e2e asserts journey invariants offline (WM-2/SC-5 no sacred lock, WM-4/WM-5/WM-6 sacred lock + /qp + /checkout + PX hang-tight + #px-captcha + px-block + data-tch-px-timeout-ms override timeout error paths, WM-5 repeated NAV_FAILED + poll-skip + live START_MONITOR poll cycle while sacred lock holds on product + /qp + checkout queue, SC-5 repeated ATC_SUCCESS FCFS race cycles, SC-6 restock repeated NAV_FAILED + SC-5 ATC_SUCCESS combo, TGT-4 manual review)',
     impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],

@@ -340,6 +340,34 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       true,
       `FIX-3 WM-5: poll must skip navigate while sacred lock holds on ${normLockUrl}`
     );
+
+    // Live background poll: sacred lock must survive real poll cycles without re-arming navigationLock.
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: lockUrl, name: `Fixture WM-5 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.ok(
+      liveInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: live poll must preserve sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    assert.ok(
+      !liveNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: live poll must not re-arm navigationLock while sacred lock holds on ${normLockUrl}, got ${JSON.stringify(liveNavLock)}`
+    );
+    assert.equal(
+      pollWouldSkipNavigation(normLockUrl, new Set(liveInQueue), new Set(liveNavLock)),
+      true,
+      `FIX-3 WM-5: live poll cycle must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
   }
 
   if (invariants.includes('px-timeout-nav-failed')) {
