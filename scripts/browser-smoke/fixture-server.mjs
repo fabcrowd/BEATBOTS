@@ -69,7 +69,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueue,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['sacred-lock-checkout', 'wm5-sacred-survives-nav-failed'],
+    invariants: ['sacred-lock-checkout', 'wm5-sacred-survives-nav-failed', 'wm5-live-poll-cycle'],
     sacredLockProductPath: '/ip/mock-wm6-checkout/789',
   },
   {
