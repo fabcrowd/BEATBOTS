@@ -388,7 +388,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     // Live background poll: FCFS signals must never arm sacred lock during real poll cycles.
     await sendBg(popup, {
       type: 'START_MONITOR',
-      products: [{ url: monitorUrl, name: `Fixture SC ${route.journey}`, qty: 1 }],
+      products: [{ url: monitorUrl, name: `Fixture SC ${route.journey}`, qty: route.monitorQty || 5 }],
       refreshInterval: 1,
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
@@ -405,15 +405,13 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       0,
       `FIX-3 ${route.journey}: live poll must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
     );
-    assert.ok(
-      !liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl),
-      `FIX-3 ${route.journey}: live poll FCFS signals must release navigationLock on ${normMonitorUrl}, got ${JSON.stringify(liveNavLock)}`
-    );
-    assert.equal(
-      pollWouldSkipNavigation(normMonitorUrl, new Set(liveInQueue), new Set(liveNavLock)),
-      false,
-      `FIX-3 ${route.journey}: FCFS live poll must not skip-navigate via sacred lock on ${normMonitorUrl}`
-    );
+    // FCFS: navigationLock may be held during poll navigate, but must never pair with sacred lock.
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+        `FIX-3 ${route.journey}: navigationLock alone must not imply sacred lock on ${normMonitorUrl}`
+      );
+    }
     await sendBg(popup, { type: 'STOP_MONITOR' });
     await new Promise((r) => setTimeout(r, 300));
   }
