@@ -61,6 +61,7 @@ if (fs.existsSync(ENV_REHEARSAL)) {
   });
   results.push(`- **checkout-rehearsal:** ${r.ok ? 'PASS' : 'FAIL (see log)'}`);
   if (!r.ok) {
+    allOk = false;
     results.push('```');
     results.push(r.out.trim().slice(-1200));
     results.push('```');
