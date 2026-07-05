@@ -74,6 +74,14 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.walmart.com',
+    path: '/checkout/unmonitored',
+    file: MOCK_URLS.walmartCheckoutQueue,
+    initLog: '[WMT] init',
+    journey: 'WM-4',
+    invariants: ['no-sacred-lock', 'wm4-checkout-no-producturl'],
+  },
+  {
+    host: 'www.walmart.com',
     path: '/ip/mock-queue-poll/457',
     file: MOCK_URLS.walmartProductPreDrop,
     initLog: '[WMT] init',

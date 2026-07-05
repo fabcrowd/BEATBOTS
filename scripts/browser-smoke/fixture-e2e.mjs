@@ -215,6 +215,17 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('wm4-checkout-no-producturl')) {
+    assert.ok(
+      logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-4: /checkout without monitor must warn about missing productUrl on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue detected')),
+      `FIX-3 WM-4: expected checkout queue log on ${pageUrl}`
+    );
+  }
+
   if (invariants.includes('sacred-lock-checkout')) {
     const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
     const normProductUrl = normalizeProductUrl(productUrl);

@@ -678,6 +678,10 @@ function runWm6CheckoutQueueLockTests() {
   const noProductLock = wmSimulateCheckoutQueueLock({}, checkoutHref);
   assert.equal(noProductLock.messages.length, 0, 'WM-6: checkout queue without productUrl emits no WALMART_IN_QUEUE');
   assert.equal(noProductLock.armed, false, 'WM-6: checkout queue without productUrl leaves tab unprotected');
+  assert.ok(
+    WM_SRC.includes('wmHandleQueue: no productUrl in settings'),
+    'WM-4: checkout queue must warn when productUrl missing'
+  );
 
   const withProductLock = wmSimulateCheckoutQueueLock({ productUrl: monitoredProduct }, checkoutHref);
   assert.equal(withProductLock.messages.length, 1, 'WM-6: checkout queue with productUrl emits WALMART_IN_QUEUE');
