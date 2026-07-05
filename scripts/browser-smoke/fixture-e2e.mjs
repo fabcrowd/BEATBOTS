@@ -379,6 +379,42 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('wm2-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    // Live background poll: pre-drop NAV_FAILED must never arm sacred lock during real poll cycles.
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture WM-2 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: monitorUrl });
+    await sendBg(popup, { type: 'NAV_FAILED', url: monitorUrl });
+    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: monitorUrl });
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 WM-2: live poll must not arm inQueueUrls on pre-drop ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+        `FIX-3 WM-2: navigationLock alone must not imply sacred lock on pre-drop ${normMonitorUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('sc5-sc6-live-poll-cycle')) {
     const monitorUrl = route.monitorProductPath
       ? `http://${route.host}:${port}${route.monitorProductPath}`

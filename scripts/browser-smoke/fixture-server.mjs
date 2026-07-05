@@ -36,7 +36,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPreDrop,
     initLog: '[WMT] init',
     journey: 'WM-2',
-    invariants: ['no-sacred-lock', 'nav-failed-releases-lock', 'wm2-repeated-nav-failed'],
+    invariants: ['no-sacred-lock', 'nav-failed-releases-lock', 'wm2-repeated-nav-failed', 'wm2-live-poll-cycle'],
+    monitorProductPath: '/ip/mock-predrop/123',
   },
   {
     host: 'www.walmart.com',
