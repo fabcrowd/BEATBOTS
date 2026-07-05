@@ -44,7 +44,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductQueue,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['sacred-lock', 'wm5-sacred-survives-nav-failed'],
+    invariants: ['sacred-lock', 'wm5-sacred-survives-nav-failed', 'wm5-live-poll-cycle'],
   },
   {
     host: 'www.walmart.com',
