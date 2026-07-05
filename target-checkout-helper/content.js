@@ -2480,7 +2480,7 @@ async function init() {
     startHarvestRecurringTick();
   }
 
-  if (data.monitor?.active && page === 'product') {
+  if (data.monitor?.active && data.enabled && page === 'product') {
     const normUrl    = normalizeProductUrl(location.href);
     const currentTcin = extractTcinFromUrl(location.href);
     // Match by normalised URL first, then by TCIN as fallback (handles URL slug redirects).

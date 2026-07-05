@@ -645,8 +645,12 @@ async function runBackgroundPoll() {
   }
 
   while (bgPollActive) {
-    const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
+    const { monitor, enabled } = await chrome.storage.local.get(['monitor', 'enabled']).catch(() => ({}));
     if (!monitor?.active) { bgPollActive = false; break; }
+    if (!enabled) {
+      await sleep(computeBackgroundPollSleepMs(monitor));
+      continue;
+    }
 
     const pendingProducts = (monitor.products || []).filter(p => {
       const n = normalizeProductUrl(p.url);
