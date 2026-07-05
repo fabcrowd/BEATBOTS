@@ -82,6 +82,9 @@ async function setStorage(popup, data) {
 
 async function resetQueueState(popup) {
   await sendBg(popup, { type: 'STOP_MONITOR' }).catch(() => {});
+  await setStorage(popup, {
+    monitor: { active: false, products: [], tabIds: [], counts: {} },
+  });
 }
 
 const FIXTURE_STORAGE_BASE = {
@@ -380,8 +383,8 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 
   if (invariants.includes('wm2-live-poll-cycle')) {
-    const monitorUrl = route.monitorProductPath
-      ? `http://${route.host}:${port}${route.monitorProductPath}`
+    const monitorUrl = route.livePollMonitorPath
+      ? `http://${route.host}:${port}${route.livePollMonitorPath}`
       : pageUrl;
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
 
