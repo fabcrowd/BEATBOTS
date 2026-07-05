@@ -371,7 +371,23 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
     await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: lockUrl });
-    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
+    // Repeated NAV_FAILED during live poll — sacred lock must survive (WM-5 error path).
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: lockUrl });
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.ok(
+        cycleInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: live poll cycle ${i + 1} must preserve sacred lock on ${normLockUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      assert.ok(
+        !cycleNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: live poll cycle ${i + 1} must not re-arm navigationLock on ${normLockUrl} after ${navFailTypes[i]}, got ${JSON.stringify(cycleNavLock)}`
+      );
+    }
     await new Promise((r) => setTimeout(r, 2500));
     const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
     const liveInQueue = afterPollWait?.inQueueUrls || [];
