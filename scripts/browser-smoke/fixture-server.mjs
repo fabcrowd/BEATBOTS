@@ -122,7 +122,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPxOverride,
     initLog: '[WMT] PX/loading page detected',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'px-timeout-nav-failed', 'px-timeout-ms-override'],
+    invariants: [
+      'no-sacred-lock',
+      'px-timeout-nav-failed',
+      'px-timeout-ms-override',
+      'wm6-live-poll-cycle',
+    ],
     sacredLockProductPath: '/ip/mock-px-override/558',
     pxTimeoutMs: 750,
   },
