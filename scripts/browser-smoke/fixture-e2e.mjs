@@ -459,9 +459,30 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
     });
-    await sendBg(popup, { type: 'NAV_FAILED', url: monitorUrl });
-    await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
-    await sendBg(popup, { type: 'NAV_FAILED', url: monitorUrl });
+    // Repeated NAV_FAILED / ATC_SUCCESS during live poll — FCFS must never arm sacred lock (SC-5/SC-6).
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
+      } else {
+        await sendBg(popup, { type: liveSignalTypes[i], url: monitorUrl });
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 ${route.journey}: live poll cycle ${i + 1} must not arm inQueueUrls on ${normMonitorUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 ${route.journey}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+    }
     await new Promise((r) => setTimeout(r, 2500));
     const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
     const liveInQueue = afterPollWait?.inQueueUrls || [];
