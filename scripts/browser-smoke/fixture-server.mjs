@@ -104,7 +104,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPxCaptcha,
     initLog: '[WMT] PX/loading page detected',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'px-timeout-nav-failed'],
+    invariants: ['no-sacred-lock', 'px-timeout-nav-failed', 'wm6-live-poll-cycle'],
     sacredLockProductPath: '/ip/mock-px-captcha/556',
   },
   {
@@ -113,7 +113,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPxBlock,
     initLog: '[WMT] PX/loading page detected',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'px-timeout-nav-failed'],
+    invariants: ['no-sacred-lock', 'px-timeout-nav-failed', 'wm6-live-poll-cycle'],
     sacredLockProductPath: '/ip/mock-px-block/557',
   },
   {
