@@ -52,7 +52,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartQpRoom,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['no-sacred-lock', 'wm4-qp-no-producturl'],
+    invariants: ['no-sacred-lock', 'wm4-qp-no-producturl', 'wm4-live-poll-cycle'],
   },
   {
     host: 'www.walmart.com',
@@ -78,7 +78,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueue,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['no-sacred-lock', 'wm4-checkout-no-producturl'],
+    invariants: ['no-sacred-lock', 'wm4-checkout-no-producturl', 'wm4-live-poll-cycle'],
   },
   {
     host: 'www.walmart.com',
