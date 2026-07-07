@@ -371,6 +371,44 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
     await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+    const shouldReloadDuringPoll =
+      !route.sacredLockProductPath ||
+      route.path.includes('/qp/') ||
+      route.path === '/checkout' ||
+      route.path.startsWith('/checkout/');
+    if (shouldReloadDuringPoll) {
+      await new Promise((r) => setTimeout(r, 800));
+      // Reload sacred-lock tab during live poll — content script must re-arm lock (WM-5).
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await new Promise((r) => setTimeout(r, 2000));
+      const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const reloadInQueue = afterReload?.inQueueUrls || [];
+      const reloadNavLock = afterReload?.navigationLock || [];
+      assert.ok(
+        reloadInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: sacred lock must survive page reload during live poll on ${normLockUrl}, got inQueueUrls=${JSON.stringify(reloadInQueue)}`
+      );
+      assert.ok(
+        !reloadNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: reload during live poll must not leave navigationLock on ${normLockUrl}, got ${JSON.stringify(reloadNavLock)}`
+      );
+      if (route.path.includes('/qp/')) {
+        assert.ok(
+          logs.filter((l) => l.includes('/qp waiting room detected')).length >= 2,
+          `FIX-3 WM-5: /qp reload must re-detect waiting room on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+        );
+      } else if (route.path.includes('checkout')) {
+        assert.ok(
+          logs.filter((l) => l.includes('Queue detected')).length >= 2,
+          `FIX-3 WM-5: checkout reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+        );
+      } else {
+        assert.ok(
+          logs.filter((l) => l.includes('Product-page queue detected')).length >= 2,
+          `FIX-3 WM-5: product-page reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+        );
+      }
+    }
     // Repeated NAV_FAILED during live poll — sacred lock must survive (WM-5 error path).
     const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
     for (let i = 0; i < navFailTypes.length; i++) {
