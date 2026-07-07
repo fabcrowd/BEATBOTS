@@ -631,6 +631,32 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
     });
+    await new Promise((r) => setTimeout(r, 800));
+    // Reload FCFS tab during live poll — must re-init without arming sacred lock (SC-5/SC-6).
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 ${route.journey}: FCFS page reload during live poll must not arm inQueueUrls on ${normMonitorUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[TCH] init')).length >= 2,
+      `FIX-3 ${route.journey}: FCFS reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    if (route.journey === 'SC-6') {
+      assert.ok(
+        logs.filter((l) => l.includes('FCFS restock wait')).length >= 2,
+        `FIX-3 SC-6: restock reload must re-detect disabled ATC on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+      );
+    } else {
+      assert.ok(
+        logs.filter((l) => l.includes('Clicking ATC button')).length >= 2,
+        `FIX-3 SC-5: FCFS reload must re-click ATC on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+      );
+    }
     // Repeated NAV_FAILED / ATC_SUCCESS during live poll — FCFS must never arm sacred lock (SC-5/SC-6).
     const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
     for (let i = 0; i < liveSignalTypes.length; i++) {
