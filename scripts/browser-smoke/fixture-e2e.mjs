@@ -465,22 +465,49 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 
   if (invariants.includes('wm4-live-poll-cycle')) {
-    const monitorPath =
+    const walmartProbePath =
       route.path.includes('/qp/') ? '/ip/mock-wm4-qp-live/111' : '/ip/mock-wm4-checkout-live/222';
-    const monitorUrl = `http://${route.host}:${port}${monitorPath}`;
-    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+    const walmartProbeUrl = `http://${route.host}:${port}${walmartProbePath}`;
+    const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+    const targetMonitorUrl = `http://www.target.com:${port}/p/mock-product`;
 
-    // Live background poll: unmonitored /qp or /checkout must never arm sacred lock (WM-4).
+    // Target-only monitor keeps the /qp or /checkout tab unmonitored (no walmart productUrl).
     await sendBg(popup, {
       type: 'START_MONITOR',
-      products: [{ url: monitorUrl, name: `Fixture WM-4 ${route.journey}`, qty: 1 }],
+      products: [{ url: targetMonitorUrl, name: `Fixture WM-4 ${route.journey}`, qty: 1 }],
       refreshInterval: 1,
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
     });
+    await new Promise((r) => setTimeout(r, 800));
+    // Reload queue tab during live poll — re-detect must warn and must not arm sacred lock (WM-4).
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 WM-4: queue page reload during live poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      !reloadInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-4: queue page URL must not be sacred lock key after reload on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    const queueRedetectLog = route.path.includes('/qp/')
+      ? logs.some((l) => l.includes('/qp waiting room detected'))
+      : logs.some((l) => l.includes('Queue detected'));
+    assert.ok(
+      queueRedetectLog,
+      `FIX-3 WM-4: queue page reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('no productUrl in settings')).length >= 2,
+      `FIX-3 WM-4: queue page reload must warn missing productUrl again on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
     const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
     for (let i = 0; i < navFailTypes.length; i++) {
-      await sendBg(popup, { type: navFailTypes[i], url: monitorUrl });
+      await sendBg(popup, { type: navFailTypes[i], url: walmartProbeUrl });
       await new Promise((r) => setTimeout(r, 650));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
@@ -490,10 +517,10 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         0,
         `FIX-3 WM-4: live poll cycle ${i + 1} must not arm inQueueUrls on unmonitored ${pageUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
       );
-      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl)) {
         assert.ok(
-          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
-          `FIX-3 WM-4: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${navFailTypes[i]}`
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl),
+          `FIX-3 WM-4: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
         );
       }
     }
@@ -506,10 +533,10 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       0,
       `FIX-3 WM-4: live poll must not arm inQueueUrls on unmonitored ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
     );
-    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl)) {
       assert.ok(
-        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
-        `FIX-3 WM-4: navigationLock alone must not imply sacred lock on unmonitored ${normMonitorUrl}`
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl),
+        `FIX-3 WM-4: navigationLock alone must not imply sacred lock on unmonitored ${normWalmartProbeUrl}`
       );
     }
     await sendBg(popup, { type: 'STOP_MONITOR' });
