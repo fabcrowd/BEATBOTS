@@ -75,7 +75,11 @@ async function maybeApplyHarvestedSession(settings) {
   try {
     if (!settings?.harvestConfig?.applyNextBeforeCheckout) return;
     const r = await chrome.runtime.sendMessage({ type: 'HARVEST_APPLY_NEXT' });
-    if (r?.ok) console.log('[TCH] applied harvested cookie snapshot; remaining:', r.remaining);
+    if (r?.ok) {
+      console.log('[TCH] applied harvested cookie snapshot; remaining:', r.remaining);
+    } else if (r?.reason === 'cookie_set_failed') {
+      console.warn('[TCH] harvest apply failed — snapshot kept in pool');
+    }
   } catch (e) {
     console.warn('[TCH] harvest apply skipped', e);
   }
@@ -740,7 +744,16 @@ let checkoutRetryScheduled = false;
 let stockWatchTimer = null;
 let stockWatchActive = false;
 let stockWatchPolls = 0;
+/** Passive monitor stock poll — must clear when monitor stops or another poll starts. */
+let monitorPassivePollId = null;
 let runtimeEnabled = true;
+
+function stopMonitorPassivePoll() {
+  if (monitorPassivePollId != null) {
+    clearInterval(monitorPassivePollId);
+    monitorPassivePollId = null;
+  }
+}
 
 function clampInt(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -1505,7 +1518,18 @@ async function handleCheckoutPage(settings) {
     const binUrl = sessionStorage.getItem(MONITOR_BIN_PENDING_KEY);
     if (binUrl) {
       sessionStorage.removeItem(MONITOR_BIN_PENDING_KEY);
-      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: binUrl }).catch(() => {});
+      const monData = await getSettings();
+      const normBin = normalizeProductUrl(binUrl);
+      const product = (monData.monitor?.products || []).find(
+        (p) => normalizeProductUrl(p.url) === normBin
+          || (extractTcinFromUrl(p.url) && extractTcinFromUrl(p.url) === extractTcinFromUrl(binUrl))
+      );
+      const count = monData.monitor?.counts?.[normBin] || 0;
+      if (monData.monitor?.active && product && count < product.qty) {
+        chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: normBin }).catch(() => {});
+      } else {
+        console.log('[TCH] BIN pending cleared without ATC_SUCCESS — monitor inactive or qty satisfied');
+      }
     }
   } catch {}
   const step = getCheckoutStep(settings.useSavedPayment);
@@ -2395,8 +2419,13 @@ async function handleMonitoredATC(monitor, product) {
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
 
-  const pollId = setInterval(async () => {
-    if (!runtimeEnabled) { clearInterval(pollId); return; }
+  stopMonitorPassivePoll();
+  monitorPassivePollId = setInterval(async () => {
+    if (!runtimeEnabled) { stopMonitorPassivePoll(); return; }
+    try {
+      const pollMon = (await getSettings()).monitor;
+      if (!pollMon?.active) { stopMonitorPassivePoll(); return; }
+    } catch { stopMonitorPassivePoll(); return; }
     // Prevent overlapping async callbacks — critical at 250ms drop-window intervals
     // where each network fetch takes 3-8s. Without this lock, dozens of fetches
     // queue up and hammer Target simultaneously.
@@ -2417,7 +2446,7 @@ async function handleMonitoredATC(monitor, product) {
       const result = await streamingStockCheck(normUrl, 8000, { stockOpts });
       if (result === true) {
         // Act immediately on first positive for maximum speed.
-        clearInterval(pollId);
+        stopMonitorPassivePoll();
         console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
         showToast('STOCK DETECTED — reloading!', 'success');
         location.reload();
@@ -2464,6 +2493,8 @@ async function init() {
   const page = getPageType();
   console.log('[TCH] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
+  if (!data.monitor?.active) stopMonitorPassivePoll();
+
   // Target sets window.__CONFIG__ asynchronously after document_end, so retry
   // until it's populated (up to 10 seconds) then write to storage for the SW.
   cacheApiKeyWhenReady();
@@ -2488,7 +2519,21 @@ async function init() {
       normalizeProductUrl(p.url) === normUrl
       || (currentTcin && extractTcinFromUrl(p.url) === currentTcin)
     );
-    if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
+    if (product) {
+      let isMonitorTab = false;
+      try {
+        const tabCheck = await chrome.runtime.sendMessage({ type: 'IS_MONITOR_TAB', url: normUrl });
+        isMonitorTab = !!tabCheck?.isMonitorTab;
+      } catch { /* SW asleep — skip ATC on unverified tabs */ }
+      if (!isMonitorTab) {
+        console.log('[TCH] monitor product match on non-assigned tab — skip ATC');
+        stopInit('not_monitor_tab');
+        return;
+      }
+      await handleMonitoredATC(data.monitor, product);
+      stopInit('monitor_mode');
+      return;
+    }
   }
 
   if (!data.enabled) {

@@ -1158,6 +1158,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ntpOffsetMs, lastSyncMs: lastClockSyncMs });
       return true;
 
+    case 'IS_MONITOR_TAB': {
+      (async () => {
+        try {
+          const norm = normalizeProductUrl(message.url || '');
+          const tabId = sender.tab?.id;
+          if (!norm || !tabId) {
+            sendResponse({ ok: false, isMonitorTab: false });
+            return;
+          }
+          const { monitor } = await chrome.storage.local.get('monitor');
+          const assigned = monitor?.urlToTabId?.[norm] ?? urlToTabId[norm];
+          sendResponse({
+            ok: true,
+            isMonitorTab: !!monitor?.active && assigned === tabId,
+          });
+        } catch {
+          sendResponse({ ok: false, isMonitorTab: false });
+        }
+      })();
+      return true;
+    }
+
     case 'ATC_SUCCESS':
       handleATCSuccess(message.url, sender.tab.id)
         .then(() => sendResponse({ ok: true }));

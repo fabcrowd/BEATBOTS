@@ -1054,7 +1054,6 @@ async function _wmInit() {
     if (shouldRedirect) {
       wmShowToast('Use Saved Session is OFF — redirecting to Walmart login…');
       window.location.href = 'https://www.walmart.com/account/login';
-      wmInitInFlight = false;
       return;
     }
     if (onLoginPage) {
@@ -1066,7 +1065,6 @@ async function _wmInit() {
         imap2faEnabled: !!data.imap2faEnabled,
         imapProfile: data.imapProfile || {},
       });
-      wmInitInFlight = false;
       return;
     }
   }
