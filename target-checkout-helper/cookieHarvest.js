@@ -187,35 +187,48 @@ function tchSameSiteForSet(ss) {
 
 async function tchApplyNextSnapshot() {
   const cfg = await tchGetHarvestConfig();
-  let entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
-  if (!entries.length) return { ok: false, reason: 'empty', remaining: 0 };
-  // Prefer ATC snapshots — they carry cart-session authority vs. homepage/keepalive cookies.
-  const atcIdx = entries.findIndex(e => e.kind === 'atc');
-  const idx = atcIdx !== -1 ? atcIdx : (cfg.removalOrder === 'fifo' ? 0 : entries.length - 1);
-  const snap = entries[idx];
-  const setUrl = 'https://www.target.com';
-  for (const c of snap.cookies || []) {
-    try {
-      const details = {
-        url: setUrl,
-        name: c.name,
-        value: c.value,
-        domain: c.domain,
-        path: c.path || '/',
-        secure: !!c.secure,
-        httpOnly: !!c.httpOnly,
-      };
-      const ss = tchSameSiteForSet(c.sameSite);
-      if (ss !== 'unspecified') details.sameSite = ss;
-      if (c.expirationDate) details.expirationDate = c.expirationDate;
-      if (c.storeId) details.storeId = c.storeId;
-      if (c.partitionKey) details.partitionKey = c.partitionKey;
-      await chrome.cookies.set(details);
-    } catch (e) {
-      /* skip individual cookie set failures */
+  const prior = _harvestLock;
+  let releaseLock;
+  _harvestLock = new Promise(resolve => { releaseLock = resolve; });
+  await prior;
+  try {
+    let entries = tchPruneExpired(await tchGetHarvestEntries(), cfg.expirationMinutes);
+    if (!entries.length) return { ok: false, reason: 'empty', remaining: 0 };
+    // Prefer ATC snapshots — they carry cart-session authority vs. homepage/keepalive cookies.
+    const atcIdx = entries.findIndex(e => e.kind === 'atc');
+    const idx = atcIdx !== -1 ? atcIdx : (cfg.removalOrder === 'fifo' ? 0 : entries.length - 1);
+    const snap = entries[idx];
+    const setUrl = 'https://www.target.com';
+    let setOk = 0;
+    for (const c of snap.cookies || []) {
+      try {
+        const details = {
+          url: setUrl,
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || '/',
+          secure: !!c.secure,
+          httpOnly: !!c.httpOnly,
+        };
+        const ss = tchSameSiteForSet(c.sameSite);
+        if (ss !== 'unspecified') details.sameSite = ss;
+        if (c.expirationDate) details.expirationDate = c.expirationDate;
+        if (c.storeId) details.storeId = c.storeId;
+        if (c.partitionKey) details.partitionKey = c.partitionKey;
+        await chrome.cookies.set(details);
+        setOk++;
+      } catch (e) {
+        /* skip individual cookie set failures */
+      }
     }
+    if (setOk === 0) {
+      return { ok: false, reason: 'cookie_set_failed', remaining: entries.length };
+    }
+    entries.splice(idx, 1);
+    await tchSetHarvestEntries(entries);
+    return { ok: true, remaining: entries.length, applied: setOk };
+  } finally {
+    releaseLock();
   }
-  entries.splice(idx, 1);
-  await tchSetHarvestEntries(entries);
-  return { ok: true, remaining: entries.length };
 }
