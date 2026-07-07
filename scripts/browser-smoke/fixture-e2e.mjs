@@ -383,14 +383,14 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       await new Promise((r) => setTimeout(r, 2000));
       const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const reloadInQueue = afterReload?.inQueueUrls || [];
-      const reloadNavLock = afterReload?.navigationLock || [];
       assert.ok(
         reloadInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
         `FIX-3 WM-5: sacred lock must survive page reload during live poll on ${normLockUrl}, got inQueueUrls=${JSON.stringify(reloadInQueue)}`
       );
-      assert.ok(
-        !reloadNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
-        `FIX-3 WM-5: reload during live poll must not leave navigationLock on ${normLockUrl}, got ${JSON.stringify(reloadNavLock)}`
+      assert.equal(
+        pollWouldSkipNavigation(normLockUrl, new Set(reloadInQueue), new Set(afterReload?.navigationLock || [])),
+        true,
+        `FIX-3 WM-5: poll must skip navigate after reload while sacred lock holds on ${normLockUrl}`
       );
       if (route.path.includes('/qp/')) {
         assert.ok(
