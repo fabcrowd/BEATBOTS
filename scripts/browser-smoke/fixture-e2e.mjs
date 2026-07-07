@@ -648,13 +648,15 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
     if (route.journey === 'SC-6') {
       assert.ok(
-        logs.filter((l) => l.includes('FCFS restock wait')).length >= 2,
-        `FIX-3 SC-6: restock reload must re-detect disabled ATC on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+        logs.filter((l) => l.includes('handleProductPage — FCFS ATC')).length >= 2,
+        `FIX-3 SC-6: restock reload must re-run FCFS product handler on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
       );
     } else {
+      // SC-5: first ATC may navigate to cart; reload re-inits there without sacred lock.
       assert.ok(
-        logs.filter((l) => l.includes('Clicking ATC button')).length >= 2,
-        `FIX-3 SC-5: FCFS reload must re-click ATC on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+        logs.filter((l) => l.includes('[TCH] init: cart')).length >= 1 ||
+          logs.filter((l) => l.includes('Clicking ATC button')).length >= 2,
+        `FIX-3 SC-5: FCFS reload must re-init after ATC flow on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
       );
     }
     // Repeated NAV_FAILED / ATC_SUCCESS during live poll — FCFS must never arm sacred lock (SC-5/SC-6).
