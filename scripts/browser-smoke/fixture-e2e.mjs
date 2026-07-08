@@ -626,7 +626,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     // Live background poll: Target product reload must re-init without arming sacred lock (TGT-1).
     await sendBg(popup, {
       type: 'START_MONITOR',
-      products: [{ url: monitorUrl, name: `Fixture TGT ${route.journey}`, qty: 1 }],
+      products: [{ url: monitorUrl, name: `Fixture TGT ${route.journey}`, qty: 5 }],
       refreshInterval: 1,
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
@@ -696,7 +696,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     // Live background poll: checkout review reload must preserve TGT-4 manual stop (no sacred lock).
     await sendBg(popup, {
       type: 'START_MONITOR',
-      products: [{ url: monitorUrl, name: `Fixture TGT-4 ${route.journey}`, qty: 1 }],
+      products: [{ url: monitorUrl, name: `Fixture TGT-4 ${route.journey}`, qty: 5 }],
       refreshInterval: 1,
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
