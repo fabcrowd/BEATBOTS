@@ -36,7 +36,7 @@ export const JOURNEYS = {
   'MON-3': {
     id: 'MON-3',
     retailer: 'core',
-    summary: 'Background poll navigationLock + inQueueUrls skip re-navigation; isInCheckoutFlow guard; START_MONITOR restart clears locks',
+    summary: 'Background poll navigationLock + inQueueUrls skip re-navigation; isInCheckoutFlow guard; START_MONITOR restart clears inQueueUrls',
     impl: ['target-checkout-helper/background.js'],
     coverage: 'strong',
     tests: ['extension-functional.mjs'],
