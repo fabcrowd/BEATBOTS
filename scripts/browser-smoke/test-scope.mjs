@@ -121,6 +121,17 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['walmart-flow-simulation.mjs', 'extension-functional.mjs'],
   },
+  'WM-7': {
+    id: 'WM-7',
+    retailer: 'walmart',
+    summary: 'Product-page __NEXT_DATA__ offerId → WM_OFFER_ID_READY updates monitor.products[].oid',
+    impl: [
+      'target-checkout-helper/walmart-content.js (_wmInit)',
+      'target-checkout-helper/background.js (WM_OFFER_ID_READY handler)',
+    ],
+    coverage: 'strong',
+    tests: ['extension-functional.mjs'],
+  },
   'SC-1': {
     id: 'SC-1',
     retailer: 'samsclub',
@@ -236,7 +247,7 @@ export const INVARIANTS = {
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
-  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6', 'SC-1'],
+  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6', 'WM-7', 'SC-1'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],

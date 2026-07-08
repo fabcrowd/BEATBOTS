@@ -365,6 +365,58 @@ async function main() {
   assert.ok(!mon3Cleared.inQueueUrls?.length, 'MON-3: STOP_MONITOR clears inQueueUrls');
   assert.ok(!mon3Cleared.navigationLock?.length, 'MON-3: STOP_MONITOR clears navigationLock');
 
+  // ─── WM-7: WM_OFFER_ID_READY stores OID on monitored Walmart product ─────
+  const WM7_URL = 'https://www.walmart.com/ip/WM7-Offer-Id-Product/111222333';
+  const WM7_OID = 'OFFER-ID-WM7-TEST';
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: WM7_URL, name: 'WM-7 OID test', qty: 1 }],
+    refreshInterval: 60,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  const wm7Before = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(!wm7Before.products?.[0]?.oid, 'WM-7: product starts without oid');
+
+  const wm7Ready = await sendBg(popup, {
+    type: 'WM_OFFER_ID_READY',
+    offerId: WM7_OID,
+    url: WM7_URL,
+  });
+  assert.ok(wm7Ready?.ok !== false, 'WM-7: WM_OFFER_ID_READY responds ok');
+
+  const wm7After = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(wm7After.products?.[0]?.oid, WM7_OID, 'WM-7: WM_OFFER_ID_READY stores oid on matching product');
+
+  const wm7WrongUrl = await sendBg(popup, {
+    type: 'WM_OFFER_ID_READY',
+    offerId: 'WRONG-OID',
+    url: 'https://www.walmart.com/ip/other-product/999',
+  });
+  assert.ok(wm7WrongUrl?.ok !== false, 'WM-7: non-monitored URL still responds ok');
+  const wm7Unchanged = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(
+    wm7Unchanged.products?.[0]?.oid,
+    WM7_OID,
+    'WM-7: non-matching URL must not change stored oid'
+  );
+
+  const wm7Same = await sendBg(popup, {
+    type: 'WM_OFFER_ID_READY',
+    offerId: WM7_OID,
+    url: WM7_URL,
+  });
+  assert.ok(wm7Same?.ok !== false, 'WM-7: idempotent same oid responds ok');
+  assert.equal(
+    (await sendBg(popup, { type: 'GET_MONITOR_STATUS' })).products?.[0]?.oid,
+    WM7_OID,
+    'WM-7: idempotent same oid leaves storage unchanged'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
     type: 'CHECKOUT_RETRY_EVENT',
