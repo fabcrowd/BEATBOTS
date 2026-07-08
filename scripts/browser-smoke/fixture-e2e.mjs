@@ -847,6 +847,21 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('wm7-offer-id-ready')) {
+    const productUrl = `http://${route.host}:${port}${route.monitorProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const expectedOid = route.expectedOfferId || 'FIXTURE-OID-WM7-777';
+    const wm7Status = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const wm7Product = (wm7Status?.products || []).find(
+      (p) => normalizeProductUrl(p.url) === normProductUrl
+    );
+    assert.equal(
+      wm7Product?.oid,
+      expectedOid,
+      `FIX-3 WM-7: __NEXT_DATA__ must store oid ${expectedOid} on ${normProductUrl}, got ${JSON.stringify(wm7Product)}`
+    );
+  }
+
   if (invariants.includes('px-timeout-nav-failed')) {
     assert.ok(
       logs.some((l) => l.includes('PX/loading page detected')),
@@ -883,6 +898,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 
 function routeWaitMs(route) {
   if (route.pxTimeoutMs > 0) return route.pxTimeoutMs + 900;
+  if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;

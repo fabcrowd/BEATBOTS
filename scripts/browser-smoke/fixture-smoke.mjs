@@ -98,6 +98,16 @@ const FIXTURE_MARKERS = {
       'hang tight',
     ],
   },
+  walmartProductOid: {
+    fixtureId: 'walmart-product-oid',
+    journeys: ['WM-7'],
+    markers: [
+      'data-tch-fixture="walmart-product-oid"',
+      '__NEXT_DATA__',
+      'FIXTURE-OID-WM7-777',
+      'data-automation-id="add-to-cart-btn"',
+    ],
+  },
   samsclubProductFcfs: {
     fixtureId: 'samsclub-product-fcfs',
     journeys: ['SC-3', 'SC-5'],

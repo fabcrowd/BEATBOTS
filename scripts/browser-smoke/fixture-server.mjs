@@ -135,6 +135,16 @@ export const FIXTURE_E2E_ROUTES = [
     pxTimeoutMs: 750,
   },
   {
+    host: 'www.walmart.com',
+    path: '/ip/mock-oid/777',
+    file: MOCK_URLS.walmartProductOid,
+    initLog: '[WMT] init',
+    journey: 'WM-7',
+    invariants: ['wm7-offer-id-ready'],
+    monitorProductPath: '/ip/mock-oid/777',
+    expectedOfferId: 'FIXTURE-OID-WM7-777',
+  },
+  {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,

@@ -130,7 +130,7 @@ export const JOURNEYS = {
       'target-checkout-helper/background.js (WM_OFFER_ID_READY handler)',
     ],
     coverage: 'strong',
-    tests: ['extension-functional.mjs'],
+    tests: ['extension-functional.mjs', 'fixture-e2e.mjs'],
   },
   'SC-1': {
     id: 'SC-1',
@@ -190,7 +190,7 @@ export const JOURNEYS = {
   'FIX-3': {
     id: 'FIX-3',
     retailer: 'core',
-    summary: 'Fixture e2e asserts journey invariants offline (WM-2 pre-drop no sacred lock + WM-2 live START_MONITOR poll cycle (wm2-live-poll-cycle), SC-5 no sacred lock, WM-4/WM-5/WM-6 sacred lock + product-page queue lock URL (location.href) + wm5-live-poll-cycle on product-page sacred lock + /qp + /checkout (sacred-lock page reload during live poll) + wm4-qp-no-producturl + wm4-live-poll-cycle on unmonitored /qp + /checkout (Target-only monitor + queue page reload during live poll) + wm4-checkout-no-producturl + PX hang-tight + #px-captcha + px-block + data-tch-px-timeout-ms override timeout error paths + wm6-live-poll-cycle on PX hang-tight + #px-captcha + px-block + PX override with repeated NAV_FAILED during poll, WM-5 repeated NAV_FAILED + poll-skip + live START_MONITOR poll cycle with sacred-lock page reload + repeated NAV_FAILED during poll on product-page queue URL + monitored /qp + /checkout (wm5-live-poll-cycle), SC-5 repeated ATC_SUCCESS FCFS race cycles + SC-5/SC-6 live START_MONITOR poll cycle with FCFS page reload during live poll + repeated NAV_FAILED/ATC_SUCCESS during poll (sc5-sc6-live-poll-cycle), SC-6 restock repeated NAV_FAILED + SC-5 ATC_SUCCESS combo, TGT-1 tgt-live-poll-cycle (product reload + ATC_SUCCESS/NAV_FAILED during live poll, no sacred lock), TGT-4 manual review + tgt4-live-poll-cycle (checkout reload during live poll preserves manual stop))',
+    summary: 'Fixture e2e asserts journey invariants offline (WM-2 pre-drop no sacred lock + WM-2 live START_MONITOR poll cycle (wm2-live-poll-cycle), SC-5 no sacred lock, WM-4/WM-5/WM-6 sacred lock + product-page queue lock URL (location.href) + wm5-live-poll-cycle on product-page sacred lock + /qp + /checkout (sacred-lock page reload during live poll) + wm4-qp-no-producturl + wm4-live-poll-cycle on unmonitored /qp + /checkout (Target-only monitor + queue page reload during live poll) + wm4-checkout-no-producturl + PX hang-tight + #px-captcha + px-block + data-tch-px-timeout-ms override timeout error paths + wm6-live-poll-cycle on PX hang-tight + #px-captcha + px-block + PX override with repeated NAV_FAILED during poll, WM-5 repeated NAV_FAILED + poll-skip + live START_MONITOR poll cycle with sacred-lock page reload + repeated NAV_FAILED during poll on product-page queue URL + monitored /qp + /checkout (wm5-live-poll-cycle), SC-5 repeated ATC_SUCCESS FCFS race cycles + SC-5/SC-6 live START_MONITOR poll cycle with FCFS page reload during live poll + repeated NAV_FAILED/ATC_SUCCESS during poll (sc5-sc6-live-poll-cycle), SC-6 restock repeated NAV_FAILED + SC-5 ATC_SUCCESS combo, TGT-1 tgt-live-poll-cycle (product reload + ATC_SUCCESS/NAV_FAILED during live poll, no sacred lock), TGT-4 manual review + tgt4-live-poll-cycle (checkout reload during live poll preserves manual stop), WM-7 wm7-offer-id-ready (__NEXT_DATA__ offerId → monitor.products[].oid))',
     impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],
@@ -253,7 +253,7 @@ export const EXTENSION_SUITE = {
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
   'fixture-smoke.mjs': ['FIX-1'],
-  'fixture-e2e.mjs': ['FIX-2', 'FIX-3'],
+  'fixture-e2e.mjs': ['FIX-2', 'FIX-3', 'WM-7'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
@@ -281,6 +281,7 @@ export const MOCK_URLS = {
   walmartProductPxCaptcha: 'fixtures/walmart-product-px-captcha.html',
   walmartProductPxBlock: 'fixtures/walmart-product-px-block.html',
   walmartProductPxOverride: 'fixtures/walmart-product-px-override.html',
+  walmartProductOid: 'fixtures/walmart-product-oid.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
   samsclubProductFcfsRestock: 'fixtures/samsclub-product-fcfs-restock.html',
 };
