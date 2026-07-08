@@ -21,6 +21,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetProduct,
     initLog: '[TCH] init',
     journey: 'TGT-1',
+    invariants: ['tgt-live-poll-cycle'],
+    monitorProductPath: '/p/mock-product',
   },
   {
     host: 'www.target.com',
@@ -28,7 +30,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetCheckoutReview,
     initLog: '[TCH] init',
     journey: 'TGT-4',
-    invariants: ['tgt4-manual-review'],
+    invariants: ['tgt4-manual-review', 'tgt4-live-poll-cycle'],
+    monitorProductPath: '/p/mock-product',
   },
   {
     host: 'www.walmart.com',

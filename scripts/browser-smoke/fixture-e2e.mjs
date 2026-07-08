@@ -617,6 +617,150 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('tgt-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    // Live background poll: Target product reload must re-init without arming sacred lock (TGT-1).
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture TGT ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 ${route.journey}: Target product reload during live poll must not arm inQueueUrls on ${normMonitorUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[TCH] init')).length >= 2,
+      `FIX-3 ${route.journey}: Target product reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    const liveSignalTypes = ['ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
+      } else {
+        await sendBg(popup, { type: liveSignalTypes[i], url: monitorUrl });
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 ${route.journey}: live poll cycle ${i + 1} must not arm inQueueUrls on ${normMonitorUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 ${route.journey}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 ${route.journey}: live poll must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+        `FIX-3 ${route.journey}: navigationLock alone must not imply sacred lock on ${normMonitorUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  if (invariants.includes('tgt4-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    // Live background poll: checkout review reload must preserve TGT-4 manual stop (no sacred lock).
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture TGT-4 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 TGT-4: checkout reload during live poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[TCH] review reached')).length >= 2,
+      `FIX-3 TGT-4: checkout reload must re-detect review on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('autoPlaceOrder: clicking Place Order')),
+      `FIX-3 TGT-4: checkout reload during live poll must not auto-click Place Order on ${pageUrl}`
+    );
+    const clickedAfterReload = await page.evaluate(() => {
+      const btn = document.querySelector('[data-test="placeOrderButton"]');
+      return btn?.dataset?.tchFixtureClicked === '1';
+    });
+    assert.equal(
+      clickedAfterReload,
+      false,
+      'FIX-3 TGT-4: Place Order button must remain unclicked after checkout reload during live poll'
+    );
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
+      } else {
+        await sendBg(popup, { type: liveSignalTypes[i], url: pageUrl });
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 TGT-4: live poll cycle ${i + 1} must not arm inQueueUrls on checkout ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycle?.navigationLock?.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 TGT-4: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      afterPollWait?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 TGT-4: live poll must not arm inQueueUrls on checkout ${pageUrl}, got inQueueUrls=${JSON.stringify(afterPollWait?.inQueueUrls || [])}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('sc5-sc6-live-poll-cycle')) {
     const monitorUrl = route.monitorProductPath
       ? `http://${route.host}:${port}${route.monitorProductPath}`
