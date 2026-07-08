@@ -1111,6 +1111,11 @@ function getCheckoutStep(useSavedPayment = false) {
 
 async function handleProductPage(settings) {
   console.log('[TCH] handleProductPage');
+  // Offline fixture e2e: skip live ATC/nav — tests drive monitor signals explicitly.
+  if (document.documentElement.hasAttribute('data-tch-fixture')) {
+    console.log('[TCH] handleProductPage — fixture mode, skipping live ATC');
+    return;
+  }
   prefetchCheckout();
   try {
     const { monitor: monDrop } = await chrome.storage.local.get('monitor');
