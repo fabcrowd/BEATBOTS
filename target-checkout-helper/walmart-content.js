@@ -171,6 +171,18 @@ function wmIsVisible(el) {
   return true;
 }
 
+/** Read Next.js payload — script#id tag (page + fixtures); window fallback when shared. */
+function wmReadNextData() {
+  try {
+    const el = document.getElementById('__NEXT_DATA__');
+    if (el?.textContent) return JSON.parse(el.textContent);
+  } catch (_) {}
+  try {
+    if (window.__NEXT_DATA__) return window.__NEXT_DATA__;
+  } catch (_) {}
+  return null;
+}
+
 /**
  * @param {boolean} [liveOnly=false] Skip __NEXT_DATA__ and read DOM only.
  *   Use this inside polling loops: __NEXT_DATA__ is frozen at page load and will
@@ -179,7 +191,7 @@ function wmIsVisible(el) {
 function wmGetCurrentPrice(liveOnly = false) {
   if (!liveOnly) {
     try {
-      const nd = window.__NEXT_DATA__;
+      const nd = wmReadNextData();
       const p = nd?.props?.pageProps?.initialData?.data?.product?.priceInfo?.currentPrice?.price;
       if (typeof p === 'number' && p > 0) return p;
     } catch (_) {}
@@ -365,7 +377,7 @@ async function wmDirectAtc(oid, settings, opts = {}) {
   // the vidUserId cookie for guest sessions.
   const cid = (() => {
     try {
-      const nd = window.__NEXT_DATA__;
+      const nd = wmReadNextData();
       return nd?.props?.pageProps?.customerId || null;
     } catch { return null; }
   })() || (() => {
@@ -1165,7 +1177,7 @@ async function _wmInit() {
     // mode where background fires ATC immediately at dropExpectedAt without poll delay.
     const pageOid = (() => {
       try {
-        const nd = window.__NEXT_DATA__;
+        const nd = wmReadNextData();
         return nd?.props?.pageProps?.initialData?.data?.product?.primaryOffer?.offerId || null;
       } catch { return null; }
     })();
