@@ -25,6 +25,17 @@ function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
   return false;
 }
 
+/** Mirrors background.js isInCheckoutFlow — poll must not navigate tabs already in checkout. */
+function isInCheckoutFlow(url) {
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
 async function waitForMonitorLocks(popup, check, label, timeoutMs = 35000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -203,6 +214,12 @@ async function main() {
   const MON3_WM = 'https://www.walmart.com/ip/Test-Mon3-Product/987654321';
   const MON3_NORM = normalizeProductUrl(MON3_WM);
 
+  assert.ok(isInCheckoutFlow('https://www.target.com/checkout'), 'MON-3: target checkout path');
+  assert.ok(isInCheckoutFlow('https://www.walmart.com/checkout'), 'MON-3: walmart checkout path');
+  assert.ok(isInCheckoutFlow('https://www.target.com/cart'), 'MON-3: cart path');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/ip/product/123'), 'MON-3: product page not checkout flow');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/qp'), 'MON-3: /qp uses sacred lock, not checkout-flow guard');
+
   {
     const inQ = new Set();
     const navL = new Set();
@@ -325,6 +342,25 @@ async function main() {
       'WM-5: poll skips when inQueueUrls holds after retailer-neutral NAV_FAILED'
     );
   }
+
+  // MON-3: START_MONITOR calls stopMonitor first — clears sacred lock for a fresh session.
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: MON3_WM, name: 'MON-3 restart', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+  const afterRestart = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(afterRestart.active, true, 'MON-3: START_MONITOR sets active after restart');
+  assert.ok(
+    !afterRestart.inQueueUrls?.includes(MON3_NORM),
+    'MON-3: START_MONITOR clears prior inQueueUrls (stopMonitor first)'
+  );
+  assert.ok(
+    !afterRestart.navigationLock?.includes(MON3_NORM),
+    'MON-3: START_MONITOR clears prior navigationLock'
+  );
 
   await sendBg(popup, { type: 'STOP_MONITOR' });
   const mon3Cleared = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
