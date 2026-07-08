@@ -2489,6 +2489,9 @@ async function init() {
       || (currentTcin && extractTcinFromUrl(p.url) === currentTcin)
     );
     if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
+    // Monitor is active on other SKUs — do not auto-ATC/checkout on unrelated product pages.
+    stopInit('monitor_unmatched_product');
+    return;
   }
 
   if (!data.enabled) {
