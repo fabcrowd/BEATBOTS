@@ -1128,6 +1128,11 @@ async function _wmInit() {
     productUrl:            matchedProduct?.url || null,
   };
 
+  if (page === 'product' && hasMonitor && !matchedProduct) {
+    console.log('[WMT] Monitor active — skipping automation on non-monitored product page');
+    return;
+  }
+
   if (page === 'product') {
     // Extract OID from __NEXT_DATA__ and report to background — enables backend-link
     // mode where background fires ATC immediately at dropExpectedAt without poll delay.
