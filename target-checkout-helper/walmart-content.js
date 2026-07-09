@@ -329,6 +329,23 @@ function wmPxTimeoutMs() {
   return 2 * 60 * 1000;
 }
 
+/** WM-4/WM-6: /qp + checkout queue wait cap — optional data-tch-queue-timeout-ms for fixture e2e. */
+function wmQueueWaitTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-queue-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 45 * 60 * 1000;
+}
+
+/** Faster poll when queue-timeout override is set so fixture e2e can finish quickly. */
+function wmQueuePollMs(queueRoom = false) {
+  if (document.documentElement?.getAttribute('data-tch-queue-timeout-ms')) return 200;
+  return queueRoom ? 5000 : 2000;
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -610,11 +627,11 @@ async function wmHandleQueueRoom(settings) {
     console.warn('[WMT] wmHandleQueueRoom: no productUrl in settings — background nav lock NOT set');
   }
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
 
   while (Date.now() - started < maxWaitMs) {
-    await wmSleep(5000);
+    await wmSleep(wmQueuePollMs(true));
     // When the waiting room clears, Walmart redirects away from /qp automatically.
     // The SPA watcher fires wmInit() on URL change — no extra action needed here.
     if (!location.pathname.startsWith('/qp')) return;
@@ -626,7 +643,12 @@ async function wmHandleQueueRoom(settings) {
 
   wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] /qp waiting room timeout after 45 min');
-  if (settings?.productUrl) wmSignalQueueTimeout(settings.productUrl);
+  if (settings?.productUrl) {
+    wmSignalQueueTimeout(settings.productUrl);
+  } else {
+    console.warn('[WMT] /qp waiting room timeout — no productUrl — releasing navigation lock');
+    wmSignalNavFailed(location.href);
+  }
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -747,11 +769,11 @@ async function wmHandleQueue(settings) {
     console.warn('[WMT] wmHandleQueue: no productUrl in settings — background nav lock NOT set');
   }
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
 
   while (Date.now() - started < maxWaitMs) {
-    await wmSleep(2000);
+    await wmSleep(wmQueuePollMs(false));
     if (!wmIsQueuePage()) {
       console.log('[WMT] Queue cleared');
       wmShowToast('Queue cleared — continuing checkout', 'success');
@@ -766,7 +788,12 @@ async function wmHandleQueue(settings) {
   }
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Queue wait timed out after 45 min');
-  if (settings?.productUrl) wmSignalQueueTimeout(settings.productUrl);
+  if (settings?.productUrl) {
+    wmSignalQueueTimeout(settings.productUrl);
+  } else {
+    console.warn('[WMT] Queue timeout — no productUrl — releasing navigation lock');
+    wmSignalNavFailed(location.href);
+  }
 }
 
 /**

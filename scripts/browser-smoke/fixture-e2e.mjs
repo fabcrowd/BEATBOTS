@@ -226,6 +226,40 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('wm4-qp-timeout-no-producturl')) {
+    assert.ok(
+      logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-6: /qp timeout without monitor must warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-6: /qp timeout must log no-productUrl NAV_FAILED path on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      (after?.inQueueUrls || []).length,
+      0,
+      `FIX-3 WM-6: /qp timeout without productUrl must not arm inQueueUrls on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('wm4-checkout-timeout-no-producturl')) {
+    assert.ok(
+      logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-6: checkout queue timeout without monitor must warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-6: checkout queue timeout must log no-productUrl NAV_FAILED path on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      (after?.inQueueUrls || []).length,
+      0,
+      `FIX-3 WM-6: checkout queue timeout without productUrl must not arm inQueueUrls on ${pageUrl}`
+    );
+  }
+
   if (invariants.includes('sacred-lock-checkout')) {
     const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
     const normProductUrl = normalizeProductUrl(productUrl);
@@ -924,6 +958,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 }
 
 function routeWaitMs(route) {
+  if (route.queueTimeoutMs > 0) return route.queueTimeoutMs + 900;
   if (route.pxTimeoutMs > 0) return route.pxTimeoutMs + 900;
   if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;

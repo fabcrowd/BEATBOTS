@@ -861,6 +861,36 @@ function runWm6ErrorPathTests() {
   }
   assert.ok(!checkoutInQ.has(norm), 'WM-6: checkout timeout must not arm inQueueUrls');
   assert.ok(!checkoutNav.has(norm), 'WM-6: checkout timeout releases navigationLock');
+
+  // WM-6: /qp + checkout queue timeout without productUrl — NAV_FAILED fallback (not QUEUE_TIMEOUT).
+  assert.ok(
+    WM_SRC.includes('/qp waiting room timeout — no productUrl — releasing navigation lock'),
+    'WM-6: /qp timeout without productUrl must log NAV_FAILED fallback'
+  );
+  assert.ok(
+    WM_SRC.includes('Queue timeout — no productUrl — releasing navigation lock'),
+    'WM-6: checkout queue timeout without productUrl must log NAV_FAILED fallback'
+  );
+  for (const href of [
+    'https://www.walmart.com/qp/waiting-room-timeout',
+    'https://www.walmart.com/checkout/unmonitored-timeout',
+  ]) {
+    const normHref = normalizeProductUrl(href);
+    const timeoutMsgs = [{ type: 'WALMART_NAV_FAILED', url: href }];
+    const noProductInQ = new Set();
+    const noProductNav = new Set([normHref]);
+    for (const m of timeoutMsgs) {
+      bgApplyWalmartMessage(noProductInQ, noProductNav, m);
+    }
+    assert.ok(
+      !noProductInQ.has(normHref),
+      `WM-6: queue timeout without productUrl must not arm inQueueUrls (${href})`
+    );
+    assert.ok(
+      !noProductNav.has(normHref),
+      `WM-6: queue timeout without productUrl releases navigationLock (${href})`
+    );
+  }
 }
 
 function runWm5SacredLockBlockTests() {
