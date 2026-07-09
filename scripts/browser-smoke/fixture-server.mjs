@@ -145,6 +145,15 @@ export const FIXTURE_E2E_ROUTES = [
     expectedOfferId: 'FIXTURE-OID-WM7-777',
   },
   {
+    host: 'www.walmart.com',
+    path: '/cart/no-checkout',
+    file: MOCK_URLS.walmartCartNoCheckout,
+    initLog: '[WMT] init',
+    journey: 'WM-6',
+    invariants: ['no-sacred-lock', 'wm6-cart-checkout-missing'],
+    monitorProductPath: '/ip/mock-cart-missing/888',
+  },
+  {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,

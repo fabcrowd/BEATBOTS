@@ -847,6 +847,20 @@ function runWm6ErrorPathTests() {
   }
   assert.ok(!cartInQ.has(norm), 'WM-6: cart checkout-missing must not arm inQueueUrls');
   assert.ok(!cartNav.has(norm), 'WM-6: cart checkout-missing releases navigationLock');
+
+  // WM-6: checkout SPA timeout — release poll lock after 10 min stall (no sacred lock).
+  assert.ok(
+    WM_SRC.includes('wmHandleCheckout timed out') && WM_SRC.includes('wmSignalNavFailed'),
+    'WM-6: checkout timeout emits WALMART_NAV_FAILED'
+  );
+  const checkoutTimeout = { messages: [{ type: 'WALMART_NAV_FAILED', url: productUrl }] };
+  const checkoutInQ = new Set();
+  const checkoutNav = new Set([norm]);
+  for (const m of checkoutTimeout.messages) {
+    bgApplyWalmartMessage(checkoutInQ, checkoutNav, m);
+  }
+  assert.ok(!checkoutInQ.has(norm), 'WM-6: checkout timeout must not arm inQueueUrls');
+  assert.ok(!checkoutNav.has(norm), 'WM-6: checkout timeout releases navigationLock');
 }
 
 function runWm5SacredLockBlockTests() {

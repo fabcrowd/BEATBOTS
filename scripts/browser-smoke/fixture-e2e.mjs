@@ -259,6 +259,33 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
   }
 
+  if (invariants.includes('wm6-cart-checkout-missing')) {
+    assert.ok(
+      logs.some((l) => l.includes('Checkout button not found')),
+      `FIX-3 WM-6: expected cart checkout-missing log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('releasing navigation lock')),
+      `FIX-3 WM-6: expected NAV_FAILED release log on cart ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    const productUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-6: cart checkout-missing must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-6: cart checkout-missing must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
   if (invariants.includes('nav-failed-releases-lock')) {
     const releasingLog = route.host.includes('samsclub')
       ? logs.some((l) => l.includes('releasing nav lock'))
@@ -901,6 +928,7 @@ function routeWaitMs(route) {
   if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
+  if (route.invariants?.includes('wm6-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;
   return 6000;

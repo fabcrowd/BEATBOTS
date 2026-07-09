@@ -284,6 +284,7 @@ export const MOCK_URLS = {
   walmartProductOid: 'fixtures/walmart-product-oid.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
   samsclubProductFcfsRestock: 'fixtures/samsclub-product-fcfs-restock.html',
+  walmartCartNoCheckout: 'fixtures/walmart-cart-no-checkout.html',
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */

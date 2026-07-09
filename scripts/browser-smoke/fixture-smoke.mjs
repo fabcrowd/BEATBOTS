@@ -125,6 +125,14 @@ const FIXTURE_MARKERS = {
       'disabled',
     ],
   },
+  walmartCartNoCheckout: {
+    fixtureId: 'walmart-cart-no-checkout',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-cart-no-checkout"',
+      'data-tch-path="/cart/no-checkout"',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

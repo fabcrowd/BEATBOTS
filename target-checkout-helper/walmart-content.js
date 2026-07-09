@@ -1017,7 +1017,9 @@ async function wmHandleCheckout(settings) {
     await wmSleep(500);
   }
 
-  console.warn('[WMT] wmHandleCheckout timed out after 10 min');
+  wmShowToast('Checkout step timeout — take over manually', 'error');
+  console.warn('[WMT] wmHandleCheckout timed out after 10 min — releasing navigation lock');
+  wmSignalNavFailed(settings?.productUrl || location.href);
 }
 
 // ─── WALMART LOGIN / 2FA (IMAP via native host) ────────────────────────────────
