@@ -1131,6 +1131,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    case 'WALMART_QUEUE_TIMEOUT': {
+      // Queue wait exceeded max duration — release sacred lock so poll/user can recover.
+      const normTimeoutUrl = normalizeProductUrl(message.url || '');
+      if (normTimeoutUrl) {
+        inQueueUrls.delete(normTimeoutUrl);
+        navigationLock.delete(normTimeoutUrl);
+        console.log('[TCH bg] Queue timeout — released sacred lock:', normTimeoutUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
     case 'WALMART_IN_QUEUE': {
       // Content script confirmed queue entry — lock this URL so the poll
       // never navigates the tab again and destroys the queue position.

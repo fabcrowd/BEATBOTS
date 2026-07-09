@@ -343,6 +343,18 @@ async function main() {
     );
   }
 
+  // WM-5: queue wait timeout releases sacred lock (contrast with NAV_FAILED above).
+  await sendBg(popup, { type: 'WALMART_QUEUE_TIMEOUT', url: MON3_WM });
+  const afterQueueTimeout = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterQueueTimeout.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: WALMART_QUEUE_TIMEOUT clears inQueueUrls'
+  );
+  assert.ok(
+    !afterQueueTimeout.navigationLock?.includes(MON3_NORM),
+    'WM-5: WALMART_QUEUE_TIMEOUT clears navigationLock'
+  );
+
   // MON-3: START_MONITOR calls stopMonitor first — clears sacred lock for a fresh session.
   await sendBg(popup, {
     type: 'START_MONITOR',

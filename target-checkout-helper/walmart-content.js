@@ -117,6 +117,12 @@ function wmSignalAtcSuccess(productUrl) {
   try { chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url }); } catch (_) {}
 }
 
+/** WM-4/WM-5: queue wait exceeded — release sacred lock so background poll can recover. */
+function wmSignalQueueTimeout(lockUrl) {
+  const url = lockUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_TIMEOUT', url }); } catch (_) {}
+}
+
 /** Same telemetry path as Target review — drives Discord webhooks + endless mode. */
 async function wmReportCheckoutSuccess() {
   try {
@@ -546,6 +552,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
+  wmSignalQueueTimeout(location.href);
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
   }
@@ -612,6 +619,7 @@ async function wmHandleQueueRoom(settings) {
 
   wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] /qp waiting room timeout after 45 min');
+  if (settings?.productUrl) wmSignalQueueTimeout(settings.productUrl);
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -750,6 +758,7 @@ async function wmHandleQueue(settings) {
   }
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Queue wait timed out after 45 min');
+  if (settings?.productUrl) wmSignalQueueTimeout(settings.productUrl);
 }
 
 /**

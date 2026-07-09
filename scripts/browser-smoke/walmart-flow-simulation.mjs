@@ -538,6 +538,10 @@ function bgApplyWalmartMessage(inQueueUrls, navigationLock, message) {
   if (message.type === 'NAV_FAILED' || message.type === 'WALMART_NAV_FAILED') {
     navigationLock.delete(norm);
   }
+  if (message.type === 'WALMART_QUEUE_TIMEOUT') {
+    inQueueUrls.delete(norm);
+    navigationLock.delete(norm);
+  }
   return { inQueueUrls, navigationLock };
 }
 
@@ -857,6 +861,40 @@ function runWm5SacredLockBlockTests() {
   }
 }
 
+/** WM-5: queue wait timeout releases sacred lock so poll can recover. */
+function runWm5QueueTimeoutTests() {
+  const productUrl = 'https://www.walmart.com/ip/wm5-queue-timeout/444555666';
+  const norm = normalizeProductUrl(productUrl);
+  const inQ = new Set();
+  const navL = new Set();
+
+  assert.ok(
+    WM_SRC.includes("type: 'WALMART_QUEUE_TIMEOUT'"),
+    'WM-5: walmart-content.js must emit WALMART_QUEUE_TIMEOUT on queue timeout'
+  );
+  assert.ok(WM_SRC.includes('wmSignalQueueTimeout'), 'WM-5: wmSignalQueueTimeout helper defined');
+
+  bgApplyWalmartMessage(inQ, navL, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navL.add(norm);
+  assert.ok(inQ.has(norm), 'WM-5 timeout setup: inQueueUrls armed');
+  assert.ok(navL.has(norm), 'WM-5 timeout setup: navigationLock armed');
+
+  bgApplyWalmartMessage(inQ, navL, { type: 'WALMART_QUEUE_TIMEOUT', url: productUrl });
+  assert.ok(!inQ.has(norm), 'WM-5: WALMART_QUEUE_TIMEOUT clears inQueueUrls');
+  assert.ok(!navL.has(norm), 'WM-5: WALMART_QUEUE_TIMEOUT clears navigationLock');
+
+  const afterTimeoutPoll = bgPollCycle(inQ, navL, productUrl);
+  assert.equal(afterTimeoutPoll.skipped, false, 'WM-5: poll can re-navigate after queue timeout');
+  assert.ok(navL.has(norm), 'WM-5: poll re-arms navigationLock after queue timeout');
+
+  // Contrast: transient NAV_FAILED must not clear sacred lock (WM-5 invariant).
+  inQ.add(norm);
+  navL.add(norm);
+  bgApplyWalmartMessage(inQ, navL, { type: 'WALMART_NAV_FAILED', url: productUrl });
+  assert.ok(inQ.has(norm), 'WM-5 contrast: NAV_FAILED must not clear inQueueUrls');
+  assert.ok(!navL.has(norm), 'WM-5 contrast: NAV_FAILED clears navigationLock only');
+}
+
 async function main() {
   runPageTypeTests();
   runDispatchTests();
@@ -865,6 +903,7 @@ async function main() {
   await runWm2FlowTests();
   runWm4SacredLockTests();
   runWm5SacredLockBlockTests();
+  runWm5QueueTimeoutTests();
   runWm6CheckoutQueueLockTests();
   runWm6ErrorPathTests();
   console.log(
