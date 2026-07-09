@@ -123,6 +123,12 @@ function wmSignalQueueTimeout(lockUrl) {
   try { chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_TIMEOUT', url }); } catch (_) {}
 }
 
+/** WM-6: release background poll lock on error paths — does not clear sacred lock (WM-5). */
+function wmSignalNavFailed(lockUrl) {
+  const url = lockUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url }); } catch (_) {}
+}
+
 /** Same telemetry path as Target review — drives Discord webhooks + endless mode. */
 async function wmReportCheckoutSuccess() {
   try {
@@ -582,6 +588,7 @@ async function wmWaitForPriceDrop(settings) {
 
   wmShowToast('Price wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Price guard wait timed out after 45 min');
+  wmSignalNavFailed(settings?.productUrl || location.href);
 }
 
 /**
@@ -675,7 +682,7 @@ async function wmHandleProductPage(settings, oid) {
     }
     wmShowToast('ATC not available — waiting for restock', 'persistent');
     console.log('[WMT] ATC button not found or disabled — releasing navigation lock');
-    try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
+    wmSignalNavFailed(settings?.productUrl || location.href);
     return;
   }
 
@@ -719,7 +726,8 @@ async function wmHandleCart(settings) {
 
   if (!checkoutBtn) {
     wmShowToast('Checkout button not found — take over manually', 'error');
-    console.warn('[WMT] Checkout button not found on cart page');
+    console.warn('[WMT] Checkout button not found on cart page — releasing navigation lock');
+    wmSignalNavFailed(settings?.productUrl || location.href);
     return;
   }
   console.log('[WMT] Clicking checkout button');

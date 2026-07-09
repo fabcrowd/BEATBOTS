@@ -344,6 +344,9 @@ async function main() {
   }
 
   // WM-5: queue wait timeout releases sacred lock (contrast with NAV_FAILED above).
+  // Stop poll first so navigationLock is not re-armed before we read status (avoids race).
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
   await sendBg(popup, { type: 'WALMART_QUEUE_TIMEOUT', url: MON3_WM });
   const afterQueueTimeout = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.ok(

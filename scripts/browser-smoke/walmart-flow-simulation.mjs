@@ -107,6 +107,11 @@ function wmIsVisible(el) {
   return !!(el && el.visible);
 }
 
+/** WM-6: price-guard timeout releases navigationLock only — never arms sacred lock (WM-2). */
+function wmSimulatePriceGuardTimeout(productUrl) {
+  return { messages: [{ type: 'WALMART_NAV_FAILED', url: productUrl }] };
+}
+
 /** Mirrors wmPxTimeoutMs() — walmart-content.js */
 function wmResolvePxTimeoutMs(attrs = {}) {
   const override = attrs['data-tch-px-timeout-ms'];
@@ -281,7 +286,7 @@ async function wmHandleProductPageSim(page, settings) {
 /**
  * Mirrors wmHandleCart happy path — walmart-content.js lines ~640–666.
  */
-async function wmHandleCartSim(page, settings) {
+function wmHandleCartSim(page, settings) {
   const actions = [];
   if (settings.walmartAtcOnly) {
     actions.push('atc_only_stop');
@@ -300,7 +305,11 @@ async function wmHandleCartSim(page, settings) {
 
   if (!checkoutBtn) {
     actions.push('checkout_missing');
-    return { path: 'checkout_not_found', actions };
+    return {
+      path: 'checkout_not_found',
+      actions,
+      messages: [{ type: 'WALMART_NAV_FAILED' }],
+    };
   }
 
   actions.push('click_checkout');
@@ -803,6 +812,41 @@ function runWm6ErrorPathTests() {
   const afterFailPoll = bgPollCycle(atcInQ, atcNav, productUrl);
   assert.equal(afterFailPoll.skipped, false, 'WM-6: poll can re-navigate after NAV_FAILED when not in queue');
   assert.ok(atcNav.has(norm), 'WM-6: poll re-arms navigationLock after error-path NAV_FAILED');
+
+  // WM-6: price-guard timeout — no sacred lock, releases nav lock for poll retry (WM-2).
+  assert.ok(WM_SRC.includes('wmSignalNavFailed'), 'WM-6: wmSignalNavFailed helper defined');
+  assert.ok(
+    WM_SRC.includes('Price guard wait timed out') && WM_SRC.includes('wmSignalNavFailed'),
+    'WM-6: price-guard timeout emits WALMART_NAV_FAILED'
+  );
+  const priceTimeout = wmSimulatePriceGuardTimeout(productUrl);
+  const priceInQ = new Set();
+  const priceNav = new Set([norm]);
+  for (const m of priceTimeout.messages) {
+    bgApplyWalmartMessage(priceInQ, priceNav, m);
+  }
+  assert.ok(!priceInQ.has(norm), 'WM-6: price-guard timeout must not arm inQueueUrls');
+  assert.ok(!priceNav.has(norm), 'WM-6: price-guard timeout releases navigationLock');
+
+  // WM-6: cart checkout button missing — same error-path semantics as ATC unavailable.
+  assert.ok(
+    WM_SRC.includes('Checkout button not found') && WM_SRC.includes('wmSignalNavFailed'),
+    'WM-6: cart checkout-missing emits WALMART_NAV_FAILED'
+  );
+  const emptyCart = makePage({ pathname: '/cart', bodyText: 'Your cart is empty' });
+  const cartMissing = wmHandleCartSim(emptyCart, {});
+  assert.equal(cartMissing.path, 'checkout_not_found', 'WM-6: cart without checkout btn → error path');
+  assert.ok(
+    cartMissing.messages?.some((m) => m.type === 'WALMART_NAV_FAILED'),
+    'WM-6: cart checkout-missing must emit WALMART_NAV_FAILED'
+  );
+  const cartInQ = new Set();
+  const cartNav = new Set([norm]);
+  for (const m of cartMissing.messages) {
+    bgApplyWalmartMessage(cartInQ, cartNav, { ...m, url: productUrl });
+  }
+  assert.ok(!cartInQ.has(norm), 'WM-6: cart checkout-missing must not arm inQueueUrls');
+  assert.ok(!cartNav.has(norm), 'WM-6: cart checkout-missing releases navigationLock');
 }
 
 function runWm5SacredLockBlockTests() {

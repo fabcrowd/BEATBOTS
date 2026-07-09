@@ -392,6 +392,23 @@ function runSc6ErrorPathTests() {
     restockEntry.messages.some((m) => m.type === 'NAV_FAILED'),
     'SC-6: restock wait must emit NAV_FAILED for poll retry'
   );
+
+  const invisibleAtcPage = makePage({
+    pathname: '/p/sc6-invisible-atc/456',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        visible: false,
+      },
+    ],
+  });
+  const invisibleEntry = scDecideProductPageEntry(invisibleAtcPage);
+  assert.equal(invisibleEntry.action, 'fcfs_restock_wait', 'SC-6: invisible enabled ATC → restock wait');
+  assert.ok(
+    invisibleEntry.messages.some((m) => m.type === 'NAV_FAILED'),
+    'SC-6: invisible ATC must emit NAV_FAILED (not sacred lock)'
+  );
   assert.ok(
     !restockEntry.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
     'SC-6: restock wait must not emit WALMART_IN_QUEUE'
