@@ -188,11 +188,19 @@ export class TaskRunner extends EventEmitter {
       return
     }
 
-    // Checkout mode: either wait for monitor ping or go immediately
+    // Checkout mode: block until the monitor signals stock for the target TCIN.
     const firstProduct = products[0]
     this.setTaskStatus(task.id, 'waiting_stock', `Waiting for stock: ${firstProduct?.tcin || '?'}`)
 
     if (signal.aborted) return
+
+    if (firstProduct?.tcin) {
+      await this.waitForStock(firstProduct.tcin, signal)
+    }
+    if (signal.aborted) {
+      this.running.delete(task.id)
+      return
+    }
 
     // Main checkout loop
     for (let attempt = 0; attempt <= settings.retryMaxAttempts; attempt++) {
@@ -300,6 +308,9 @@ export class TaskRunner extends EventEmitter {
           const delay = settings.checkoutDelayMs || 2000
           this.setTaskStatus(task.id, 'waiting_stock', `Success #${successCount}. Waiting for next restock...`)
           await sleep(delay, signal)
+          if (signal.aborted) break
+          await this.waitForStock(product.tcin, signal)
+          if (signal.aborted) break
           continue
         }
 
@@ -386,6 +397,28 @@ export class TaskRunner extends EventEmitter {
       if (peekPool('atc') > 0 || peekPool('login') > 0) return
       await sleep(500, signal)
     }
+  }
+
+  /** Resolves when monitorEngine emits stock for tcin (no-op if monitor is off). */
+  private waitForStock(tcin: string, signal: AbortSignal): Promise<void> {
+    if (!monitorEngine.isRunning()) return Promise.resolve()
+    if (monitorEngine.isTcinInStock(tcin)) return Promise.resolve()
+
+    return new Promise((resolve) => {
+      const finish = () => {
+        monitorEngine.off('stock', onStock)
+        signal.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      const onStock = (ev: { tcin: string }) => {
+        if (ev.tcin === tcin) finish()
+      }
+      const onAbort = () => finish()
+
+      monitorEngine.on('stock', onStock)
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) finish()
+    })
   }
 
   private async waitForever(signal: AbortSignal): Promise<void> {
