@@ -1209,6 +1209,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (r?.ok) {
             lastHarvestCaptureMs = Date.now();
             lastHarvestCaptureKind = String(message.data?.kind || 'burst');
+            void bbForwardCaptureToBeatbots(message.data?.kind, message.data?.url || '');
           }
           sendResponse(r);
         })
@@ -1469,7 +1470,8 @@ async function maybeRunDropAwareHarvestKeepalive() {
     return;
   }
 
-  await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
+  const snap = await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
+  if (snap?.ok) void bbForwardCaptureToBeatbots('keepalive', 'https://www.target.com/');
   lastHarvestKeepaliveRunMs = Date.now();
   lastHarvestCaptureMs = Date.now();
   lastHarvestCaptureKind = 'keepalive';
@@ -1720,8 +1722,40 @@ function bbSendCookieHarvest(kind, cookies, shapeHeaders, proxy) {
   } catch { return false; }
 }
 
-// Hook into the cookie harvest system — forward to desktop app whenever a snapshot is stored
-// We do this by listening for the TCH_HARVEST_NOW broadcast response pattern
+function cookiesArrayToMap(cookies) {
+  const map = {};
+  for (const c of cookies || []) {
+    if (c && c.name != null && c.value != null) map[c.name] = String(c.value);
+  }
+  return map;
+}
+
+function harvestKindFromCapture(kind, tabUrl) {
+  const k = String(kind || '').toLowerCase();
+  if (k === 'atc') return 'atc';
+  if (k === 'keepalive' || k === 'login') return 'login';
+  try {
+    const path = new URL(tabUrl || 'https://www.target.com/', 'https://www.target.com').pathname;
+    if (/^\/(?:account\/)?(?:login|signin)/i.test(path)) return 'login';
+    if (/\/p\//i.test(path)) return 'atc';
+  } catch {}
+  return 'atc';
+}
+
+/** After a successful extension harvest, push cookies to Beatbots when the WS bridge is up. */
+async function bbForwardCaptureToBeatbots(kind, tabUrl) {
+  if (!bbConnected || !bbWs || bbWs.readyState !== WebSocket.OPEN) return;
+  try {
+    const cookies = await tchReadCookiesForRetailer('target');
+    const map = cookiesArrayToMap(cookies);
+    if (!Object.keys(map).length) return;
+    bbSendCookieHarvest(harvestKindFromCapture(kind, tabUrl), map, {}, null);
+  } catch (e) {
+    console.debug('[TCH] BEATBOTS harvest forward failed:', e?.message || e);
+  }
+}
+
+// Legacy path: content may still emit TCH_HARVEST_RESULT with a pre-built cookie map.
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === 'TCH_HARVEST_RESULT' && msg?.cookies) {
     const kind = msg.isLoginPage ? 'login' : 'atc';

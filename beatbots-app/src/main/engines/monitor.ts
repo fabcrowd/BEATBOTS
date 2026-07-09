@@ -90,6 +90,10 @@ export class MonitorEngine extends EventEmitter {
     return this.running
   }
 
+  isTcinInStock(tcin: string): boolean {
+    return this.tcinStates.get(tcin)?.inStock ?? false
+  }
+
   setApiKey(key: string, base?: string): void {
     this.cachedApiKey = key
     if (base) this.cachedRedskyBase = base
