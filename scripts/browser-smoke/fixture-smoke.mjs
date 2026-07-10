@@ -160,6 +160,15 @@ const FIXTURE_MARKERS = {
       'itemprop="price"',
     ],
   },
+  walmartCheckoutSpaTimeout: {
+    fixtureId: 'walmart-checkout-spa-timeout',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-spa-timeout"',
+      'data-tch-checkout-timeout-ms="750"',
+      'data-tch-path="/checkout/spa-stall"',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

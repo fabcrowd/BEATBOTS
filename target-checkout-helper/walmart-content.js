@@ -363,6 +363,23 @@ function wmPriceGuardPollMs() {
   return 1000;
 }
 
+/** WM-6: checkout SPA stall cap — optional data-tch-checkout-timeout-ms for fixture e2e. */
+function wmCheckoutTotalTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-checkout-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 10 * 60 * 1000;
+}
+
+/** Faster poll when checkout-timeout override is set so fixture e2e can finish quickly. */
+function wmCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-checkout-timeout-ms')) return 200;
+  return 500;
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -1023,8 +1040,10 @@ async function wmHandleCheckout(settings) {
   const STEP_MIN_INTERVAL_MS = 5000;
   const stepHandledAt = {};
   const started = Date.now();
+  const maxWaitMs = wmCheckoutTotalTimeoutMs();
+  const pollMs = wmCheckoutPollMs();
 
-  while (Date.now() - started < 10 * 60 * 1000) {
+  while (Date.now() - started < maxWaitMs) {
     if (wmIsQueuePage()) {
       await wmHandleQueue(settings);
       return;
@@ -1058,11 +1077,11 @@ async function wmHandleCheckout(settings) {
     }
 
     // No recognizable form yet — page still loading or transitioning.
-    await wmSleep(500);
+    await wmSleep(pollMs);
   }
 
   wmShowToast('Checkout step timeout — take over manually', 'error');
-  console.warn('[WMT] wmHandleCheckout timed out after 10 min — releasing navigation lock');
+  console.warn('[WMT] wmHandleCheckout timed out — releasing navigation lock');
   wmSignalNavFailed(settings?.productUrl || location.href);
 }
 
