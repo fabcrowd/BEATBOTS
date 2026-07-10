@@ -309,11 +309,22 @@ async function signInCdpClick(el) {
 
 // Waits for the password field or a 2FA/OTP prompt after the email step (SPA transition).
 async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
+  const authScope = getCheckoutAuthRoot() || document;
+  const findOtpInput = () => (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.findVisibleOtpInput)
+    ? TCH_SIGNIN_STEP.findVisibleOtpInput(authScope, isVisible)
+    : null;
+
   const handlePasswordOrOtp = async (observer) => {
-    const otpInput = document.querySelector(
-      'input[autocomplete="one-time-code"],input[inputmode="numeric"][maxlength="6"],' +
-      'input[name*="otp"],input[name*="code"],input[id*="otp"],input[id*="verif"]'
-    );
+    const passInput = Array.from(authScope.querySelectorAll('input[id="password"],input[type="password"]'))
+      .find((el) => isVisible(el));
+    if (passInput) {
+      if (observer) observer.disconnect();
+      await sleep(400);
+      await handleSignInPage(settings, { nested: true });
+      return true;
+    }
+
+    const otpInput = findOtpInput();
     if (otpInput) {
       if (observer) observer.disconnect();
       console.log('[TCH] auto sign-in: 2FA prompt — polling Gmail for OTP');
@@ -326,7 +337,8 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
           await sleep(300);
           await signInClickAndType(otpInput, msg.code);
           await sleep(200);
-          const btn = document.querySelector('button[type="submit"],[data-test="account-signin-button"]');
+          const btn = authScope.querySelector('button[type="submit"],[data-test="account-signin-button"]')
+            || document.querySelector('button[type="submit"],[data-test="account-signin-button"]');
           if (btn) await signInCdpClick(btn);
         } else if (msg.type === 'OTP_TIMEOUT') {
           chrome.runtime.onMessage.removeListener(otpListener);
@@ -341,14 +353,6 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
       return true;
     }
 
-    const passInput = Array.from((getCheckoutAuthRoot() || document).querySelectorAll('input[id="password"],input[type="password"]'))
-      .find((el) => isVisible(el));
-    if (passInput) {
-      if (observer) observer.disconnect();
-      await sleep(400);
-      await handleSignInPage(settings, { nested: true });
-      return true;
-    }
     return false;
   };
 
@@ -1573,7 +1577,7 @@ async function handleCheckoutPendingStep(settings, step) {
   watchForCheckoutStep(settings, { probeTimeoutMs: 0, noRetryOnTimeout: true });
 }
 
-function watchForCheckoutStep(settings, options = {}) {
+function stopCheckoutStepWatch() {
   if (checkoutStepObserver) {
     checkoutStepObserver.disconnect();
     checkoutStepObserver = null;
@@ -1586,12 +1590,20 @@ function watchForCheckoutStep(settings, options = {}) {
     clearTimeout(checkoutStepPollTimer);
     checkoutStepPollTimer = null;
   }
+}
+
+function watchForCheckoutStep(settings, options = {}) {
+  stopCheckoutStepWatch();
 
   let handled = false;
   let pendingRetryCount = 0;
   let lastPendingRetryMs = 0;
   const runStep = async (step) => {
     if (handled) return;
+    if (getPageType() !== 'checkout') {
+      stopCheckoutStepWatch();
+      return;
+    }
     if (step === 'unknown' || step === 'signin') {
       if (autoSignInInFlight) return;
       const shouldRetry = typeof TCH_SIGNIN_STEP !== 'undefined'
@@ -1617,18 +1629,7 @@ function watchForCheckoutStep(settings, options = {}) {
     try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
     handled = true;
     markCheckoutFlow(`${step}_detected`);
-    if (checkoutStepObserver) {
-      checkoutStepObserver.disconnect();
-      checkoutStepObserver = null;
-    }
-    if (checkoutStepPollId) {
-      clearInterval(checkoutStepPollId);
-      checkoutStepPollId = null;
-    }
-    if (checkoutStepPollTimer) {
-      clearTimeout(checkoutStepPollTimer);
-      checkoutStepPollTimer = null;
-    }
+    stopCheckoutStepWatch();
     if (step === 'shipping') await handleShippingStep(settings);
     else if (step === 'payment') await handlePaymentStep(settings);
     else if (step === 'review') await handleReviewStep(settings);
@@ -2470,6 +2471,7 @@ async function init() {
 
   if (page !== 'checkout') {
     checkoutFlowStart = null;
+    stopCheckoutStepWatch();
   } else {
     flushNavigationTiming('product_to_checkout', 'nav_product_to_checkout');
     flushNavigationTiming('cart_to_checkout', 'nav_cart_to_checkout');

@@ -94,6 +94,21 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+// OTP input detection — scoped + visible; promo/gift code fields must not match.
+{
+  const scope = {
+    querySelector(sel) {
+      if (sel.includes('otp')) return { id: 'otp' };
+      if (sel.includes('code')) return { id: 'promo-code' };
+      return null;
+    },
+  };
+  const visible = (el) => el.id === 'otp';
+  assert(S.findVisibleOtpInput(scope, visible)?.id === 'otp', 'finds visible OTP in scope');
+  assert(!S.findVisibleOtpInput(scope, () => false), 'hidden OTP ignored');
+  assert(!S.OTP_INPUT_SELECTORS.some((s) => /name\*="code"/.test(s)), 'no broad name*="code" OTP selector');
+}
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);

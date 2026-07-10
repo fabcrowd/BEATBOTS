@@ -133,6 +133,30 @@
    * }} opts
    * @returns {boolean}
    */
+  var OTP_INPUT_SELECTORS = [
+    'input[autocomplete="one-time-code"]',
+    'input[inputmode="numeric"][maxlength="6"]',
+    'input[name*="otp"]',
+    'input[id*="otp"]',
+    'input[id*="verif"]',
+    'input[name*="verif"]',
+  ];
+
+  /**
+   * Visible OTP field within auth scope — excludes promo/gift `*code*` inputs.
+   * @param {ParentNode|null|undefined} scope
+   * @param {(el: Element) => boolean} isVisibleFn
+   * @returns {Element|null}
+   */
+  function findVisibleOtpInput(scope, isVisibleFn) {
+    if (!scope || !isVisibleFn) return null;
+    for (var i = 0; i < OTP_INPUT_SELECTORS.length; i++) {
+      var el = scope.querySelector(OTP_INPUT_SELECTORS[i]);
+      if (el && isVisibleFn(el)) return el;
+    }
+    return null;
+  }
+
   function shouldRetryCheckoutPending(opts) {
     opts = opts || {};
     if (opts.signInInFlight) return false;
@@ -171,6 +195,8 @@
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,
+    findVisibleOtpInput: findVisibleOtpInput,
+    OTP_INPUT_SELECTORS: OTP_INPUT_SELECTORS,
     formatLoginStatusLabel: formatLoginStatusLabel,
     LOGIN_STATUS_LABELS: LOGIN_STATUS_LABELS,
   };
