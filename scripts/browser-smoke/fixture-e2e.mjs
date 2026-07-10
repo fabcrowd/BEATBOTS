@@ -264,6 +264,99 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('wm4-qp-timeout-with-producturl')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room detected')),
+      `FIX-3 WM-5: monitored /qp timeout must enter waiting room on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-5: monitored /qp timeout must not warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room timeout')),
+      `FIX-3 WM-5: monitored /qp timeout must log timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('/qp waiting room timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-5: monitored /qp timeout must use QUEUE_TIMEOUT path (not NAV_FAILED) on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: monitored /qp timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: monitored /qp timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
+  if (invariants.includes('wm4-checkout-timeout-with-producturl')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      logs.some((l) => l.includes('Queue detected')),
+      `FIX-3 WM-5: monitored checkout timeout must enter queue wait on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-5: monitored checkout timeout must not warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue wait timed out')),
+      `FIX-3 WM-5: monitored checkout timeout must log timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Queue timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-5: monitored checkout timeout must use QUEUE_TIMEOUT path (not NAV_FAILED) on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: monitored checkout timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: monitored checkout timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
+  if (invariants.includes('wm5-queue-timeout-clears-sacred-lock')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: QUEUE_TIMEOUT must release sacred lock on ${pageUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: QUEUE_TIMEOUT must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+    const pollAfter = pollWouldSkipNavigation(
+      normProductUrl,
+      new Set(afterInQueue.map(normalizeProductUrl)),
+      new Set(afterNavLock.map(normalizeProductUrl))
+    );
+    assert.equal(
+      pollAfter,
+      false,
+      `FIX-3 WM-5: background poll must be able to re-navigate after QUEUE_TIMEOUT on ${normProductUrl}`
+    );
+  }
+
   if (invariants.includes('wm6-price-guard-timeout')) {
     assert.ok(
       logs.some((l) => l.includes('Price guard') && l.includes('no sacred lock')),
