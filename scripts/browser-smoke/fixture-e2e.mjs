@@ -129,6 +129,10 @@ async function applyRouteStorage(popup, route, port) {
     };
   }
 
+  if (route.walmartMaxPrice > 0) {
+    data.walmartMaxPrice = route.walmartMaxPrice;
+  }
+
   await setStorage(popup, data);
   return pageUrl;
 }
@@ -257,6 +261,37 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       (after?.inQueueUrls || []).length,
       0,
       `FIX-3 WM-6: checkout queue timeout without productUrl must not arm inQueueUrls on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('wm6-price-guard-timeout')) {
+    assert.ok(
+      logs.some((l) => l.includes('Price guard') && l.includes('no sacred lock')),
+      `FIX-3 WM-6: price-guard must log no-sacred-lock wait on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Price guard wait timed out')),
+      `FIX-3 WM-6: price-guard timeout must log timed out on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 WM-6: price-guard timeout must not enter product-page queue wait on ${pageUrl}`
+    );
+    const productUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-6: price-guard timeout must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-6: price-guard timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
     );
   }
 
@@ -959,6 +994,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 
 function routeWaitMs(route) {
   if (route.queueTimeoutMs > 0) return route.queueTimeoutMs + 900;
+  if (route.priceGuardTimeoutMs > 0) return route.priceGuardTimeoutMs + 900;
   if (route.pxTimeoutMs > 0) return route.pxTimeoutMs + 900;
   if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;

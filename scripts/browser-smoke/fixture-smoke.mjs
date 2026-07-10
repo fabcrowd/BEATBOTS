@@ -151,6 +151,15 @@ const FIXTURE_MARKERS = {
       'estimated wait time',
     ],
   },
+  walmartProductPriceGuardTimeout: {
+    fixtureId: 'walmart-product-price-guard-timeout',
+    journeys: ['WM-2', 'WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-price-guard-timeout"',
+      'data-tch-price-guard-timeout-ms="750"',
+      'itemprop="price"',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

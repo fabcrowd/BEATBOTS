@@ -172,6 +172,17 @@ export const FIXTURE_E2E_ROUTES = [
     queueTimeoutMs: 750,
   },
   {
+    host: 'www.walmart.com',
+    path: '/ip/mock-price-guard-timeout/991',
+    file: MOCK_URLS.walmartProductPriceGuardTimeout,
+    initLog: '[WMT] init',
+    journey: 'WM-6',
+    invariants: ['no-sacred-lock', 'wm6-price-guard-timeout'],
+    monitorProductPath: '/ip/mock-price-guard-timeout/991',
+    walmartMaxPrice: 50,
+    priceGuardTimeoutMs: 750,
+  },
+  {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,

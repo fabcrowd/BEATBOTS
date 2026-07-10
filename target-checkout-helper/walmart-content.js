@@ -346,6 +346,23 @@ function wmQueuePollMs(queueRoom = false) {
   return queueRoom ? 5000 : 2000;
 }
 
+/** WM-6: price-guard wait cap — optional data-tch-price-guard-timeout-ms for fixture e2e. */
+function wmPriceGuardTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-price-guard-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 45 * 60 * 1000;
+}
+
+/** Faster poll when price-guard timeout override is set so fixture e2e can finish quickly. */
+function wmPriceGuardPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-price-guard-timeout-ms')) return 200;
+  return 1000;
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -591,10 +608,10 @@ async function wmWaitForPriceDrop(settings) {
   wmShowToast(`Price above max $${maxPrice.toFixed(2)} — waiting for drop price`, 'persistent');
   console.log(`[WMT] Price guard wait — no sacred lock until queue confirmed`);
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmPriceGuardTimeoutMs();
   const started = Date.now();
   while (Date.now() - started < maxWaitMs) {
-    await wmSleep(1000);
+    await wmSleep(wmPriceGuardPollMs());
     const currentPrice = wmGetCurrentPrice(true);
     if (currentPrice === null || currentPrice <= maxPrice) {
       wmShowToast('Drop price reached — continuing', 'success');
