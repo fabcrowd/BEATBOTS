@@ -150,7 +150,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCartNoCheckout,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'wm6-cart-checkout-missing'],
+    invariants: ['no-sacred-lock', 'wm6-cart-checkout-missing', 'wm6-cart-live-poll-cycle'],
     monitorProductPath: '/ip/mock-cart-missing/888',
   },
   {
