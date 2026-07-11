@@ -1279,13 +1279,23 @@ function getPageType() {
   return 'other';
 }
 
+function hasVisibleInput(...selectors) {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && isVisible(el)) return true;
+  }
+  return false;
+}
+
 function getCheckoutStep(useSavedPayment = false) {
+  const placeOrderEl = document.querySelector(SEL.placeOrder);
   const opts = {
-    hasPlaceOrder: !!(document.querySelector(SEL.placeOrder) || findByText('place order')),
+    hasPlaceOrder: !!((placeOrderEl && isVisible(placeOrderEl)) || findByText('place order')),
     hasAuthGate: hasCheckoutAuthGate(),
-    hasCardNumber: !!document.querySelector(SEL.cardNumber),
-    hasShippingFields: ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
-      .some((s) => document.querySelector(s)),
+    hasCardNumber: hasVisibleInput(SEL.cardNumber),
+    hasShippingFields: hasVisibleInput(
+      'input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]'
+    ),
     useSavedPayment,
     hasEnabledContinueButton: !!findContinueButton(true),
   };
@@ -2443,7 +2453,28 @@ async function handleMonitoredATC(monitor, product) {
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 
+/** Prevents overlapping init() from SPA nav, MONITOR_UPDATED, and SETTINGS_UPDATED. */
+let initInFlight = false;
+let initPending = false;
+
 async function init() {
+  if (initInFlight) {
+    initPending = true;
+    console.log('[TCH] init: already in flight — will re-run after current pass');
+    return;
+  }
+  initInFlight = true;
+  try {
+    do {
+      initPending = false;
+      await runInitPass();
+    } while (initPending);
+  } finally {
+    initInFlight = false;
+  }
+}
+
+async function runInitPass() {
   const stopInit = startTiming('init_total', location.pathname);
   const data = await getSettings();
   runtimeEnabled = !!data.enabled;
