@@ -859,6 +859,10 @@ async function runBackgroundPoll() {
       }
       // Lock this URL — content script is now loading on the product page.
       // Don't navigate again until it reports back (ATC_SUCCESS or NAV_FAILED).
+      // Re-check after async tab work — stopMonitor may have run while we navigated.
+      if (!bgPollActive) break;
+      const { monitor: monAfterNav } = await chrome.storage.local.get('monitor').catch(() => ({}));
+      if (!monAfterNav?.active) break;
       navigationLock.add(normUrl);
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
       // Avoid hammering the same product multiple times per cycle.
