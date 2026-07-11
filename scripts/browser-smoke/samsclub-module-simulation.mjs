@@ -375,6 +375,14 @@ function runSc6ErrorPathTests() {
     'SC-6: samsclub must not emit WALMART_NAV_FAILED'
   );
   assert.ok(SC_SRC.includes('scSignalNavFailed'), 'SC-6: scSignalNavFailed helper defined');
+  assert.ok(
+    SC_SRC.includes('function scAtcWaitTimeoutMs'),
+    'SC-6: scAtcWaitTimeoutMs for fixture e2e ATC wait override'
+  );
+  assert.ok(
+    SC_SRC.includes('data-tch-atc-wait-ms'),
+    'SC-6: data-tch-atc-wait-ms override for fixture e2e'
+  );
 
   const restockPage = makePage({
     pathname: '/p/sc6-restock/123',

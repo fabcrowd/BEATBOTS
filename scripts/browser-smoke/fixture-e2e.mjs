@@ -612,6 +612,18 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     }
   }
 
+  // SC-6: invisible enabled ATC must emit NAV_FAILED (not sacred lock).
+  if (invariants.includes('sc6-invisible-atc')) {
+    assert.ok(
+      logs.some((l) => l.includes('ATC button not found or disabled')),
+      `FIX-3 SC-6: invisible ATC must time out to NAV_FAILED on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Clicking ATC button')),
+      `FIX-3 SC-6: invisible ATC must not click on ${pageUrl}`
+    );
+  }
+
   // SC-5: repeated ATC_SUCCESS cycles must never arm sacred lock (FCFS race).
   if (invariants.includes('sc5-repeated-atc-success')) {
     if (!invariants.includes('sc6-repeated-nav-failed')) {
@@ -1212,6 +1224,7 @@ function routeWaitMs(route) {
   if (route.queueTimeoutMs > 0) return route.queueTimeoutMs + 900;
   if (route.priceGuardTimeoutMs > 0) return route.priceGuardTimeoutMs + 900;
   if (route.pxTimeoutMs > 0) return route.pxTimeoutMs + 900;
+  if (route.atcWaitMs > 0) return route.atcWaitMs + 900;
   if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;

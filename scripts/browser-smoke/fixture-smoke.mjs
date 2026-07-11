@@ -131,8 +131,19 @@ const FIXTURE_MARKERS = {
     journeys: ['SC-6'],
     markers: [
       'data-tch-fixture="samsclub-product-fcfs-restock"',
+      'data-tch-atc-wait-ms="750"',
       'data-automation-id="add-to-cart-btn"',
       'disabled',
+    ],
+  },
+  samsclubProductFcfsInvisibleAtc: {
+    fixtureId: 'samsclub-product-fcfs-invisible-atc',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-fcfs-invisible-atc"',
+      'data-tch-atc-wait-ms="750"',
+      'data-automation-id="add-to-cart-btn"',
+      'display:none',
     ],
   },
   walmartCartNoCheckout: {

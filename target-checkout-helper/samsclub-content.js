@@ -59,6 +59,23 @@ function scFindAtcButton() {
   return scFindByText('add to cart');
 }
 
+/** SC-6: FCFS ATC wait cap — optional data-tch-atc-wait-ms for fixture e2e. */
+function scAtcWaitTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-atc-wait-ms');
+  if (override != null && override !== '') {
+    const n = Number(override);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 8000;
+}
+
+/** Faster poll when ATC-wait override is set so fixture e2e can finish quickly. */
+function scAtcWaitPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-atc-wait-ms')) return 200;
+  return 200;
+}
+
 async function scWaitFor(fn, timeoutMs = 8000, intervalMs = 200) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -111,7 +128,7 @@ async function scHandleProductPage(settings) {
     const el = scFindAtcButton();
     if (el && !el.disabled && scIsVisible(el)) return el;
     return null;
-  }, 8000);
+  }, scAtcWaitTimeoutMs(), scAtcWaitPollMs());
 
   if (!atcBtn) {
     scShowToast('ATC not available — waiting for restock', 'persistent');
