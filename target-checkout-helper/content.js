@@ -1111,6 +1111,11 @@ function getCheckoutStep(useSavedPayment = false) {
 
 async function handleProductPage(settings) {
   console.log('[TCH] handleProductPage');
+  // Offline fixture e2e: skip live ATC/nav — tests drive monitor signals explicitly.
+  if (document.documentElement.hasAttribute('data-tch-fixture')) {
+    console.log('[TCH] handleProductPage — fixture mode, skipping live ATC');
+    return;
+  }
   prefetchCheckout();
   try {
     const { monitor: monDrop } = await chrome.storage.local.get('monitor');
@@ -2194,6 +2199,11 @@ async function init() {
   if (detected === 'walmart') {
     // Walmart is handled by walmart-content.js — this script is Target-only.
     stopInit('walmart_handled');
+    return;
+  }
+  if (detected === 'samsclub') {
+    // Sam's Club is handled by samsclub-content.js — this script is Target-only.
+    stopInit('samsclub_handled');
     return;
   }
   if (detected !== 'target') {
