@@ -961,6 +961,10 @@ function runWm5QueueTimeoutTests() {
     'WM-5: walmart-content.js must emit WALMART_QUEUE_TIMEOUT on queue timeout'
   );
   assert.ok(WM_SRC.includes('wmSignalQueueTimeout'), 'WM-5: wmSignalQueueTimeout helper defined');
+  assert.ok(
+    /async function wmWaitInProductQueue[\s\S]*?const maxWaitMs = wmQueueWaitTimeoutMs\(\)/.test(WM_SRC),
+    'WM-5: wmWaitInProductQueue must use wmQueueWaitTimeoutMs (not hardcoded 45min)'
+  );
 
   bgApplyWalmartMessage(inQ, navL, { type: 'WALMART_IN_QUEUE', url: productUrl });
   navL.add(norm);

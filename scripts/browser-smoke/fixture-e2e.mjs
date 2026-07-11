@@ -297,6 +297,35 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('wm5-product-queue-timeout')) {
+    const productUrl = `http://${route.host}:${port}${route.monitorProductPath || route.path}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 WM-5: product-page queue timeout must enter queue wait on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Product-page queue wait timed out')),
+      `FIX-3 WM-5: product-page queue timeout must log timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Queue timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-5: product-page queue timeout must use QUEUE_TIMEOUT path (not NAV_FAILED) on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: product-page queue timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: product-page queue timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
   if (invariants.includes('wm4-checkout-timeout-with-producturl')) {
     const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
     const normProductUrl = normalizeProductUrl(productUrl);

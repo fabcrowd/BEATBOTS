@@ -193,6 +193,16 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.walmart.com',
+    path: '/ip/mock-product-queue-timeout/458',
+    file: MOCK_URLS.walmartProductQueueTimeout,
+    initLog: '[WMT] init',
+    journey: 'WM-5',
+    invariants: ['wm5-product-queue-timeout', 'wm5-queue-timeout-clears-sacred-lock'],
+    monitorProductPath: '/ip/mock-product-queue-timeout/458',
+    queueTimeoutMs: 750,
+  },
+  {
+    host: 'www.walmart.com',
     path: '/ip/mock-price-guard-timeout/991',
     file: MOCK_URLS.walmartProductPriceGuardTimeout,
     initLog: '[WMT] init',

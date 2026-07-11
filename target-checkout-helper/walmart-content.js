@@ -542,7 +542,7 @@ async function wmWaitInProductQueue(settings, oid) {
   // Lock the tab in background poll so it doesn't re-navigate while we wait.
   try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: location.href }); } catch (_) {}
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
   let queuePassedSignal = false;
   const onQueuePassed = () => { queuePassedSignal = true; };
@@ -551,7 +551,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
   try {
   while (Date.now() - started < maxWaitMs) {
-    if (!queuePassedSignal) await wmSleep(1000);
+    if (!queuePassedSignal) await wmSleep(wmQueuePollMs());
 
     // Price guard — use DOM-only (liveOnly=true): __NEXT_DATA__ is frozen at
     // page load and won't update when Walmart flips the drop price at go-time.
@@ -608,7 +608,7 @@ async function wmWaitInProductQueue(settings, oid) {
   }
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
-  console.warn('[WMT] Product-page queue wait timed out after 45 min');
+  console.warn('[WMT] Product-page queue wait timed out');
   wmSignalQueueTimeout(location.href);
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
