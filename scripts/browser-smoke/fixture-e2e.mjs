@@ -612,6 +612,22 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     }
   }
 
+  // WM-6: product page with no ATC element must emit NAV_FAILED (not sacred lock).
+  if (invariants.includes('wm6-missing-atc-element')) {
+    assert.ok(
+      logs.some((l) => l.includes('ATC button not found or disabled')),
+      `FIX-3 WM-6: missing ATC element must time out to NAV_FAILED on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Clicking ATC button')),
+      `FIX-3 WM-6: missing ATC element must not click on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 WM-6: missing ATC element must not enter product-page queue wait on ${pageUrl}`
+    );
+  }
+
   // SC-6: invisible enabled ATC must emit NAV_FAILED (not sacred lock).
   if (invariants.includes('sc6-invisible-atc')) {
     assert.ok(

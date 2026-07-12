@@ -94,6 +94,23 @@ function wmFillSelect(select, value) {
 
 const wmSleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** WM-6: ATC wait cap — optional data-tch-atc-wait-ms for fixture e2e. */
+function wmAtcWaitTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-atc-wait-ms');
+  if (override != null && override !== '') {
+    const n = Number(override);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 8000;
+}
+
+/** Faster poll when ATC-wait override is set so fixture e2e can finish quickly. */
+function wmAtcWaitPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-atc-wait-ms')) return 200;
+  return 100;
+}
+
 function wmPlayBeep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -252,13 +269,13 @@ function wmShowToast(message, type = 'info') {
   }
 }
 
-/** Polls selectorFn every 100ms until it returns a truthy value, or timeout. */
-async function wmWaitFor(selectorFn, timeoutMs = 8000) {
+/** Polls selectorFn until it returns a truthy value, or timeout. */
+async function wmWaitFor(selectorFn, timeoutMs = 8000, intervalMs = 100) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = selectorFn();
     if (result) return result;
-    await wmSleep(100);
+    await wmSleep(intervalMs);
   }
   return null;
 }
@@ -728,7 +745,7 @@ async function wmHandleProductPage(settings, oid) {
     const el = wmFindAtcLikeButton();
     if (el && !el.disabled && wmIsVisible(el)) return el;
     return null;
-  }, 8000);
+  }, wmAtcWaitTimeoutMs(), wmAtcWaitPollMs());
 
   if (!atcBtn) {
     // Re-check: did the queue load while we were waiting?

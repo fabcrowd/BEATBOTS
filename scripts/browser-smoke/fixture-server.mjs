@@ -121,6 +121,21 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.walmart.com',
+    path: '/ip/mock-no-atc/559',
+    file: MOCK_URLS.walmartProductNoAtc,
+    initLog: '[WMT] init',
+    journey: 'WM-6',
+    invariants: [
+      'no-sacred-lock',
+      'nav-failed-releases-lock',
+      'wm6-missing-atc-element',
+      'wm6-live-poll-cycle',
+    ],
+    monitorProductPath: '/ip/mock-no-atc/559',
+    atcWaitMs: 750,
+  },
+  {
+    host: 'www.walmart.com',
     path: '/ip/mock-px-override/558',
     file: MOCK_URLS.walmartProductPxOverride,
     initLog: '[WMT] PX/loading page detected',

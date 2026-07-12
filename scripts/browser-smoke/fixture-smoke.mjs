@@ -190,6 +190,15 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/checkout/spa-stall"',
     ],
   },
+  walmartProductNoAtc: {
+    fixtureId: 'walmart-product-no-atc',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-no-atc"',
+      'data-tch-atc-wait-ms="750"',
+      'no ATC element',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

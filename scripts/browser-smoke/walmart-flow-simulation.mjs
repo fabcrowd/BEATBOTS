@@ -716,6 +716,7 @@ function runWm6ErrorPathTests() {
   const productUrl = 'https://www.walmart.com/ip/wm6-error-path/444555666';
   const norm = normalizeProductUrl(productUrl);
 
+  assert.ok(WM_SRC.includes('function wmAtcWaitTimeoutMs'), 'WM-6: wmAtcWaitTimeoutMs must exist in walmart-content.js');
   assert.ok(WM_SRC.includes('function wmPxTimeoutMs'), 'WM-6: wmPxTimeoutMs must exist in walmart-content.js');
   assert.ok(
     WM_SRC.includes('2 * 60 * 1000'),
