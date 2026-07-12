@@ -166,17 +166,25 @@ async function tchClearHarvestEntries() {
 
 async function tchHarvestStatus() {
   const cfg = await tchGetHarvestConfig();
-  const rawEntries = await tchGetHarvestEntries();
-  const entries = tchPruneExpired(rawEntries, cfg.expirationMinutes);
-  if (entries.length !== rawEntries.length) {
-    await tchSetHarvestEntries(entries);
+  const prior = _harvestLock;
+  let releaseLock;
+  _harvestLock = new Promise(resolve => { releaseLock = resolve; });
+  await prior;
+  try {
+    const rawEntries = await tchGetHarvestEntries();
+    const entries = tchPruneExpired(rawEntries, cfg.expirationMinutes);
+    if (entries.length !== rawEntries.length) {
+      await tchSetHarvestEntries(entries);
+    }
+    return {
+      ok: true,
+      config: cfg,
+      count: entries.length,
+      sessionStorage: await tchSessionStorageAvailable(),
+    };
+  } finally {
+    releaseLock();
   }
-  return {
-    ok: true,
-    config: cfg,
-    count: entries.length,
-    sessionStorage: await tchSessionStorageAvailable(),
-  };
 }
 
 function tchSameSiteForSet(ss) {
