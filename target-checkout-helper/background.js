@@ -455,6 +455,35 @@ const inQueueUrls    = new Set();
 // URLs where the background has already navigated the tab to the product page.
 // The content script is now in control — don't reload until it reports back.
 const navigationLock = new Set();
+const POLL_GUARD_SESSION_KEY = 'tchPollGuards';
+
+async function persistPollGuards() {
+  if (!chrome.storage?.session) return;
+  await chrome.storage.session.set({
+    [POLL_GUARD_SESSION_KEY]: {
+      inQueue: [...inQueueUrls],
+      navLock: [...navigationLock],
+    },
+  }).catch(() => {});
+}
+
+async function restorePollGuards() {
+  if (!chrome.storage?.session) return;
+  try {
+    const data = await chrome.storage.session.get(POLL_GUARD_SESSION_KEY);
+    const guards = data[POLL_GUARD_SESSION_KEY];
+    if (!guards || typeof guards !== 'object') return;
+    if (Array.isArray(guards.inQueue)) {
+      for (const url of guards.inQueue) inQueueUrls.add(url);
+    }
+    if (Array.isArray(guards.navLock)) {
+      for (const url of guards.navLock) navigationLock.add(url);
+    }
+    if (guards.inQueue?.length || guards.navLock?.length) {
+      console.log('[TCH bg] restored poll guards:', inQueueUrls.size, 'queue,', navigationLock.size, 'nav');
+    }
+  } catch {}
+}
 // Tab IDs that have reported document hidden — used to warn popup that keepalives may throttle.
 const harvestHiddenTabs = new Set();
 // NTP offset: (server clock) - (local Date.now()) in ms. Negative means local is ahead.
@@ -510,7 +539,8 @@ function requestApiKeyFromTabs() {
 // ─── TCIN STOCK CHECK ────────────────────────────────────────────────────────
 
 // Single-TCIN check using product_fulfillment_v1 (known-good for preorders).
-async function checkSingleTcin(tcin, apiKey, redskyBase) {
+// deferStreakBump: when true, caller batches parallel fallbacks and bumps streak once.
+async function checkSingleTcin(tcin, apiKey, redskyBase, deferStreakBump = false) {
   const base = (redskyBase || 'https://redsky.target.com').replace(/\/$/, '');
   const url  = `${base}/redsky_aggregations/v1/web/product_fulfillment_v1`
     + `?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcin)}`;
@@ -522,6 +552,7 @@ async function checkSingleTcin(tcin, apiKey, redskyBase) {
       signal: AbortSignal.timeout(3000),
     });
     if (res.status === 401 || res.status === 403) {
+      if (deferStreakBump) return { authError: true };
       redskyErrorStreak++;
       await maybeAutoRecoverTargetSession();
       return null;
@@ -570,10 +601,16 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
   // For TCINs not covered by the batch endpoint, fall back to individual calls.
   const missing = tcins.filter(t => out.get(t) === undefined);
   if (missing.length) {
+    let fallbackAuthErrors = 0;
     await Promise.all(missing.map(async (tcin) => {
-      const result = await checkSingleTcin(tcin, apiKey, redskyBase);
-      if (result !== null) out.set(tcin, result);
+      const result = await checkSingleTcin(tcin, apiKey, redskyBase, true);
+      if (result && result.authError) fallbackAuthErrors++;
+      else if (result !== null) out.set(tcin, result);
     }));
+    if (fallbackAuthErrors > 0) {
+      redskyErrorStreak++;
+      await maybeAutoRecoverTargetSession();
+    }
   }
   return out;
 }
@@ -643,6 +680,7 @@ async function runBackgroundPoll() {
     }
     console.log('[TCH bg] restored urlToTabId:', Object.keys(urlToTabId).length, 'entries');
   }
+  await restorePollGuards();
 
   while (bgPollActive) {
     const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
@@ -851,6 +889,7 @@ async function runBackgroundPoll() {
       // Lock this URL — content script is now loading on the product page.
       // Don't navigate again until it reports back (ATC_SUCCESS or NAV_FAILED).
       navigationLock.add(normUrl);
+      persistPollGuards().catch(() => {});
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
       // Avoid hammering the same product multiple times per cycle.
       break;
@@ -1116,6 +1155,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normFailUrl = normalizeProductUrl(message.url || '');
       if (normFailUrl) {
         navigationLock.delete(normFailUrl);
+        persistPollGuards().catch(() => {});
         console.log('[TCH bg] Navigation lock released (failed):', normFailUrl);
       }
       sendResponse({ ok: true });
@@ -1128,6 +1168,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const normQueueUrl = normalizeProductUrl(message.url || '');
       if (normQueueUrl) {
         inQueueUrls.add(normQueueUrl);
+        persistPollGuards().catch(() => {});
         console.log('[TCH bg] WALMART_IN_QUEUE locked:', normQueueUrl);
       }
       sendResponse({ ok: true });
@@ -1568,6 +1609,9 @@ async function stopMonitor() {
   redskyErrorStreak = 0;
   inQueueUrls.clear();
   navigationLock.clear();
+  if (chrome.storage?.session) {
+    chrome.storage.session.remove(POLL_GUARD_SESSION_KEY).catch(() => {});
+  }
 
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) return;
@@ -1600,6 +1644,7 @@ async function handleATCSuccess(url, tabId) {
 
   navigationLock.delete(normUrl); // release — ATC succeeded
   inQueueUrls.delete(normUrl);    // release — no longer in queue, allow re-entry on endless mode
+  persistPollGuards().catch(() => {});
   monitor.counts[normUrl] = (monitor.counts[normUrl] || 0) + 1;
   await chrome.storage.local.set({ monitor });
 
