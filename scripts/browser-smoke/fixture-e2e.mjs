@@ -360,7 +360,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 
   if (invariants.includes('wm5-queue-timeout-clears-sacred-lock')) {
-    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const lockPath =
+      route.monitorProductPath && route.path === route.monitorProductPath
+        ? route.monitorProductPath
+        : route.sacredLockProductPath;
+    const productUrl = `http://${route.host}:${port}${lockPath}`;
     const normProductUrl = normalizeProductUrl(productUrl);
     const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
     const afterInQueue = after?.inQueueUrls || [];
@@ -1103,11 +1107,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 
   // WM-5: after QUEUE_TIMEOUT, background poll must re-arm navigationLock (no sacred lock).
   if (invariants.includes('wm5-poll-recovery-rearm')) {
-    const monitorUrl = route.sacredLockProductPath
-      ? `http://${route.host}:${port}${route.sacredLockProductPath}`
-      : route.monitorProductPath
-        ? `http://${route.host}:${port}${route.monitorProductPath}`
-        : pageUrl;
+    const recoveryPath =
+      route.pollRecoveryProductPath || route.sacredLockProductPath || route.monitorProductPath;
+    const monitorUrl = recoveryPath
+      ? `http://${route.host}:${port}${recoveryPath}`
+      : pageUrl;
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
 
     const postTimeout = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });

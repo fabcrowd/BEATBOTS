@@ -208,6 +208,15 @@ const FIXTURE_MARKERS = {
       'poll recovery',
     ],
   },
+  walmartProductQueuePollRecovery: {
+    fixtureId: 'walmart-product-queue-poll-recovery',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-queue-poll-recovery"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {
