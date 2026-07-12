@@ -183,7 +183,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartQpRoomTimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
-    invariants: ['wm4-qp-timeout-with-producturl', 'wm5-queue-timeout-clears-sacred-lock'],
+    invariants: ['wm4-qp-timeout-with-producturl', 'wm5-queue-timeout-clears-sacred-lock', 'wm5-poll-recovery-rearm'],
     sacredLockProductPath: '/ip/mock-qp-timeout-monitored/994',
     queueTimeoutMs: 750,
   },
