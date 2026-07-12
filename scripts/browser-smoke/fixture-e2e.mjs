@@ -1101,6 +1101,66 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  // SC-6: after restock NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
+  if (invariants.includes('sc6-poll-recovery-rearm')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture SC ${route.journey} poll recovery`, qty: route.monitorQty || 5 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+
+    let sawLockCleared = false;
+    let sawLockRearmed = false;
+    for (let i = 0; i < 24; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 SC-6: poll recovery must never arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      const hasLock = cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl);
+      if (!hasLock) sawLockCleared = true;
+      if (hasLock && sawLockCleared) {
+        sawLockRearmed = true;
+        break;
+      }
+    }
+    assert.ok(
+      sawLockCleared,
+      `FIX-3 SC-6: restock NAV_FAILED must clear navigationLock for poll retry on ${normMonitorUrl}`
+    );
+    assert.ok(
+      sawLockRearmed,
+      `FIX-3 SC-6: background poll must re-arm navigationLock after error-path NAV_FAILED on ${normMonitorUrl}`
+    );
+    const afterRecovery = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const recoveryInQueue = afterRecovery?.inQueueUrls || [];
+    const recoveryNavLock = afterRecovery?.navigationLock || [];
+    assert.equal(
+      recoveryInQueue.length,
+      0,
+      `FIX-3 SC-6: poll recovery must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(recoveryInQueue)}`
+    );
+    assert.ok(
+      recoveryNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+      `FIX-3 SC-6: poll recovery must hold navigationLock on ${normMonitorUrl}, got ${JSON.stringify(recoveryNavLock)}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('sc5-sc6-live-poll-cycle')) {
     const monitorUrl = route.monitorProductPath
       ? `http://${route.host}:${port}${route.monitorProductPath}`

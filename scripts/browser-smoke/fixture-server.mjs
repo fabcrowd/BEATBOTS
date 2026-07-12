@@ -258,6 +258,7 @@ export const FIXTURE_E2E_ROUTES = [
       'nav-failed-releases-lock',
       'sc6-repeated-nav-failed',
       'sc5-repeated-atc-success',
+      'sc6-poll-recovery-rearm',
       'sc5-sc6-live-poll-cycle',
     ],
     monitorProductPath: '/p/mock-fcfs-restock/790',
