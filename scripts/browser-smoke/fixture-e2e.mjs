@@ -1110,6 +1110,17 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         : pageUrl;
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
 
+    const postTimeout = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      postTimeout?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 WM-5: QUEUE_TIMEOUT must clear inQueueUrls before poll recovery on ${normMonitorUrl}`
+    );
+    assert.ok(
+      !(postTimeout?.navigationLock || []).some((u) => normalizeProductUrl(u) === normMonitorUrl),
+      `FIX-3 WM-5: QUEUE_TIMEOUT must clear navigationLock before poll recovery on ${normMonitorUrl}, got ${JSON.stringify(postTimeout?.navigationLock || [])}`
+    );
+
     await sendBg(popup, { type: 'STOP_MONITOR' });
     await new Promise((r) => setTimeout(r, 300));
     await sendBg(popup, {
@@ -1141,7 +1152,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     }
     assert.ok(
       sawLockCleared,
-      `FIX-3 WM-5: QUEUE_TIMEOUT must clear navigationLock before poll retry on ${normMonitorUrl}`
+      `FIX-3 WM-5: poll must clear navigationLock via NAV_FAILED before re-arm on ${normMonitorUrl}`
     );
     assert.ok(
       sawLockRearmed,

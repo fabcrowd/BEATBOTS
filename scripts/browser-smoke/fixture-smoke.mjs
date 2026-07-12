@@ -199,6 +199,15 @@ const FIXTURE_MARKERS = {
       'no ATC element',
     ],
   },
+  walmartProductPollRecovery: {
+    fixtureId: 'walmart-product-poll-recovery',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-poll-recovery"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

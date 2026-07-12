@@ -292,6 +292,7 @@ export const MOCK_URLS = {
   walmartCheckoutQueueTimeout: 'fixtures/walmart-checkout-queue-timeout.html',
   walmartProductPriceGuardTimeout: 'fixtures/walmart-product-price-guard-timeout.html',
   walmartCheckoutSpaTimeout: 'fixtures/walmart-checkout-spa-timeout.html',
+  walmartProductPollRecovery: 'fixtures/walmart-product-poll-recovery.html',
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */

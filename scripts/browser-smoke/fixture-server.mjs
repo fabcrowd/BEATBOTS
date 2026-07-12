@@ -238,6 +238,14 @@ export const FIXTURE_E2E_ROUTES = [
     checkoutTimeoutMs: 750,
   },
   {
+    host: 'www.walmart.com',
+    path: '/ip/mock-qp-timeout-monitored/994',
+    file: MOCK_URLS.walmartProductPollRecovery,
+    initLog: '[WMT] init',
+    journey: 'WM-5',
+    invariants: [],
+  },
+  {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,
