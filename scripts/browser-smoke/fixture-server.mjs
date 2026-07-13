@@ -309,6 +309,7 @@ export const FIXTURE_E2E_ROUTES = [
       'nav-failed-releases-lock',
       'sc6-repeated-nav-failed',
       'sc6-invisible-atc',
+      'sc6-poll-recovery-rearm',
     ],
     monitorProductPath: '/p/mock-fcfs-invisible-atc/791',
     monitorQty: 5,
