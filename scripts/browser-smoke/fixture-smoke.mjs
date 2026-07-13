@@ -217,6 +217,15 @@ const FIXTURE_MARKERS = {
       'poll recovery',
     ],
   },
+  walmartCheckoutPollRecovery: {
+    fixtureId: 'walmart-checkout-poll-recovery',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-poll-recovery"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {
