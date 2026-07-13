@@ -248,6 +248,14 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.walmart.com',
+    path: '/ip/mock-checkout-spa/992',
+    file: MOCK_URLS.walmartProductNoAtc,
+    initLog: '[WMT] init',
+    journey: 'WM-6',
+    invariants: [],
+  },
+  {
+    host: 'www.walmart.com',
     path: '/ip/mock-qp-timeout-monitored/994',
     file: MOCK_URLS.walmartProductPollRecovery,
     initLog: '[WMT] init',
