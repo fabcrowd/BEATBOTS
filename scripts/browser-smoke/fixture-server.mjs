@@ -174,7 +174,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartQpRoomTimeout,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'wm4-qp-timeout-no-producturl'],
+    invariants: ['no-sacred-lock', 'wm4-qp-timeout-no-producturl', 'wm4-poll-recovery-rearm'],
+    pollRecoveryProductPath: '/ip/mock-qp-unmonitored-recovery/996',
     queueTimeoutMs: 750,
   },
   {
@@ -193,7 +194,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueueTimeout,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'wm4-checkout-timeout-no-producturl'],
+    invariants: ['no-sacred-lock', 'wm4-checkout-timeout-no-producturl', 'wm4-poll-recovery-rearm'],
+    pollRecoveryProductPath: '/ip/mock-checkout-unmonitored-recovery/997',
     queueTimeoutMs: 750,
   },
   {
@@ -276,6 +278,22 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutPollRecovery,
     initLog: '[WMT] init',
     journey: 'WM-5',
+    invariants: [],
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/ip/mock-qp-unmonitored-recovery/996',
+    file: MOCK_URLS.walmartProductNoAtc,
+    initLog: '[WMT] init',
+    journey: 'WM-4',
+    invariants: [],
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/ip/mock-checkout-unmonitored-recovery/997',
+    file: MOCK_URLS.walmartProductNoAtc,
+    initLog: '[WMT] init',
+    journey: 'WM-4',
     invariants: [],
   },
   {

@@ -1178,12 +1178,22 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
-  // SC-6 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
-  if (invariants.includes('sc6-poll-recovery-rearm') || invariants.includes('wm6-poll-recovery-rearm')) {
-    const pollRecoveryLabel = invariants.includes('wm6-poll-recovery-rearm') ? 'WM-6' : 'SC-6';
-    const monitorUrl = route.monitorProductPath
-      ? `http://${route.host}:${port}${route.monitorProductPath}`
-      : pageUrl;
+  // SC-6 / WM-4 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
+  if (
+    invariants.includes('sc6-poll-recovery-rearm') ||
+    invariants.includes('wm4-poll-recovery-rearm') ||
+    invariants.includes('wm6-poll-recovery-rearm')
+  ) {
+    const pollRecoveryLabel = invariants.includes('wm4-poll-recovery-rearm')
+      ? 'WM-4'
+      : invariants.includes('wm6-poll-recovery-rearm')
+        ? 'WM-6'
+        : 'SC-6';
+    const monitorUrl = route.pollRecoveryProductPath
+      ? `http://${route.host}:${port}${route.pollRecoveryProductPath}`
+      : route.monitorProductPath
+        ? `http://${route.host}:${port}${route.monitorProductPath}`
+        : pageUrl;
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
 
     await sendBg(popup, { type: 'STOP_MONITOR' });
