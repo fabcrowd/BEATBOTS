@@ -155,6 +155,57 @@ async function attachCdpConsoleCapture(page) {
   return logs;
 }
 
+/** WM-5: sacred lock must survive live poll before QUEUE_TIMEOUT fires (monitored timeout routes). */
+async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port) {
+  const lockPath =
+    route.monitorProductPath && route.path === route.monitorProductPath
+      ? route.monitorProductPath
+      : route.sacredLockProductPath;
+  if (!lockPath) {
+    throw new Error(`wm5-pre-timeout-live-poll-cycle requires lock path on ${route.path}`);
+  }
+  const lockUrl = `http://${route.host}:${port}${lockPath}`;
+  const normLockUrl = normalizeProductUrl(lockUrl);
+
+  const initial = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const initialInQueue = initial?.inQueueUrls || [];
+  assert.ok(
+    initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: pre-timeout live poll expects sacred lock on ${normLockUrl} before QUEUE_TIMEOUT, got inQueueUrls=${JSON.stringify(initialInQueue)}`
+  );
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: lockUrl, name: `Fixture WM-5 pre-timeout ${route.journey}`, qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  await new Promise((r) => setTimeout(r, 100));
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
+  await new Promise((r) => setTimeout(r, 150));
+  await sendBg(popup, { type: 'NAV_FAILED', url: lockUrl });
+  await new Promise((r) => setTimeout(r, 150));
+
+  const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const afterInQueue = after?.inQueueUrls || [];
+  const afterNavLock = after?.navigationLock || [];
+  assert.ok(
+    afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: pre-timeout live poll must preserve sacred lock on ${normLockUrl} before QUEUE_TIMEOUT, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+  );
+  assert.ok(
+    !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: pre-timeout NAV_FAILED must not re-arm navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
+  );
+  assert.equal(
+    pollWouldSkipNavigation(normLockUrl, new Set(afterInQueue), new Set(afterNavLock)),
+    true,
+    `FIX-3 WM-5: pre-timeout live poll must skip navigate while sacred lock holds on ${normLockUrl}`
+  );
+}
+
 async function assertRouteInvariants(popup, route, logs, page, port) {
   const invariants = route.invariants || [];
   if (!invariants.length) return;
@@ -1390,6 +1441,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 }
 
+function preTimeoutPollMs(route) {
+  if (!route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')) return 0;
+  if (!(route.queueTimeoutMs > 0)) return 0;
+  return 300;
+}
+
 function routeWaitMs(route) {
   if (route.queueTimeoutMs > 0) return route.queueTimeoutMs + 900;
   if (route.priceGuardTimeoutMs > 0) return route.priceGuardTimeoutMs + 900;
@@ -1449,7 +1506,14 @@ async function main() {
     );
     assert.ok(fixtureAttr, `FIX-2 ${route.journey}: missing data-tch-fixture on ${url}`);
 
-    await new Promise((r) => setTimeout(r, routeWaitMs(route)));
+    const preTimeoutMs = preTimeoutPollMs(route);
+    if (preTimeoutMs > 0) {
+      await new Promise((r) => setTimeout(r, preTimeoutMs));
+      await assertWm5PreTimeoutLivePollCycle(popup, route, page, port);
+    }
+
+    const remainingWaitMs = Math.max(0, routeWaitMs(route) - preTimeoutMs);
+    await new Promise((r) => setTimeout(r, remainingWaitMs));
 
     assert.ok(
       logs.some((l) => l.includes(route.initLog)),
