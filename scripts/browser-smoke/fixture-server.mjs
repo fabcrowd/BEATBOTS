@@ -39,7 +39,13 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPreDrop,
     initLog: '[WMT] init',
     journey: 'WM-2',
-    invariants: ['no-sacred-lock', 'nav-failed-releases-lock', 'wm2-repeated-nav-failed', 'wm2-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'nav-failed-releases-lock',
+      'wm2-repeated-nav-failed',
+      'wm2-live-poll-cycle',
+      'mon2-samsclub-live-poll-cycle',
+    ],
   },
   {
     host: 'www.walmart.com',
@@ -81,7 +87,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueue,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['no-sacred-lock', 'wm4-checkout-no-producturl', 'wm4-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'wm4-checkout-no-producturl',
+      'wm4-live-poll-cycle',
+      'mon2-samsclub-live-poll-cycle',
+    ],
   },
   {
     host: 'www.walmart.com',
@@ -372,6 +383,14 @@ export const FIXTURE_E2E_ROUTES = [
     monitorProductPath: '/p/mock-fcfs-invisible-atc/791',
     monitorQty: 5,
     atcWaitMs: 750,
+  },
+  {
+    host: 'www.samsclub.com',
+    path: '/p/mock-mon2-walmart-live/444',
+    file: MOCK_URLS.samsclubProductFcfs,
+    initLog: '[TCH] init',
+    journey: 'MON-2',
+    invariants: [],
   },
 ];
 

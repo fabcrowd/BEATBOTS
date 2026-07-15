@@ -1114,6 +1114,127 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('mon2-samsclub-live-poll-cycle')) {
+    const samsclubProbePath = '/p/mock-mon2-walmart-live/444';
+    const samsclubProbeUrl = `http://www.samsclub.com:${port}${samsclubProbePath}`;
+    const normSamsclubProbeUrl = normalizeProductUrl(samsclubProbeUrl);
+    const normWalmartPageUrl = normalizeProductUrl(pageUrl);
+
+    // Sam's-only monitor — Walmart tab must stay unmonitored (MON-2 retailer filter).
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: samsclubProbeUrl, name: `Fixture MON-2 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    const urlBeforeReload = page.url();
+    assert.ok(
+      urlBeforeReload.includes('walmart.com'),
+      `FIX-3 MON-2: Walmart tab must stay on walmart.com before reload during samsclub-only poll on ${pageUrl}, got ${urlBeforeReload}`
+    );
+    // Reload Walmart tab during live poll — must re-init without samsclub poll hijacking URL.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const urlAfterReload = page.url();
+    assert.ok(
+      urlAfterReload.includes('walmart.com'),
+      `FIX-3 MON-2: Walmart tab must stay on walmart.com after reload during samsclub-only poll on ${pageUrl}, got ${urlAfterReload}`
+    );
+    assert.ok(
+      normalizeProductUrl(urlAfterReload) === normWalmartPageUrl,
+      `FIX-3 MON-2: Walmart tab URL must not change during samsclub-only poll on ${pageUrl}, got ${urlAfterReload}`
+    );
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadProducts = afterReload?.products || [];
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.ok(
+      reloadProducts.length && reloadProducts.every((p) => /samsclub\.com/i.test(p.url)),
+      `FIX-3 MON-2: samsclub-only monitor must send only samsclub.com products on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+    );
+    assert.ok(
+      !reloadProducts.some((p) => /walmart\.com/i.test(p.url)),
+      `FIX-3 MON-2: walmart URL must be excluded from samsclub-only monitor on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+    );
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 MON-2: Walmart page reload during samsclub-only poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      !reloadInQueue.some((u) => normalizeProductUrl(u) === normWalmartPageUrl),
+      `FIX-3 MON-2: Walmart page URL must not be sacred lock key during samsclub-only poll on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[WMT] init')).length >= 2,
+      `FIX-3 MON-2: Walmart page reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: samsclubProbeUrl });
+      } else {
+        await sendBg(popup, { type: liveSignalTypes[i], url: samsclubProbeUrl });
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleProducts = cycle?.products || [];
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.ok(
+        cycleProducts.every((p) => /samsclub\.com/i.test(p.url)),
+        `FIX-3 MON-2: live poll cycle ${i + 1} must keep samsclub-only products on ${pageUrl} after ${liveSignalTypes[i]}, got ${JSON.stringify(cycleProducts)}`
+      );
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 MON-2: live poll cycle ${i + 1} must not arm inQueueUrls on Walmart ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      assert.ok(
+        !cycleInQueue.some((u) => normalizeProductUrl(u) === normWalmartPageUrl),
+        `FIX-3 MON-2: live poll cycle ${i + 1} must not sacred-lock Walmart ${normWalmartPageUrl} after ${liveSignalTypes[i]}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normSamsclubProbeUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normSamsclubProbeUrl),
+          `FIX-3 MON-2: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normSamsclubProbeUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+      const urlDuringCycle = page.url();
+      assert.ok(
+        urlDuringCycle.includes('walmart.com'),
+        `FIX-3 MON-2: Walmart tab must stay on walmart.com during live poll cycle ${i + 1} on ${pageUrl}, got ${urlDuringCycle}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveProducts = afterPollWait?.products || [];
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.ok(
+      liveProducts.every((p) => /samsclub\.com/i.test(p.url)),
+      `FIX-3 MON-2: live poll must keep samsclub-only products on ${pageUrl}, got ${JSON.stringify(liveProducts)}`
+    );
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 MON-2: live poll must not arm inQueueUrls on Walmart ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    assert.ok(
+      page.url().includes('walmart.com'),
+      `FIX-3 MON-2: Walmart tab must remain on walmart.com after live poll on ${pageUrl}, got ${page.url()}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normSamsclubProbeUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normSamsclubProbeUrl),
+        `FIX-3 MON-2: navigationLock alone must not imply sacred lock on ${normSamsclubProbeUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('wm2-live-poll-cycle')) {
     const monitorUrl = route.livePollMonitorPath
       ? `http://${route.host}:${port}${route.livePollMonitorPath}`
