@@ -1118,9 +1118,14 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     const samsclubProbePath = '/p/mock-mon2-walmart-live/444';
     const samsclubProbeUrl = `http://www.samsclub.com:${port}${samsclubProbePath}`;
     const normSamsclubProbeUrl = normalizeProductUrl(samsclubProbeUrl);
-    const normWalmartPageUrl = normalizeProductUrl(pageUrl);
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const isTargetPage = /target\.com/i.test(pageUrl);
+    const pageHostLabel = isTargetPage ? 'Target' : 'Walmart';
+    const pageHostPattern = isTargetPage ? 'target.com' : 'walmart.com';
+    const excludedHostPattern = isTargetPage ? 'target.com' : 'walmart.com';
+    const initLogMarker = isTargetPage ? '[TCH] init' : '[WMT] init';
 
-    // Sam's-only monitor — Walmart tab must stay unmonitored (MON-2 retailer filter).
+    // Sam's-only monitor — cross-retailer tab must stay unmonitored (MON-2 retailer filter).
     await sendBg(popup, {
       type: 'START_MONITOR',
       products: [{ url: samsclubProbeUrl, name: `Fixture MON-2 ${route.journey}`, qty: 1 }],
@@ -1131,20 +1136,20 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 800));
     const urlBeforeReload = page.url();
     assert.ok(
-      urlBeforeReload.includes('walmart.com'),
-      `FIX-3 MON-2: Walmart tab must stay on walmart.com before reload during samsclub-only poll on ${pageUrl}, got ${urlBeforeReload}`
+      urlBeforeReload.includes(pageHostPattern),
+      `FIX-3 MON-2: ${pageHostLabel} tab must stay on ${pageHostPattern} before reload during samsclub-only poll on ${pageUrl}, got ${urlBeforeReload}`
     );
-    // Reload Walmart tab during live poll — must re-init without samsclub poll hijacking URL.
+    // Reload tab during live poll — must re-init without samsclub poll hijacking URL.
     await page.reload({ waitUntil: 'domcontentloaded' });
     await new Promise((r) => setTimeout(r, 2000));
     const urlAfterReload = page.url();
     assert.ok(
-      urlAfterReload.includes('walmart.com'),
-      `FIX-3 MON-2: Walmart tab must stay on walmart.com after reload during samsclub-only poll on ${pageUrl}, got ${urlAfterReload}`
+      urlAfterReload.includes(pageHostPattern),
+      `FIX-3 MON-2: ${pageHostLabel} tab must stay on ${pageHostPattern} after reload during samsclub-only poll on ${pageUrl}, got ${urlAfterReload}`
     );
     assert.ok(
-      normalizeProductUrl(urlAfterReload) === normWalmartPageUrl,
-      `FIX-3 MON-2: Walmart tab URL must not change during samsclub-only poll on ${pageUrl}, got ${urlAfterReload}`
+      normalizeProductUrl(urlAfterReload) === normPageUrl,
+      `FIX-3 MON-2: ${pageHostLabel} tab URL must not change during samsclub-only poll on ${pageUrl}, got ${urlAfterReload}`
     );
     const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
     const reloadProducts = afterReload?.products || [];
@@ -1154,21 +1159,21 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 MON-2: samsclub-only monitor must send only samsclub.com products on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
     );
     assert.ok(
-      !reloadProducts.some((p) => /walmart\.com/i.test(p.url)),
-      `FIX-3 MON-2: walmart URL must be excluded from samsclub-only monitor on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+      !reloadProducts.some((p) => new RegExp(excludedHostPattern, 'i').test(p.url)),
+      `FIX-3 MON-2: ${pageHostLabel.toLowerCase()} URL must be excluded from samsclub-only monitor on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
     );
     assert.equal(
       reloadInQueue.length,
       0,
-      `FIX-3 MON-2: Walmart page reload during samsclub-only poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+      `FIX-3 MON-2: ${pageHostLabel} page reload during samsclub-only poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
     );
     assert.ok(
-      !reloadInQueue.some((u) => normalizeProductUrl(u) === normWalmartPageUrl),
-      `FIX-3 MON-2: Walmart page URL must not be sacred lock key during samsclub-only poll on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+      !reloadInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 MON-2: ${pageHostLabel} page URL must not be sacred lock key during samsclub-only poll on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
     );
     assert.ok(
-      logs.filter((l) => l.includes('[WMT] init')).length >= 2,
-      `FIX-3 MON-2: Walmart page reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+      logs.filter((l) => l.includes(initLogMarker)).length >= 2,
+      `FIX-3 MON-2: ${pageHostLabel} page reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
     );
     const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
     for (let i = 0; i < liveSignalTypes.length; i++) {
@@ -1189,11 +1194,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       assert.equal(
         cycleInQueue.length,
         0,
-        `FIX-3 MON-2: live poll cycle ${i + 1} must not arm inQueueUrls on Walmart ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+        `FIX-3 MON-2: live poll cycle ${i + 1} must not arm inQueueUrls on ${pageHostLabel} ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
       );
       assert.ok(
-        !cycleInQueue.some((u) => normalizeProductUrl(u) === normWalmartPageUrl),
-        `FIX-3 MON-2: live poll cycle ${i + 1} must not sacred-lock Walmart ${normWalmartPageUrl} after ${liveSignalTypes[i]}`
+        !cycleInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+        `FIX-3 MON-2: live poll cycle ${i + 1} must not sacred-lock ${pageHostLabel} ${normPageUrl} after ${liveSignalTypes[i]}`
       );
       if (cycleNavLock.some((u) => normalizeProductUrl(u) === normSamsclubProbeUrl)) {
         assert.ok(
@@ -1203,8 +1208,8 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       }
       const urlDuringCycle = page.url();
       assert.ok(
-        urlDuringCycle.includes('walmart.com'),
-        `FIX-3 MON-2: Walmart tab must stay on walmart.com during live poll cycle ${i + 1} on ${pageUrl}, got ${urlDuringCycle}`
+        urlDuringCycle.includes(pageHostPattern),
+        `FIX-3 MON-2: ${pageHostLabel} tab must stay on ${pageHostPattern} during live poll cycle ${i + 1} on ${pageUrl}, got ${urlDuringCycle}`
       );
     }
     await new Promise((r) => setTimeout(r, 2500));
@@ -1219,11 +1224,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.equal(
       liveInQueue.length,
       0,
-      `FIX-3 MON-2: live poll must not arm inQueueUrls on Walmart ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+      `FIX-3 MON-2: live poll must not arm inQueueUrls on ${pageHostLabel} ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
     );
     assert.ok(
-      page.url().includes('walmart.com'),
-      `FIX-3 MON-2: Walmart tab must remain on walmart.com after live poll on ${pageUrl}, got ${page.url()}`
+      page.url().includes(pageHostPattern),
+      `FIX-3 MON-2: ${pageHostLabel} tab must remain on ${pageHostPattern} after live poll on ${pageUrl}, got ${page.url()}`
     );
     if (liveNavLock.some((u) => normalizeProductUrl(u) === normSamsclubProbeUrl)) {
       assert.ok(

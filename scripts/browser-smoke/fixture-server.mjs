@@ -21,7 +21,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetProduct,
     initLog: '[TCH] init',
     journey: 'TGT-1',
-    invariants: ['tgt-live-poll-cycle', 'mon2-live-poll-cycle'],
+    invariants: ['tgt-live-poll-cycle', 'mon2-live-poll-cycle', 'mon2-samsclub-live-poll-cycle'],
     monitorProductPath: '/p/mock-product',
   },
   {
@@ -30,7 +30,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetCheckoutReview,
     initLog: '[TCH] init',
     journey: 'TGT-4',
-    invariants: ['tgt4-manual-review', 'tgt4-live-poll-cycle', 'mon2-live-poll-cycle'],
+    invariants: ['tgt4-manual-review', 'tgt4-live-poll-cycle', 'mon2-live-poll-cycle', 'mon2-samsclub-live-poll-cycle'],
     monitorProductPath: '/p/mock-product',
   },
   {
