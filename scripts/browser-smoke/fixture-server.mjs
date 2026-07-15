@@ -247,6 +247,22 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.walmart.com',
+    path: '/ip/mock-product-queue-pretimeout/460',
+    file: 'fixtures/walmart-product-queue-pretimeout.html',
+    initLog: '[WMT] init',
+    journey: 'WM-5',
+    invariants: [
+      'wm5-pre-timeout-live-poll-cycle',
+      'wm5-product-queue-timeout',
+      'wm5-queue-timeout-clears-sacred-lock',
+      'wm5-poll-recovery-rearm',
+    ],
+    monitorProductPath: '/ip/mock-product-queue-pretimeout/460',
+    pollRecoveryProductPath: '/ip/mock-product-queue-timeout-recovery/459',
+    queueTimeoutMs: 5000,
+  },
+  {
+    host: 'www.walmart.com',
     path: '/ip/mock-product-queue-timeout/458',
     file: MOCK_URLS.walmartProductQueueTimeout,
     initLog: '[WMT] init',
