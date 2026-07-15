@@ -53,7 +53,13 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductQueue,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['sacred-lock', 'wm5-sacred-survives-nav-failed', 'wm5-live-poll-cycle'],
+    invariants: [
+      'sacred-lock',
+      'wm5-sacred-survives-nav-failed',
+      'wm5-pre-timeout-live-poll-cycle',
+      'wm5-live-poll-cycle',
+    ],
+    monitorProductPath: '/ip/mock-queue/456',
   },
   {
     host: 'www.walmart.com',
@@ -379,6 +385,7 @@ export const FIXTURE_E2E_ROUTES = [
       'sc6-repeated-nav-failed',
       'sc6-invisible-atc',
       'sc6-poll-recovery-rearm',
+      'sc5-sc6-live-poll-cycle',
     ],
     monitorProductPath: '/p/mock-fcfs-invisible-atc/791',
     monitorQty: 5,
