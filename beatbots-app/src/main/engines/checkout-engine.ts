@@ -111,17 +111,37 @@ export class CheckoutEngine {
     }
 
     // ── Step 2a: Add extra product (filler item, reduces cart-only block risk) ─
+    // Shape tokens are single-use — primary ATC must consume a fresh pool entry after filler.
 
+    let primaryAtcCookie = atcCookie
     if (settings.addExtraProduct && settings.extraProductTcin) {
       onStatus(`Adding filler item: ${settings.extraProductTcin}`)
       await this.addToCart(session, settings.extraProductTcin, 1, atcCookie.cookies, atcCookie.shapeHeaders, abortSignal)
         .catch(() => { /* filler failure is non-fatal */ })
+
+      onStatus('Waiting for Shape cookie (primary ATC)...')
+      primaryAtcCookie = await this.waitForCookie(COOKIE_WAIT_TIMEOUT_MS, abortSignal)
+      if (!primaryAtcCookie) {
+        return {
+          ok: false,
+          error: 'No ATC cookie available for primary item after filler',
+          retryable: false,
+          durationMs: Date.now() - startMs,
+        }
+      }
     }
 
     // ── Step 2b: Add target item to Cart ──────────────────────────────────
 
     onStatus(`ATC: ${tcin}`)
-    const atcResult = await this.addToCart(session, tcin, qty, atcCookie.cookies, atcCookie.shapeHeaders, abortSignal)
+    const atcResult = await this.addToCart(
+      session,
+      tcin,
+      qty,
+      primaryAtcCookie.cookies,
+      primaryAtcCookie.shapeHeaders,
+      abortSignal,
+    )
 
     if (!atcResult.ok) {
       if (atcResult.shapeBlocked) {
