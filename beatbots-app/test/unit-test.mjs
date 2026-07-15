@@ -493,6 +493,17 @@ await test('Monitor — high stock & max price filters', () => {
 
 // ─── Test: Checkout engine — cart clear, order ID, shape detection ────────────
 
+await test('Checkout engine — filler item requires a second Shape cookie for primary ATC', () => {
+  function shapeCookiesNeededForCheckout(settings) {
+    let needed = 1
+    if (settings.addExtraProduct && settings.extraProductTcin) needed = 2
+    return needed
+  }
+
+  assert.equal(shapeCookiesNeededForCheckout({ addExtraProduct: false, extraProductTcin: '' }), 1)
+  assert.equal(shapeCookiesNeededForCheckout({ addExtraProduct: true, extraProductTcin: '8675309' }), 2)
+})
+
 await test('Checkout engine — Shape block detection on ATC response', () => {
   function detectShapeBlock(status, data) {
     if (status === 409 || status === 429) {
