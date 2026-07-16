@@ -230,7 +230,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueueTimeout,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'wm4-checkout-timeout-no-producturl', 'wm4-poll-recovery-rearm'],
+    invariants: [
+      'no-sacred-lock',
+      'wm4-checkout-timeout-no-producturl',
+      'wm4-live-poll-cycle',
+      'wm4-poll-recovery-rearm',
+    ],
     pollRecoveryProductPath: '/ip/mock-checkout-unmonitored-recovery/997',
     queueTimeoutMs: 750,
   },
