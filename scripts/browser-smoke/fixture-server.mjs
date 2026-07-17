@@ -190,8 +190,17 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCartNoCheckout,
     initLog: '[WMT] init',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'wm6-cart-checkout-missing', 'wm6-cart-live-poll-cycle'],
+    invariants: ['no-sacred-lock', 'wm6-cart-checkout-missing', 'wm6-cart-live-poll-cycle', 'wm6-poll-recovery-rearm'],
     monitorProductPath: '/ip/mock-cart-missing/888',
+    pollRecoveryProductPath: '/ip/mock-cart-missing/888',
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/ip/mock-cart-missing/888',
+    file: MOCK_URLS.walmartProductCartMissing,
+    initLog: '[WMT] init',
+    journey: 'WM-6',
+    invariants: [],
   },
   {
     host: 'www.walmart.com',

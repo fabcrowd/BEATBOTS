@@ -152,6 +152,16 @@ const FIXTURE_MARKERS = {
     markers: [
       'data-tch-fixture="walmart-cart-no-checkout"',
       'data-tch-path="/cart/no-checkout"',
+      'data-tch-cart-checkout-wait-ms="750"',
+    ],
+  },
+  walmartProductCartMissing: {
+    fixtureId: 'walmart-product-cart-missing',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-cart-missing"',
+      'data-automation-id="add-to-cart-btn"',
+      'data-automation-id="go-to-cart-btn"',
     ],
   },
   walmartQpRoomTimeout: {

@@ -397,6 +397,23 @@ function wmCheckoutPollMs() {
   return 500;
 }
 
+/** WM-6: cart checkout-button wait cap — optional data-tch-cart-checkout-wait-ms for fixture e2e. */
+function wmCartCheckoutWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-cart-checkout-wait-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 8000;
+}
+
+/** Faster poll when cart-checkout-wait override is set so fixture e2e can finish quickly. */
+function wmCartCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-cart-checkout-wait-ms')) return 200;
+  return 100;
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -795,7 +812,7 @@ async function wmHandleCart(settings) {
       const text = el.textContent.trim().toLowerCase();
       return (text === 'checkout' || text === 'proceed to checkout') && wmIsVisible(el);
     }) || null;
-  }, 8000);
+  }, wmCartCheckoutWaitMs(), wmCartCheckoutPollMs());
 
   if (!checkoutBtn) {
     wmShowToast('Checkout button not found — take over manually', 'error');
