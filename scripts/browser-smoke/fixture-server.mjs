@@ -147,6 +147,7 @@ export const FIXTURE_E2E_ROUTES = [
       'nav-failed-releases-lock',
       'wm6-missing-atc-element',
       'wm6-live-poll-cycle',
+      'wm6-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-no-atc/559',
     atcWaitMs: 750,
