@@ -989,8 +989,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       queueRedetectLog,
       `FIX-3 WM-4: queue page reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
     );
+    // Routes that boot with a Walmart productUrl only warn after Target-only switch + reload.
+    const minNoProductUrlWarnings =
+      route.sacredLockProductPath || route.monitorProductPath ? 1 : 2;
     assert.ok(
-      logs.filter((l) => l.includes('no productUrl in settings')).length >= 2,
+      logs.filter((l) => l.includes('no productUrl in settings')).length >= minNoProductUrlWarnings,
       `FIX-3 WM-4: queue page reload must warn missing productUrl again on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
     );
     const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
