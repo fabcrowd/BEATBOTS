@@ -904,9 +904,25 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         ? `http://${route.host}:${port}${route.sacredLockProductPath}`
         : pageUrl;
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
-    const pxMs = route.pxTimeoutMs > 0 ? route.pxTimeoutMs : 2000;
+    const pollWaitMs =
+      route.pxTimeoutMs > 0
+        ? route.pxTimeoutMs
+        : route.priceGuardTimeoutMs > 0
+          ? route.priceGuardTimeoutMs
+          : route.checkoutTimeoutMs > 0
+            ? route.checkoutTimeoutMs
+            : route.atcWaitMs > 0
+              ? route.atcWaitMs
+              : 2000;
+    const isPriceGuard = invariants.includes('wm6-price-guard-timeout');
+    const isCheckoutSpa = invariants.includes('wm6-checkout-spa-timeout');
+    const pathLabel = isPriceGuard
+      ? 'price-guard'
+      : isCheckoutSpa
+        ? 'checkout SPA'
+        : 'PX';
 
-    // Live background poll: PX NAV_FAILED must never arm sacred lock during real poll cycles.
+    // Live background poll: WM-6 error-path NAV_FAILED must never arm sacred lock during real poll cycles.
     await sendBg(popup, {
       type: 'START_MONITOR',
       products: [{ url: monitorUrl, name: `Fixture WM-6 ${route.journey}`, qty: 1 }],
@@ -914,6 +930,31 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
     });
+    if (isPriceGuard || isCheckoutSpa) {
+      await new Promise((r) => setTimeout(r, 800));
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      const reloadWaitMs =
+        (isCheckoutSpa ? route.checkoutTimeoutMs : route.priceGuardTimeoutMs) + 900;
+      await new Promise((r) => setTimeout(r, reloadWaitMs));
+      const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const reloadInQueue = afterReload?.inQueueUrls || [];
+      assert.equal(
+        reloadInQueue.length,
+        0,
+        `FIX-3 WM-6: ${pathLabel} reload during live poll must not arm inQueueUrls on ${normMonitorUrl}, got ${JSON.stringify(reloadInQueue)}`
+      );
+      if (isPriceGuard) {
+        assert.ok(
+          logs.filter((l) => l.includes('Price guard') && l.includes('no sacred lock')).length >= 2,
+          `FIX-3 WM-6: price-guard reload must re-trigger no-sacred-lock wait on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+        );
+      } else {
+        assert.ok(
+          logs.filter((l) => l.includes('wmHandleCheckout timed out')).length >= 2,
+          `FIX-3 WM-6: checkout SPA reload must re-trigger timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+        );
+      }
+    }
     const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
     for (let i = 0; i < navFailTypes.length; i++) {
       await sendBg(popup, { type: navFailTypes[i], url: monitorUrl });
@@ -924,28 +965,28 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       assert.equal(
         cycleInQueue.length,
         0,
-        `FIX-3 WM-6: live poll cycle ${i + 1} must not arm inQueueUrls on PX ${normMonitorUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+        `FIX-3 WM-6: live poll cycle ${i + 1} must not arm inQueueUrls on ${pathLabel} ${normMonitorUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
       );
       if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
         assert.ok(
           !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
-          `FIX-3 WM-6: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on PX ${normMonitorUrl} after ${navFailTypes[i]}`
+          `FIX-3 WM-6: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${pathLabel} ${normMonitorUrl} after ${navFailTypes[i]}`
         );
       }
     }
-    await new Promise((r) => setTimeout(r, pxMs + 2500));
+    await new Promise((r) => setTimeout(r, pollWaitMs + 2500));
     const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
     const liveInQueue = afterPollWait?.inQueueUrls || [];
     const liveNavLock = afterPollWait?.navigationLock || [];
     assert.equal(
       liveInQueue.length,
       0,
-      `FIX-3 WM-6: live poll must not arm inQueueUrls on PX ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+      `FIX-3 WM-6: live poll must not arm inQueueUrls on ${pathLabel} ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
     );
     if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
       assert.ok(
         !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
-        `FIX-3 WM-6: navigationLock alone must not imply sacred lock on PX ${normMonitorUrl}`
+        `FIX-3 WM-6: navigationLock alone must not imply sacred lock on ${pathLabel} ${normMonitorUrl}`
       );
     }
     await sendBg(popup, { type: 'STOP_MONITOR' });
