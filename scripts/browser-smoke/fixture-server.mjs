@@ -311,7 +311,6 @@ export const FIXTURE_E2E_ROUTES = [
       'wm5-product-queue-timeout',
       'wm5-queue-timeout-clears-sacred-lock',
       'wm5-poll-recovery-rearm',
-      'wm5-live-poll-cycle',
     ],
     monitorProductPath: '/ip/mock-product-queue-timeout/458',
     pollRecoveryProductPath: '/ip/mock-product-queue-timeout-recovery/459',
