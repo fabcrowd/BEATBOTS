@@ -239,7 +239,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/qp/waiting-room-monitored-timeout',
-    file: 'fixtures/walmart-qp-room-monitored-pretimeout.html',
+    file: MOCK_URLS.walmartQpRoomMonitoredPretimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -271,7 +271,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/checkout/monitored-timeout',
-    file: 'fixtures/walmart-checkout-monitored-pretimeout.html',
+    file: MOCK_URLS.walmartCheckoutMonitoredPretimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -288,7 +288,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/ip/mock-product-queue-pretimeout/460',
-    file: 'fixtures/walmart-product-queue-pretimeout.html',
+    file: MOCK_URLS.walmartProductQueuePretimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
