@@ -66,6 +66,16 @@ const FIXTURE_MARKERS = {
       'data-automation-id="queue-hold-spot-btn"',
     ],
   },
+  walmartProductQueueLivePoll: {
+    fixtureId: 'walmart-product-queue-live-poll',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-queue-live-poll"',
+      'data-tch-queue-timeout-ms="15000"',
+      'estimated wait time',
+      'data-automation-id="queue-hold-spot-btn"',
+    ],
+  },
   walmartQpRoomMonitoredPretimeout: {
     fixtureId: 'walmart-qp-room-monitored-pretimeout',
     journeys: ['WM-5'],
