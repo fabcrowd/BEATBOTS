@@ -7,6 +7,7 @@ import {
   adjustedNow,
 } from '../utils/drop-timing'
 import { notifyStockDetected } from '../utils/discord'
+import { DEFAULT_API_KEY } from './session-manager'
 import { EventEmitter } from 'events'
 
 // ─── Monitor Engine ───────────────────────────────────────────────────────────
@@ -51,6 +52,11 @@ export class MonitorEngine extends EventEmitter {
     this.config = config
     this.dropMonitor = { dropExpectedAt: config.dropExpectedAt }
     this.running = true
+
+    // RedSky polls require an API key; session-manager uses the same default.
+    if (!this.cachedApiKey) {
+      this.cachedApiKey = DEFAULT_API_KEY
+    }
 
     // Initialize per-TCIN state
     for (const p of config.products) {

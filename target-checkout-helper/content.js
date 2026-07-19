@@ -511,10 +511,12 @@ function isCheckoutSignedInConfirm() {
 
 async function tryCheckoutSignedInContinue() {
   const root = getCheckoutAuthRoot();
+  // Never click document-level Continue — shipping/payment buttons share test ids.
+  if (getPageType() === 'checkout' && !root) return false;
   const scope = root || document;
   const needles = [
     'continue to checkout', 'use this account', 'continue with this account',
-    'continue with your account', 'verify and continue', 'continue',
+    'continue with your account', 'verify and continue',
   ];
   const candidates = Array.from(scope.querySelectorAll('button, [role="button"], a[href]'));
   for (const needle of needles) {
@@ -524,6 +526,11 @@ async function tryCheckoutSignedInContinue() {
         ? TCH_SIGNIN_STEP.normalizeButtonText(b.textContent)
         : (b.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
       if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.matchesGuestCheckoutText?.(raw)) return false;
+      if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.isGenericContinueButtonText) {
+        if (!TCH_SIGNIN_STEP.isGenericContinueButtonText(raw)) return false;
+      } else if (/shopping|browsing|browse|exploring|reading/i.test(raw)) {
+        return false;
+      }
       return raw === needle || raw.includes(needle);
     });
     if (el) {
