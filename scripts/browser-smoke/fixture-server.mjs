@@ -322,7 +322,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductQueueLivePoll,
     initLog: '[WMT] init',
     journey: 'WM-5',
-    invariants: ['wm5-live-poll-cycle'],
+    invariants: ['wm5-pre-timeout-live-poll-cycle', 'wm5-live-poll-cycle'],
     monitorProductPath: '/ip/mock-product-queue-live-poll/461',
     queueTimeoutMs: 15000,
   },
