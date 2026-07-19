@@ -183,7 +183,8 @@ export class CheckoutEngine {
     onStatus('Placing order...')
     const orderResult = await this.placeOrder(session, checkoutId, atcCookie.cookies, abortSignal)
     if (!orderResult.ok) {
-      return { ok: false, error: `Place order failed: ${orderResult.error}`, retryable: true, durationMs: Date.now() - startMs }
+      // Never auto-retry place_order — a timeout after server success can double-charge.
+      return { ok: false, error: `Place order failed: ${orderResult.error}`, retryable: false, durationMs: Date.now() - startMs }
     }
 
     onStatus(`Order placed: ${orderResult.orderId}`)

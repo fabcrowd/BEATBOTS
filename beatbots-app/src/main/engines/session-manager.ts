@@ -18,7 +18,7 @@ const TARGET_API_BASE = 'https://api.target.com'
 // API key extracted from Target pages via main_world.js. For direct API calls
 // we need to supply one. This is the publicly-visible web API key from Target's JS bundle.
 // It rotates occasionally; the Shape harvester / monitor engine capture the live one.
-const DEFAULT_API_KEY = 'ff457966e64d5e877fdbad070f276d18ecec4a01'
+export const DEFAULT_API_KEY = 'ff457966e64d5e877fdbad070f276d18ecec4a01'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

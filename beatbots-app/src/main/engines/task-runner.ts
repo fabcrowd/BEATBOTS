@@ -294,7 +294,9 @@ export class TaskRunner extends EventEmitter {
           settings.checkoutSound
         )
 
-        monitorEngine.recordSuccess(product.tcin)
+        if (result.orderId) {
+          monitorEngine.recordSuccess(product.tcin)
+        }
 
         if (settings.endlessMode && successCount < settings.endlessLimit) {
           const delay = settings.checkoutDelayMs || 2000
