@@ -90,6 +90,15 @@ assert(S.shouldAttemptGuest({ autoSignIn: true, hasCredentials: false, alreadyTr
 
 assert(S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 4000, retryCount: 0 }), 'retry signin after interval');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 1000, retryCount: 0 }), 'no retry before interval');
+const watchStart = 1_700_000_000_000;
+assert(
+  !S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: watchStart, nowMs: watchStart + 1000, retryCount: 0 }),
+  'watcher init timestamp blocks immediate retry'
+);
+assert(
+  S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: watchStart, nowMs: watchStart + 4000, retryCount: 0 }),
+  'watcher retry after interval from init stamp'
+);
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 15 }), 'stop at max retries');
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');

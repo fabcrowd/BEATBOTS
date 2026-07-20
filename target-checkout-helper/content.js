@@ -1589,7 +1589,8 @@ function watchForCheckoutStep(settings, options = {}) {
 
   let handled = false;
   let pendingRetryCount = 0;
-  let lastPendingRetryMs = 0;
+  // Stamp now — handleCheckoutPendingStep already ran once; 0 would make shouldRetry true immediately (epoch delta).
+  let lastPendingRetryMs = Date.now();
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
