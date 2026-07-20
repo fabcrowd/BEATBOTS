@@ -65,16 +65,16 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Walmart content script product → cart → checkout flow',
     impl: ['target-checkout-helper/walmart-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-2': {
     id: 'WM-2',
     retailer: 'walmart',
     summary: 'Pre-drop disabled ATC alone is not queue — do not treat as sacred lock',
     impl: ['target-checkout-helper/walmart-content.js (wmIsProductQueued vs wmHasQueueIndicators)'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-3': {
     id: 'WM-3',
@@ -89,16 +89,16 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed',
     impl: ['target-checkout-helper/walmart-content.js', 'target-checkout-helper/background.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-5': {
     id: 'WM-5',
     retailer: 'walmart',
     summary: 'Sacred lock blocks background re-navigation; WALMART_NAV_FAILED clears navigationLock only',
     impl: ['target-checkout-helper/background.js', 'target-checkout-helper/walmart-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'SC-3': {
     id: 'SC-3',
@@ -166,6 +166,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
+  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5'],
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */
