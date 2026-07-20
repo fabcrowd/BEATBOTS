@@ -105,16 +105,16 @@ export const JOURNEYS = {
     retailer: 'samsclub',
     summary: "Sam's Club checkout must not inherit Walmart queue handlers",
     impl: ['target-checkout-helper/samsclub-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs'],
   },
   'SC-5': {
     id: 'SC-5',
     retailer: 'samsclub',
     summary: "Sam's Club FCFS drops must not use Walmart-style sacred lock",
     impl: ['target-checkout-helper/samsclub-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs'],
   },
 };
 
@@ -168,6 +168,7 @@ export const EXTENSION_SUITE = {
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
+  'samsclub-module-simulation.mjs': ['SC-3', 'SC-5'],
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */
