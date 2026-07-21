@@ -28,6 +28,14 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['extension-functional.mjs'],
   },
+  'MON-3': {
+    id: 'MON-3',
+    retailer: 'core',
+    summary: 'Background poll navigationLock + inQueueUrls skip re-navigation; START_MONITOR restart clears inQueueUrls',
+    impl: ['target-checkout-helper/background.js'],
+    coverage: 'strong',
+    tests: ['extension-functional.mjs'],
+  },
   'TGT-1': {
     id: 'TGT-1',
     retailer: 'target',
@@ -90,7 +98,7 @@ export const JOURNEYS = {
     summary: 'Sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed',
     impl: ['target-checkout-helper/walmart-content.js', 'target-checkout-helper/background.js'],
     coverage: 'strong',
-    tests: ['walmart-flow-simulation.mjs'],
+    tests: ['walmart-flow-simulation.mjs', 'extension-functional.mjs'],
   },
   'WM-5': {
     id: 'WM-5',
@@ -98,7 +106,27 @@ export const JOURNEYS = {
     summary: 'Sacred lock blocks background re-navigation; WALMART_NAV_FAILED clears navigationLock only',
     impl: ['target-checkout-helper/background.js', 'target-checkout-helper/walmart-content.js'],
     coverage: 'strong',
-    tests: ['walmart-flow-simulation.mjs'],
+    tests: ['walmart-flow-simulation.mjs', 'extension-functional.mjs'],
+  },
+  'WM-6': {
+    id: 'WM-6',
+    retailer: 'walmart',
+    summary: 'Walmart error paths (PX timeout, NAV_FAILED while not in queue) release poll lock only',
+    impl: ['target-checkout-helper/walmart-content.js', 'target-checkout-helper/background.js'],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs', 'extension-functional.mjs'],
+  },
+  'SC-1': {
+    id: 'SC-1',
+    retailer: 'samsclub',
+    summary: "Sam's Club retailer module registered in manifest with FCFS content script",
+    impl: [
+      'target-checkout-helper/manifest.json',
+      'target-checkout-helper/core/hosts.js',
+      'target-checkout-helper/samsclub-content.js',
+    ],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs'],
   },
   'SC-3': {
     id: 'SC-3',
@@ -113,6 +141,17 @@ export const JOURNEYS = {
     retailer: 'samsclub',
     summary: "Sam's Club FCFS drops must not use Walmart-style sacred lock",
     impl: ['target-checkout-helper/samsclub-content.js'],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs'],
+  },
+  'SC-6': {
+    id: 'SC-6',
+    retailer: 'samsclub',
+    summary: "Sam's Club FCFS error paths — NAV_FAILED releases poll lock, no sacred lock",
+    impl: [
+      'target-checkout-helper/samsclub-content.js (scSignalNavFailed)',
+      'target-checkout-helper/background.js (NAV_FAILED handler)',
+    ],
     coverage: 'strong',
     tests: ['samsclub-module-simulation.mjs'],
   },
@@ -164,7 +203,7 @@ export const INVARIANTS = {
 /** Authoritative `npm run test:extension` files → journey IDs they cover. */
 export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
-  'extension-functional.mjs': ['MON-1', 'MON-2', 'TGT-1', 'TGT-2'],
+  'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5'],
   'walmart-main-world-simulation.mjs': ['WM-3'],

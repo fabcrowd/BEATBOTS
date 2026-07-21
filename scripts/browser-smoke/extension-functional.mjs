@@ -9,6 +9,43 @@ import { launchWithExtension, rmProfileDir } from './launch-util.mjs';
 let browser;
 let userDataDir;
 
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/** Mirrors background.js poll loop skip checks (inQueueUrls / navigationLock). */
+function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return true;
+  if (navigationLock.has(normUrl)) return true;
+  return false;
+}
+
+/** Mirrors background.js isInCheckoutFlow — poll must not navigate tabs already in checkout. */
+function isInCheckoutFlow(url) {
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+async function waitForMonitorLocks(popup, check, label, timeoutMs = 35000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    if (check(status)) return status;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error(`MON-3: timeout waiting for ${label}`);
+}
+
 async function sendBg(page, msg) {
   return page.evaluate(
     (m) =>
@@ -173,6 +210,174 @@ async function main() {
 
   await sendBg(popup, { type: 'STOP_MONITOR' });
 
+  // ─── MON-3: navigationLock + inQueueUrls skip poll re-navigation ───────────
+  const MON3_WM = 'https://www.walmart.com/ip/Test-Mon3-Product/987654321';
+  const MON3_NORM = normalizeProductUrl(MON3_WM);
+
+  assert.ok(isInCheckoutFlow('https://www.target.com/checkout'), 'MON-3: target checkout path');
+  assert.ok(isInCheckoutFlow('https://www.walmart.com/checkout'), 'MON-3: walmart checkout path');
+  assert.ok(isInCheckoutFlow('https://www.target.com/cart'), 'MON-3: cart path');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/ip/product/123'), 'MON-3: product page not checkout flow');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/qp'), 'MON-3: /qp uses sacred lock, not checkout-flow guard');
+
+  {
+    const inQ = new Set();
+    const navL = new Set();
+    assert.equal(pollWouldSkipNavigation(MON3_NORM, inQ, navL), false);
+    navL.add(MON3_NORM);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'MON-3: navigationLock blocks poll navigate'
+    );
+    navL.delete(MON3_NORM);
+    inQ.add(MON3_NORM);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'MON-3: inQueueUrls blocks poll navigate'
+    );
+  }
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: MON3_WM, name: 'MON-3 test', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  const withNavLock = await waitForMonitorLocks(
+    popup,
+    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(MON3_NORM),
+    'navigationLock after poll navigate'
+  );
+  assert.ok(withNavLock.navigationLock.includes(MON3_NORM), 'MON-3: poll sets navigationLock');
+  assert.ok(
+    !withNavLock.inQueueUrls?.includes(MON3_NORM),
+    'WM-4: navigationLock alone must not populate inQueueUrls (sacred lock only via WALMART_IN_QUEUE)'
+  );
+
+  // ─── WM-6: NAV_FAILED while not in queue — poll can retry ────────────────
+  const wm6BeforeFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !wm6BeforeFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-6 setup: not in queue before NAV_FAILED'
+  );
+
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: MON3_WM });
+  const wm6AfterFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !wm6AfterFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-6: NAV_FAILED must not arm inQueueUrls when not in queue'
+  );
+  assert.ok(
+    !wm6AfterFail.navigationLock?.includes(MON3_NORM),
+    'WM-6: NAV_FAILED clears navigationLock for poll retry'
+  );
+
+  await new Promise((r) => setTimeout(r, 2500));
+  const wm6AfterPoll = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    wm6AfterPoll.navigationLock?.includes(MON3_NORM),
+    'WM-6: poll re-arms navigationLock after error-path NAV_FAILED'
+  );
+  assert.ok(
+    !wm6AfterPoll.inQueueUrls?.includes(MON3_NORM),
+    'WM-6: poll retry must not arm inQueueUrls without WALMART_IN_QUEUE'
+  );
+
+  await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
+  const inQueue = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(inQueue.inQueueUrls?.includes(MON3_NORM), 'MON-3: WALMART_IN_QUEUE adds inQueueUrls');
+
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: MON3_WM });
+  const afterNavFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterNavFail.navigationLock?.includes(MON3_NORM),
+    'MON-3: WALMART_NAV_FAILED clears navigationLock'
+  );
+  assert.ok(
+    afterNavFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: WALMART_NAV_FAILED must not clear inQueueUrls'
+  );
+
+  {
+    const inQ = new Set(afterNavFail.inQueueUrls || []);
+    const navL = new Set(afterNavFail.navigationLock || []);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'WM-5: poll skips when inQueueUrls holds after NAV_FAILED'
+    );
+  }
+  await new Promise((r) => setTimeout(r, 2500));
+  const afterSacredWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    afterSacredWait.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: inQueueUrls persists across poll cycles after NAV_FAILED'
+  );
+  assert.ok(
+    !afterSacredWait.navigationLock?.includes(MON3_NORM),
+    'WM-5: poll must not re-arm navigationLock while sacred lock holds'
+  );
+
+  // WM-5: retailer-neutral NAV_FAILED while sacred lock holds — same as WALMART_NAV_FAILED.
+  await sendBg(popup, { type: 'NAV_FAILED', url: MON3_WM });
+  const afterNeutralFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterNeutralFail.navigationLock?.includes(MON3_NORM),
+    'WM-5: retailer-neutral NAV_FAILED clears navigationLock'
+  );
+  assert.ok(
+    afterNeutralFail.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: retailer-neutral NAV_FAILED must not clear inQueueUrls'
+  );
+  {
+    const inQ = new Set(afterNeutralFail.inQueueUrls || []);
+    const navL = new Set(afterNeutralFail.navigationLock || []);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'WM-5: poll skips when inQueueUrls holds after retailer-neutral NAV_FAILED'
+    );
+  }
+
+  // WM-5: queue wait timeout releases sacred lock (contrast with NAV_FAILED above).
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
+  await sendBg(popup, { type: 'WALMART_QUEUE_TIMEOUT', url: MON3_WM });
+  const afterQueueTimeout = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterQueueTimeout.inQueueUrls?.includes(MON3_NORM),
+    'WM-5: WALMART_QUEUE_TIMEOUT clears inQueueUrls'
+  );
+  assert.ok(
+    !afterQueueTimeout.navigationLock?.includes(MON3_NORM),
+    'WM-5: WALMART_QUEUE_TIMEOUT clears navigationLock'
+  );
+
+  // MON-3: START_MONITOR calls stopMonitor first — clears sacred lock for a fresh session.
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: MON3_WM, name: 'MON-3 restart', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+  const afterRestart = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(afterRestart.active, true, 'MON-3: START_MONITOR sets active after restart');
+  assert.ok(
+    !afterRestart.inQueueUrls?.includes(MON3_NORM),
+    'MON-3: START_MONITOR clears prior inQueueUrls (stopMonitor first)'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  const mon3Cleared = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon3Cleared.active, false, 'MON-3: STOP_MONITOR clears active');
+  assert.ok(!mon3Cleared.inQueueUrls?.length, 'MON-3: STOP_MONITOR clears inQueueUrls');
+  assert.ok(!mon3Cleared.navigationLock?.length, 'MON-3: STOP_MONITOR clears navigationLock');
+
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
     type: 'CHECKOUT_RETRY_EVENT',
@@ -265,7 +470,9 @@ async function main() {
   await new Promise((r) => setTimeout(r, 8000));
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
-  console.log('FUNCTIONAL PASS: background messages + popup toggle/save + Target content script');
+  console.log(
+    'FUNCTIONAL PASS: background messages + MON-2/MON-3 + WM-4/WM-5/WM-6 locks + popup toggle/save + Target content script'
+  );
 }
 
 main()
