@@ -2196,6 +2196,11 @@ async function init() {
     stopInit('walmart_handled');
     return;
   }
+  if (detected === 'samsclub') {
+    // Sam's Club is handled by samsclub-content.js — this script is Target-only.
+    stopInit('samsclub_handled');
+    return;
+  }
   if (detected !== 'target') {
     stopInit('unsupported_host');
     return;
