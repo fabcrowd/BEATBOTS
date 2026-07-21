@@ -432,6 +432,12 @@ async function wmDirectAtc(oid, settings, opts = {}) {
 
 // ─── CHECKOUT HANDLERS ───────────────────────────────────────────────────────
 
+/** Release background poll skip after queue wait ends (timeout, redirect, or handoff). */
+function wmSendQueueExit(lockUrl) {
+  if (!lockUrl) return;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_EXIT', url: lockUrl }); } catch (_) {}
+}
+
 /**
  * Walmart drop queue — runs while waiting on the PRODUCT PAGE for ATC to enable.
  *
@@ -447,8 +453,9 @@ async function wmWaitInProductQueue(settings, oid) {
   wmShowToast('In queue — waiting for your turn…', 'persistent');
   console.log('[WMT] Product-page queue detected — passive wait, DO NOT navigate');
 
+  const lockUrl = location.href;
   // Lock the tab in background poll so it doesn't re-navigate while we wait.
-  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: location.href }); } catch (_) {}
+  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
 
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();
@@ -519,6 +526,7 @@ async function wmWaitInProductQueue(settings, oid) {
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
+    wmSendQueueExit(lockUrl);
   }
 }
 
@@ -544,19 +552,23 @@ async function wmHandleQueueRoom(settings) {
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();
 
-  while (Date.now() - started < maxWaitMs) {
-    await wmSleep(5000);
-    // When the waiting room clears, Walmart redirects away from /qp automatically.
-    // The SPA watcher fires wmInit() on URL change — no extra action needed here.
-    if (!location.pathname.startsWith('/qp')) return;
-    const elapsed = Math.round((Date.now() - started) / 1000);
-    if (elapsed > 0 && elapsed % 60 === 0) {
-      wmShowToast(`Waiting room — ${Math.round(elapsed / 60)}m elapsed…`, 'persistent');
+  try {
+    while (Date.now() - started < maxWaitMs) {
+      await wmSleep(5000);
+      // When the waiting room clears, Walmart redirects away from /qp automatically.
+      // The SPA watcher fires wmInit() on URL change — no extra action needed here.
+      if (!location.pathname.startsWith('/qp')) return;
+      const elapsed = Math.round((Date.now() - started) / 1000);
+      if (elapsed > 0 && elapsed % 60 === 0) {
+        wmShowToast(`Waiting room — ${Math.round(elapsed / 60)}m elapsed…`, 'persistent');
+      }
     }
-  }
 
-  wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
-  console.warn('[WMT] /qp waiting room timeout after 45 min');
+    wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
+    console.warn('[WMT] /qp waiting room timeout after 45 min');
+  } finally {
+    wmSendQueueExit(lockUrl);
+  }
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -679,22 +691,26 @@ async function wmHandleQueue(settings) {
   const maxWaitMs = 45 * 60 * 1000;
   const started = Date.now();
 
-  while (Date.now() - started < maxWaitMs) {
-    await wmSleep(2000);
-    if (!wmIsQueuePage()) {
-      console.log('[WMT] Queue cleared');
-      wmShowToast('Queue cleared — continuing checkout', 'success');
-      await wmSleep(500);
-      await wmHandleCheckout(settings);
-      return;
+  try {
+    while (Date.now() - started < maxWaitMs) {
+      await wmSleep(2000);
+      if (!wmIsQueuePage()) {
+        console.log('[WMT] Queue cleared');
+        wmShowToast('Queue cleared — continuing checkout', 'success');
+        await wmSleep(500);
+        await wmHandleCheckout(settings);
+        return;
+      }
+      const elapsed = Math.round((Date.now() - started) / 1000);
+      if (elapsed > 0 && elapsed % 30 === 0) {
+        wmShowToast(`In queue — ${elapsed}s elapsed…`, 'persistent');
+      }
     }
-    const elapsed = Math.round((Date.now() - started) / 1000);
-    if (elapsed > 0 && elapsed % 30 === 0) {
-      wmShowToast(`In queue — ${elapsed}s elapsed…`, 'persistent');
-    }
+    wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
+    console.warn('[WMT] Queue wait timed out after 45 min');
+  } finally {
+    wmSendQueueExit(lockUrl);
   }
-  wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
-  console.warn('[WMT] Queue wait timed out after 45 min');
 }
 
 /**
