@@ -430,6 +430,81 @@ async function main() {
 
   await sendBg(popup, { type: 'STOP_MONITOR' });
 
+  // ─── SC-5/SC-6: Sam's Club FCFS — no sacred lock, NAV_FAILED / ATC_SUCCESS ─
+  const SC_URL = 'https://www.samsclub.com/p/sc-fcfs-functional/555444333';
+  const SC_NORM = normalizeProductUrl(SC_URL);
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: SC_URL, name: 'SC FCFS test', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  const scWithNavLock = await waitForMonitorLocks(
+    popup,
+    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(SC_NORM),
+    'SC-6: navigationLock after Sam\'s Club poll navigate'
+  );
+  assert.ok(
+    !scWithNavLock.inQueueUrls?.includes(SC_NORM),
+    'SC-5: Sam\'s Club poll must not arm inQueueUrls (FCFS, not queue)'
+  );
+
+  await sendBg(popup, { type: 'NAV_FAILED', url: SC_URL });
+  const scAfterFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !scAfterFail.inQueueUrls?.includes(SC_NORM),
+    'SC-6: NAV_FAILED must not arm inQueueUrls'
+  );
+  assert.ok(
+    !scAfterFail.navigationLock?.includes(SC_NORM),
+    'SC-6: NAV_FAILED clears navigationLock for poll retry'
+  );
+
+  await new Promise((r) => setTimeout(r, 2500));
+  const scAfterPoll = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    scAfterPoll.navigationLock?.includes(SC_NORM),
+    'SC-6: poll re-arms navigationLock after error-path NAV_FAILED'
+  );
+  assert.ok(
+    !scAfterPoll.inQueueUrls?.includes(SC_NORM),
+    'SC-6: poll retry must not arm inQueueUrls without WALMART_IN_QUEUE'
+  );
+
+  for (let i = 0; i < 3; i++) {
+    await sendBg(popup, { type: 'NAV_FAILED', url: SC_URL });
+    const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.ok(
+      !cycle.inQueueUrls?.includes(SC_NORM),
+      `SC-6: FCFS restock cycle ${i + 1} must not arm inQueueUrls`
+    );
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
+  await waitForMonitorLocks(
+    popup,
+    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(SC_NORM),
+    'SC-5: navigationLock before ATC_SUCCESS'
+  );
+
+  await sendBg(popup, { type: 'ATC_SUCCESS', url: SC_URL });
+  const scAfterAtc = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !scAfterAtc.inQueueUrls?.includes(SC_NORM),
+    'SC-5: ATC_SUCCESS must not arm inQueueUrls'
+  );
+  assert.ok(
+    !scAfterAtc.navigationLock?.includes(SC_NORM),
+    'SC-5: ATC_SUCCESS releases navigationLock (FCFS race, no sacred lock)'
+  );
+
+  if (scAfterAtc.active) {
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+  }
+
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
     type: 'CHECKOUT_RETRY_EVENT',
@@ -523,7 +598,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: background messages + MON-2/MON-3 + WM-4/WM-5/WM-6 locks + WM-7 offerId + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: background messages + MON-2/MON-3 + WM-4/WM-5/WM-6 locks + WM-7 offerId + SC-5/SC-6 FCFS locks + popup toggle/save + Target content script'
   );
 }
 
