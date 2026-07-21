@@ -93,6 +93,86 @@ async function main() {
   const afterMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.equal(afterMon.active, false, 'STOP_MONITOR should clear active');
 
+  // ─── MON-2: shared monitorActive + retailer-filtered START_MONITOR ───────
+  const MON2_TARGET = 'https://www.target.com/p/overnight-mon2-target';
+  const MON2_WALMART = 'https://www.walmart.com/ip/overnight-mon2-walmart/999';
+
+  await popup.evaluate((url) => {
+    const input = document.getElementById('productUrl');
+    if (!input) throw new Error('no productUrl');
+    input.value = url;
+    document.getElementById('addProductBtn')?.click();
+  }, MON2_TARGET);
+
+  await popup.evaluate(() => {
+    document.getElementById('tabWalmart')?.click();
+  });
+  await popup.waitForSelector('#wmAddProductBtn', { timeout: 5000 });
+  await popup.evaluate((url) => {
+    const input = document.getElementById('wmProductUrl');
+    if (!input) throw new Error('no wmProductUrl');
+    input.value = url;
+    document.getElementById('wmAddProductBtn')?.click();
+  }, MON2_WALMART);
+
+  await popup.evaluate(() => {
+    document.getElementById('wmMonitorBtn')?.click();
+  });
+  await popup.waitForFunction(
+    () => document.getElementById('wmMonitorBtn')?.textContent?.match(/stop/i),
+    { timeout: 8000 }
+  );
+
+  const wmMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(wmMon.active, true, 'MON-2: walmart start sets monitor active');
+  assert.ok(
+    wmMon.products?.length && wmMon.products.every((p) => /walmart\.com/i.test(p.url)),
+    'MON-2: walmart start sends only walmart.com products'
+  );
+  assert.ok(
+    !wmMon.products.some((p) => /target\.com/i.test(p.url)),
+    'MON-2: target URL excluded when starting from Walmart tab'
+  );
+
+  const sharedStopUi = await popup.evaluate(() => ({
+    target: document.getElementById('monitorBtn')?.textContent || '',
+    walmart: document.getElementById('wmMonitorBtn')?.textContent || '',
+  }));
+  assert.match(sharedStopUi.target, /stop/i, 'MON-2: Target button shows Stop while monitor active');
+  assert.match(sharedStopUi.walmart, /stop/i, 'MON-2: Walmart button shows Stop while monitor active');
+
+  await popup.evaluate(() => {
+    document.getElementById('tabMain')?.click();
+    document.getElementById('monitorBtn')?.click();
+  });
+  await popup.waitForFunction(
+    () => !document.getElementById('monitorBtn')?.textContent?.match(/stop/i),
+    { timeout: 8000 }
+  );
+  const stopped = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(stopped.active, false, 'MON-2: stop from Target tab clears shared monitor');
+
+  await popup.evaluate(() => {
+    document.getElementById('monitorBtn')?.click();
+  });
+  await popup.waitForFunction(
+    () => document.getElementById('monitorBtn')?.textContent?.match(/stop/i),
+    { timeout: 8000 }
+  );
+
+  const tgtMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(tgtMon.active, true, 'MON-2: target start sets monitor active');
+  assert.ok(
+    tgtMon.products?.length && tgtMon.products.every((p) => /target\.com/i.test(p.url)),
+    'MON-2: target start sends only target.com products'
+  );
+  assert.ok(
+    !tgtMon.products.some((p) => /walmart\.com/i.test(p.url)),
+    'MON-2: walmart URL excluded when starting from Target tab'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
     type: 'CHECKOUT_RETRY_EVENT',
