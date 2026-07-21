@@ -996,8 +996,11 @@ async function main() {
   await runWm2FlowTests();
   runWm4SacredLockTests();
   runWm5SacredLockBlockTests();
+  runWm5QueueTimeoutTests();
+  runWm6CheckoutQueueLockTests();
+  runWm6ErrorPathTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4 + WM-5): page type, flow, queue invariants'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-4 + WM-5 + WM-6): page type, flow, queue, error paths'
   );
 }
 
