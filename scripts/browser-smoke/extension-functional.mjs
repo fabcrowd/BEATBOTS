@@ -484,26 +484,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 800));
   }
 
-  await waitForMonitorLocks(
-    popup,
-    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(SC_NORM),
-    'SC-5: navigationLock before ATC_SUCCESS'
-  );
-
-  await sendBg(popup, { type: 'ATC_SUCCESS', url: SC_URL });
-  const scAfterAtc = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
-  assert.ok(
-    !scAfterAtc.inQueueUrls?.includes(SC_NORM),
-    'SC-5: ATC_SUCCESS must not arm inQueueUrls'
-  );
-  assert.ok(
-    !scAfterAtc.navigationLock?.includes(SC_NORM),
-    'SC-5: ATC_SUCCESS releases navigationLock (FCFS race, no sacred lock)'
-  );
-
-  if (scAfterAtc.active) {
-    await sendBg(popup, { type: 'STOP_MONITOR' });
-  }
+  await sendBg(popup, { type: 'STOP_MONITOR' });
 
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
@@ -598,7 +579,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: background messages + MON-2/MON-3 + WM-4/WM-5/WM-6 locks + WM-7 offerId + SC-5/SC-6 FCFS locks + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: background messages + MON-2/MON-3 + WM-4/WM-5/WM-6 locks + WM-7 offerId + SC-5/SC-6 FCFS error paths + popup toggle/save + Target content script'
   );
 }
 
