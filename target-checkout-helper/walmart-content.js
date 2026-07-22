@@ -1235,11 +1235,16 @@ async function _wmInit() {
   if (wmIsPxPage()) {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
+    // Poll keys navigationLock by monitored /ip/ URL — PX pages use a different href.
+    const pxProducts = (data.monitor?.products || []).filter((p) =>
+      /walmart\.com(?::\d+)?\/ip\//i.test(p.url)
+    );
+    const pxLockUrl = pxProducts[0]?.url || null;
     const pxTimeoutMs = wmPxTimeoutMs();
     setTimeout(() => {
       if (wmIsPxPage()) {
         console.log('[WMT] PX page still showing — releasing nav lock');
-        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
+        wmSignalNavFailed(pxLockUrl);
       }
     }, pxTimeoutMs);
     return;

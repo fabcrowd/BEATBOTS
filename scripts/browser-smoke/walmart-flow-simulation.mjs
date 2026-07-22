@@ -763,6 +763,15 @@ function runWm6ErrorPathTests() {
     'WM-6: PX page must not arm sacred queue wait'
   );
 
+  assert.ok(
+    /PX page still showing[\s\S]*?wmSignalNavFailed\(pxLockUrl\)/.test(WM_SRC),
+    'WM-6: PX timeout must release navigationLock via wmSignalNavFailed(pxLockUrl)'
+  );
+  assert.ok(
+    !/PX page still showing[\s\S]*?sendMessage\(\{ type: 'WALMART_NAV_FAILED', url: location\.href/.test(WM_SRC),
+    'WM-6: PX timeout must not inline-send NAV_FAILED with location.href (wrong poll lock key)'
+  );
+
   const pxGuard = wmSimulatePxInitGuard(pxPage, productUrl, { simulateTimeout: true });
   assert.equal(pxGuard.earlyReturn, true, 'WM-6: PX guard early-returns from wmInit');
   assert.ok(
