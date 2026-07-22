@@ -15,6 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '../..');
 const HOSTS_SRC = readFileSync(join(ROOT, 'target-checkout-helper/core/hosts.js'), 'utf8');
 const SC_SRC = readFileSync(join(ROOT, 'target-checkout-helper/samsclub-content.js'), 'utf8');
+const BG_SRC = readFileSync(join(ROOT, 'target-checkout-helper/background.js'), 'utf8');
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'target-checkout-helper/manifest.json'), 'utf8'));
 const CONTENT_SRC = readFileSync(join(ROOT, 'target-checkout-helper/content.js'), 'utf8');
 
@@ -216,6 +217,23 @@ function bgApplyAtcSuccess(inQueueUrls, navigationLock, url) {
   return { inQueueUrls, navigationLock };
 }
 
+function extractWalmartItemId(url) {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/ip\/[^/]+\/(\d+)/);
+    return m?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Mirrors handleATCSuccess checkout navigation guard — Sam's Club must not go to Target. */
+function bgAtcSuccessWouldNavigateTargetCheckout(url, hosts) {
+  const isWalmart = !!extractWalmartItemId(url);
+  const isSamsclub = hosts.detectRetailer(url) === 'samsclub';
+  return !isWalmart && !isSamsclub;
+}
+
 function runSc5NoSacredLockTests() {
   const forbidden = [
     'inQueueUrls',
@@ -240,9 +258,24 @@ function runSc5NoSacredLockTests() {
 }
 
 /** SC-5: FCFS race — ATC_SUCCESS releases locks; poll never arms inQueueUrls for Sam's Club. */
-function runSc5FcfsRaceTests() {
+function runSc5FcfsRaceTests(hosts) {
   const scProductUrl = 'https://www.samsclub.com/p/member-mark-race/123';
   const norm = normalizeProductUrl(scProductUrl);
+
+  assert.ok(
+    BG_SRC.includes("TCH_HOSTS.detectRetailer(url) === 'samsclub'"),
+    "SC-5: handleATCSuccess must skip Target checkout redirect for Sam's Club"
+  );
+  assert.equal(
+    bgAtcSuccessWouldNavigateTargetCheckout(scProductUrl, hosts),
+    false,
+    "SC-5: Sam's Club ATC_SUCCESS must not redirect tab to Target checkout"
+  );
+  assert.equal(
+    bgAtcSuccessWouldNavigateTargetCheckout('https://www.target.com/p/A-1234567', hosts),
+    true,
+    'SC-5 contrast: Target ATC_SUCCESS navigates to Target checkout'
+  );
 
   assert.ok(
     SC_SRC.includes("type: 'ATC_SUCCESS'"),
@@ -448,7 +481,7 @@ function main() {
   runSc1HostsTests(hosts);
   runSc1ManifestTests();
   runSc5NoSacredLockTests();
-  runSc5FcfsRaceTests();
+  runSc5FcfsRaceTests(hosts);
   runSc1PageTypeTests();
   runSc3FcfsAtcTests();
   runSc6ErrorPathTests();

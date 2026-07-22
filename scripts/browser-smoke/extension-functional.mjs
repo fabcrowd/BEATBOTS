@@ -486,6 +486,33 @@ async function main() {
 
   await sendBg(popup, { type: 'STOP_MONITOR' });
 
+  // SC-5: live ATC_SUCCESS — no sacred lock; monitor stops without Target checkout redirect.
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: SC_URL, name: 'SC ATC success test', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  await waitForMonitorLocks(
+    popup,
+    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(SC_NORM),
+    'SC-5: navigationLock before ATC_SUCCESS'
+  );
+
+  await sendBg(popup, { type: 'ATC_SUCCESS', url: SC_URL });
+  const scAtcDone = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !scAtcDone.inQueueUrls?.includes(SC_NORM),
+    'SC-5: ATC_SUCCESS must not arm inQueueUrls'
+  );
+  assert.ok(
+    !scAtcDone.navigationLock?.includes(SC_NORM),
+    'SC-5: ATC_SUCCESS clears navigationLock'
+  );
+  assert.equal(scAtcDone.active, false, 'SC-5: ATC_SUCCESS with qty satisfied stops monitor');
+
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
     type: 'CHECKOUT_RETRY_EVENT',

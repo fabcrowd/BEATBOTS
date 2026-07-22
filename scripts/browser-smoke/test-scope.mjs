@@ -153,7 +153,7 @@ export const JOURNEYS = {
     summary: "Sam's Club FCFS drops must not use Walmart-style sacred lock",
     impl: ['target-checkout-helper/samsclub-content.js'],
     coverage: 'strong',
-    tests: ['samsclub-module-simulation.mjs'],
+    tests: ['samsclub-module-simulation.mjs', 'extension-functional.mjs'],
   },
   'SC-6': {
     id: 'SC-6',
@@ -164,7 +164,7 @@ export const JOURNEYS = {
       'target-checkout-helper/background.js (NAV_FAILED handler)',
     ],
     coverage: 'strong',
-    tests: ['samsclub-module-simulation.mjs'],
+    tests: ['samsclub-module-simulation.mjs', 'extension-functional.mjs'],
   },
 };
 
@@ -216,7 +216,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6', 'WM-7', 'SC-5', 'SC-6'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
-  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5'],
+  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
 };

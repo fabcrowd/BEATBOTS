@@ -1645,23 +1645,27 @@ async function handleATCSuccess(url, tabId) {
   }
 
   // Consider "done" if every product whose ID can be resolved is satisfied.
-  // Products with no extractable TCIN *and* no Walmart item ID can't be auto-ATC'd — skip them.
+  // Products with no extractable TCIN, Walmart item ID, or Sam's Club URL can't be auto-ATC'd — skip them.
   const allDone = monitor.products.every((p) => {
     const c = monitor.counts[normalizeProductUrl(p.url)] || 0;
     if (c >= p.qty) return true;
-    return !extractTcin(p.url) && !extractWalmartItemId(p.url);
+    const isSamsclub =
+      typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(p.url) === 'samsclub';
+    return !extractTcin(p.url) && !extractWalmartItemId(p.url) && !isSamsclub;
   });
 
   if (allDone) {
     bgPollActive = false;
     const isWalmart = !!extractWalmartItemId(url);
-    if (!isWalmart) {
+    const isSamsclub =
+      typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(url) === 'samsclub';
+    if (!isWalmart && !isSamsclub) {
       // Target: navigate the ATC tab directly to Target checkout.
       chrome.tabs.update(tabId, { url: 'https://www.target.com/checkout' });
       // Detach debugger — no click simulation needed during checkout form-fill.
       tchDebuggerDetach().catch(() => {});
     }
-    // Walmart: walmart-content.js already navigates cart → checkout — don't clobber it.
+    // Walmart / Sam's Club: retailer content scripts navigate cart → checkout — don't clobber them.
 
     for (const tid of monitor.tabIds || []) {
       if (tid !== tabId) {
