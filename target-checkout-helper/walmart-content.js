@@ -146,6 +146,16 @@ function wmSignalNavFailed(lockUrl) {
   try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url }); } catch (_) {}
 }
 
+/** WM-6: poll keys navigationLock by monitored /ip/ URL — not PX/queue/checkout hrefs. */
+function wmResolvePollLockUrl(settings) {
+  if (settings?.productUrl) return settings.productUrl;
+  const products = wmSettingsCache?.monitor?.products || [];
+  const walmartProducts = products.filter((p) =>
+    /walmart\.com(?::\d+)?\/ip\//i.test(p.url)
+  );
+  return walmartProducts[0]?.url || null;
+}
+
 /** Same telemetry path as Target review — drives Discord webhooks + endless mode. */
 async function wmReportCheckoutSuccess() {
   try {
@@ -673,7 +683,7 @@ async function wmWaitForPriceDrop(settings) {
 
   wmShowToast('Price wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Price guard wait timed out after 45 min');
-  wmSignalNavFailed(settings?.productUrl || location.href);
+  wmSignalNavFailed(wmResolvePollLockUrl(settings));
 }
 
 /**
@@ -715,7 +725,7 @@ async function wmHandleQueueRoom(settings) {
     wmSignalQueueTimeout(settings.productUrl);
   } else {
     console.warn('[WMT] /qp waiting room timeout — no productUrl — releasing navigation lock');
-    wmSignalNavFailed(location.href);
+    wmSignalNavFailed(wmResolvePollLockUrl(settings));
   }
 }
 
@@ -772,7 +782,7 @@ async function wmHandleProductPage(settings, oid) {
     }
     wmShowToast('ATC not available — waiting for restock', 'persistent');
     console.log('[WMT] ATC button not found or disabled — releasing navigation lock');
-    wmSignalNavFailed(settings?.productUrl || location.href);
+    wmSignalNavFailed(wmResolvePollLockUrl(settings));
     return;
   }
 
@@ -817,7 +827,7 @@ async function wmHandleCart(settings) {
   if (!checkoutBtn) {
     wmShowToast('Checkout button not found — take over manually', 'error');
     console.warn('[WMT] Checkout button not found on cart page — releasing navigation lock');
-    wmSignalNavFailed(settings?.productUrl || location.href);
+    wmSignalNavFailed(wmResolvePollLockUrl(settings));
     return;
   }
   console.log('[WMT] Clicking checkout button');
@@ -860,7 +870,7 @@ async function wmHandleQueue(settings) {
     wmSignalQueueTimeout(settings.productUrl);
   } else {
     console.warn('[WMT] Queue timeout — no productUrl — releasing navigation lock');
-    wmSignalNavFailed(location.href);
+    wmSignalNavFailed(wmResolvePollLockUrl(settings));
   }
 }
 
@@ -1116,7 +1126,7 @@ async function wmHandleCheckout(settings) {
 
   wmShowToast('Checkout step timeout — take over manually', 'error');
   console.warn('[WMT] wmHandleCheckout timed out — releasing navigation lock');
-  wmSignalNavFailed(settings?.productUrl || location.href);
+  wmSignalNavFailed(wmResolvePollLockUrl(settings));
 }
 
 // ─── WALMART LOGIN / 2FA (IMAP via native host) ────────────────────────────────
@@ -1236,10 +1246,7 @@ async function _wmInit() {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
     // Poll keys navigationLock by monitored /ip/ URL — PX pages use a different href.
-    const pxProducts = (data.monitor?.products || []).filter((p) =>
-      /walmart\.com(?::\d+)?\/ip\//i.test(p.url)
-    );
-    const pxLockUrl = pxProducts[0]?.url || null;
+    const pxLockUrl = wmResolvePollLockUrl(null);
     const pxTimeoutMs = wmPxTimeoutMs();
     setTimeout(() => {
       if (wmIsPxPage()) {
