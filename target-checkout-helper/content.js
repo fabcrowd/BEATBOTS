@@ -1487,6 +1487,15 @@ let reviewStepInFlight = false;
 let reviewStepInFlightKey = '';
 /** Prevents concurrent handleSignInPage from checkout pending retries during email→password transition. */
 let autoSignInInFlight = false;
+/** Passive monitor stock poll — cleared before starting a new one (MONITOR_UPDATED re-init). */
+let monitorPassivePollId = null;
+
+function stopMonitorPassivePoll() {
+  if (monitorPassivePollId) {
+    clearInterval(monitorPassivePollId);
+    monitorPassivePollId = null;
+  }
+}
 
 function markCheckoutFlow(step) {
   if (checkoutFlowStart === null) {
@@ -2263,7 +2272,27 @@ async function handleMonitoredATC(monitor, product) {
   const currentCount = monitor.counts?.[normUrl] || 0;
   const interval = getDropAwarePollSeconds(monitor, monitor.refreshInterval || 1);
 
-  if (currentCount >= product.qty) return;
+  if (currentCount >= product.qty) {
+    stopMonitorPassivePoll();
+    return;
+  }
+
+  // If item is already in cart (e.g. endless restart with reset counts), skip to checkout.
+  const inCartEl = (
+    Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find(el => /\bin cart\b/i.test(el.textContent))
+  ) || document.querySelector('[data-test="cartButton"]');
+  if (inCartEl) {
+    console.log('[TCH] monitor: item already in cart — navigating to checkout');
+    stopMonitorPassivePoll();
+    markCartReady();
+    showToast('Monitor: item in cart → checkout…');
+    setNavigationMark('product_to_checkout');
+    const settings = await getSettings();
+    await maybeApplyHarvestedSession(settings);
+    window.location.href = 'https://www.target.com/checkout';
+    return;
+  }
 
   // Hype mode: require at least one cookie snapshot in pool before ATC.
   if (product.hypeMode) {
@@ -2395,8 +2424,9 @@ async function handleMonitoredATC(monitor, product) {
   showToast(`Monitor: Polling every ${interval}s (no reload)…`, 'persistent');
   console.log('[TCH] passive polling for', normUrl);
 
-  const pollId = setInterval(async () => {
-    if (!runtimeEnabled) { clearInterval(pollId); return; }
+  stopMonitorPassivePoll();
+  monitorPassivePollId = setInterval(async () => {
+    if (!runtimeEnabled) { stopMonitorPassivePoll(); return; }
     // Prevent overlapping async callbacks — critical at 250ms drop-window intervals
     // where each network fetch takes 3-8s. Without this lock, dozens of fetches
     // queue up and hammer Target simultaneously.
@@ -2417,7 +2447,7 @@ async function handleMonitoredATC(monitor, product) {
       const result = await streamingStockCheck(normUrl, 8000, { stockOpts });
       if (result === true) {
         // Act immediately on first positive for maximum speed.
-        clearInterval(pollId);
+        stopMonitorPassivePoll();
         console.log('[TCH] STOCK DETECTED after', pollCount, 'polls');
         showToast('STOCK DETECTED — reloading!', 'success');
         location.reload();
@@ -2691,6 +2721,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     if (!runtimeEnabled) {
       clearCheckoutRetryState();
+      stopMonitorPassivePoll();
       document.getElementById('tch-toast')?.remove();
       reportRetryEvent({
         status: 'cancelled',

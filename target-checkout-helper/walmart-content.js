@@ -872,23 +872,27 @@ async function wmHandleReview(settings) {
   }
 }
 
+function wmHasVisibleSelector(selector) {
+  const el = document.querySelector(selector);
+  return !!(el && wmIsVisible(el));
+}
+
 function wmCheckoutHasShipping() {
-  return !!(
-    document.querySelector(WM_SEL.firstName) ||
-    document.querySelector(WM_SEL.address1) ||
-    document.querySelector(WM_SEL.zip)
-  );
+  return wmHasVisibleSelector(WM_SEL.firstName)
+    || wmHasVisibleSelector(WM_SEL.address1)
+    || wmHasVisibleSelector(WM_SEL.zip);
 }
 
 function wmCheckoutHasPayment() {
-  return !!(
-    document.querySelector(WM_SEL.cardNumber) ||
-    document.querySelector(WM_SEL.cvv)
-  );
+  return wmHasVisibleSelector(WM_SEL.cardNumber)
+    || wmHasVisibleSelector(WM_SEL.cvv);
 }
 
 function wmCheckoutHasReview() {
-  return !!(document.querySelector(WM_SEL.placeOrder) || wmFindByText('place order'));
+  const placeOrder = document.querySelector(WM_SEL.placeOrder);
+  if (placeOrder && wmIsVisible(placeOrder)) return true;
+  const byText = wmFindByText('place order');
+  return !!(byText && wmIsVisible(byText));
 }
 
 /**
