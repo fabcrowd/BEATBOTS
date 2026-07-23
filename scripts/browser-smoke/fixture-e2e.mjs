@@ -85,12 +85,15 @@ const FIXTURE_STORAGE_BASE = {
 async function applyRouteStorage(popup, route, port) {
   await resetQueueState(popup);
 
-  if (!route.invariants?.length) {
+  const pageUrl = `http://${route.host}:${port}${route.path}`;
+  const mon2Only =
+    route.invariants?.length === 1 && route.invariants[0] === 'mon2-live-poll-cycle';
+
+  if (!route.invariants?.length || mon2Only) {
     await setStorage(popup, { enabled: true, walmartUseSavedSession: true });
-    return `http://${route.host}:${port}${route.path}`;
+    return pageUrl;
   }
 
-  const pageUrl = `http://${route.host}:${port}${route.path}`;
   const data = { ...FIXTURE_STORAGE_BASE };
 
   await setStorage(popup, data);
@@ -283,6 +286,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 function routeWaitMs(route) {
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;
+  if (
+    route.invariants?.includes('mon2-live-poll-cycle') &&
+    !route.invariants?.includes('tgt4-manual-review')
+  ) {
+    return 1500;
+  }
   return 6000;
 }
 
