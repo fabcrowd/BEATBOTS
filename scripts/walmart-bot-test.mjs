@@ -52,7 +52,7 @@ function loadJigAddress() {
   return sandbox.self.jigAddressLine1 || sandbox.jigAddressLine1;
 }
 
-function makeDom(opts = {}) {
+function makeDom(opts = {}, ElementClass = class Element {}) {
   const elements = new Map();
   const bodyText = opts.bodyText || '';
   const pathName = opts.pathname || '/';
@@ -103,7 +103,8 @@ function makeDom(opts = {}) {
   };
 
   function addElement(selector, props = {}) {
-    const el = {
+    const el = Object.create(ElementClass.prototype);
+    Object.assign(el, {
       tagName: (props.tagName || 'BUTTON').toUpperCase(),
       disabled: !!props.disabled,
       textContent: props.textContent || '',
@@ -119,7 +120,7 @@ function makeDom(opts = {}) {
       remove() {},
       appendChild() {},
       _isElement: true,
-    };
+    });
     elements.set('__sel:' + selector, el);
     return el;
   }
@@ -137,7 +138,8 @@ function makeDom(opts = {}) {
 }
 
 function loadWalmartFunctions(domOpts = {}) {
-  const dom = makeDom(domOpts);
+  class MockElement {}
+  const dom = makeDom(domOpts, MockElement);
   const code = fs.readFileSync(path.join(EXT, 'walmart-content.js'), 'utf8');
   const sandbox = {
     console: { log() {}, warn() {}, error() {} },
@@ -152,7 +154,7 @@ function loadWalmartFunctions(domOpts = {}) {
     HTMLInputElement: { prototype: { value: '' } },
     Object,
     Array,
-    Element: class Element {},
+    Element: MockElement,
     Event: class Event { constructor(t, o) { this.type = t; } },
     CustomEvent: dom.CustomEvent,
     MutationObserver: class { observe() {} disconnect() {} },
@@ -560,6 +562,19 @@ section('Checkout step router — wmCheckoutHas* detection');
   const { sandbox: s3, dom: d3 } = loadWalmartFunctions({ pathname: '/checkout' });
   d3.addElement('[data-automation-id="place-order-btn"]', { textContent: 'Place Order' });
   assertEq(s3.wmCheckoutHasReview(), true, 'place order btn = review');
+
+  // Hidden shipping fields must not block payment step (SPA keeps prior-step DOM)
+  const { sandbox: s4, dom: d4 } = loadWalmartFunctions({ pathname: '/checkout' });
+  d4.addElement('input[name="firstName"], input[autocomplete="given-name"]', {
+    tagName: 'INPUT',
+    width: 0,
+    height: 0,
+  });
+  d4.addElement('input[id="creditCard"], input[name="cardNumber"], input[id*="card-number"], input[autocomplete="cc-number"]', {
+    tagName: 'INPUT',
+  });
+  assertEq(s4.wmCheckoutHasShipping(), false, 'hidden firstName does not count as shipping');
+  assertEq(s4.wmCheckoutHasPayment(), true, 'visible card input = payment step');
 }
 
 section('wmTryImap2FA — gating logic');
