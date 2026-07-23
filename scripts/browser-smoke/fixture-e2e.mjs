@@ -162,6 +162,122 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     });
     assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
   }
+
+  if (invariants.includes('mon2-live-poll-cycle')) {
+    const walmartProbePath = '/ip/mock-mon2-target-live/333';
+    const walmartProbeUrl = `http://www.walmart.com:${port}${walmartProbePath}`;
+    const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+    const normTargetPageUrl = normalizeProductUrl(pageUrl);
+
+    // Walmart-only monitor — Target tab must stay unmonitored (MON-2 retailer filter).
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: walmartProbeUrl, name: `Fixture MON-2 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    const urlBeforeReload = page.url();
+    assert.ok(
+      urlBeforeReload.includes('target.com'),
+      `FIX-3 MON-2: Target tab must stay on target.com before reload during walmart-only poll on ${pageUrl}, got ${urlBeforeReload}`
+    );
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const urlAfterReload = page.url();
+    assert.ok(
+      urlAfterReload.includes('target.com'),
+      `FIX-3 MON-2: Target tab must stay on target.com after reload during walmart-only poll on ${pageUrl}, got ${urlAfterReload}`
+    );
+    assert.ok(
+      normalizeProductUrl(urlAfterReload) === normTargetPageUrl,
+      `FIX-3 MON-2: Target tab URL must not change during walmart-only poll on ${pageUrl}, got ${urlAfterReload}`
+    );
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadProducts = afterReload?.products || [];
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.ok(
+      reloadProducts.length && reloadProducts.every((p) => /walmart\.com/i.test(p.url)),
+      `FIX-3 MON-2: walmart-only monitor must send only walmart.com products on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+    );
+    assert.ok(
+      !reloadProducts.some((p) => /target\.com/i.test(p.url)),
+      `FIX-3 MON-2: target URL must be excluded from walmart-only monitor on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+    );
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 MON-2: Target page reload during walmart-only poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      !reloadInQueue.some((u) => normalizeProductUrl(u) === normTargetPageUrl),
+      `FIX-3 MON-2: Target page URL must not be sacred lock key during walmart-only poll on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[TCH] init')).length >= 2,
+      `FIX-3 MON-2: Target page reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: walmartProbeUrl });
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleProducts = cycle?.products || [];
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.ok(
+        cycleProducts.every((p) => /walmart\.com/i.test(p.url)),
+        `FIX-3 MON-2: live poll cycle ${i + 1} must keep walmart-only products on ${pageUrl} after ${navFailTypes[i]}, got ${JSON.stringify(cycleProducts)}`
+      );
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 MON-2: live poll cycle ${i + 1} must not arm inQueueUrls on Target ${pageUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      assert.ok(
+        !cycleInQueue.some((u) => normalizeProductUrl(u) === normTargetPageUrl),
+        `FIX-3 MON-2: live poll cycle ${i + 1} must not sacred-lock Target ${normTargetPageUrl} after ${navFailTypes[i]}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl),
+          `FIX-3 MON-2: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+      const urlDuringCycle = page.url();
+      assert.ok(
+        urlDuringCycle.includes('target.com'),
+        `FIX-3 MON-2: Target tab must stay on target.com during live poll cycle ${i + 1} on ${pageUrl}, got ${urlDuringCycle}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveProducts = afterPollWait?.products || [];
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.ok(
+      liveProducts.every((p) => /walmart\.com/i.test(p.url)),
+      `FIX-3 MON-2: live poll must keep walmart-only products on ${pageUrl}, got ${JSON.stringify(liveProducts)}`
+    );
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 MON-2: live poll must not arm inQueueUrls on Target ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    assert.ok(
+      page.url().includes('target.com'),
+      `FIX-3 MON-2: Target tab must remain on target.com after live poll on ${pageUrl}, got ${page.url()}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl),
+        `FIX-3 MON-2: navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 function routeWaitMs(route) {

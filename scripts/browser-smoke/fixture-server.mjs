@@ -21,6 +21,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetProduct,
     initLog: '[TCH] init',
     journey: 'TGT-1',
+    invariants: ['mon2-live-poll-cycle'],
   },
   {
     host: 'www.target.com',
@@ -28,7 +29,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetCheckoutReview,
     initLog: '[TCH] init',
     journey: 'TGT-4',
-    invariants: ['tgt4-manual-review'],
+    invariants: ['tgt4-manual-review', 'mon2-live-poll-cycle'],
   },
   {
     host: 'www.walmart.com',
@@ -59,6 +60,14 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutQueue,
     initLog: '[WMT] init',
     journey: 'WM-6',
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/ip/mock-mon2-target-live/333',
+    file: MOCK_URLS.walmartProductPreDrop,
+    initLog: '[WMT] init',
+    journey: 'MON-2',
+    invariants: [],
   },
   {
     host: 'www.samsclub.com',
