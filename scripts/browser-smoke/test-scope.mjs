@@ -185,7 +185,7 @@ export const JOURNEYS = {
   'FIX-3': {
     id: 'FIX-3',
     retailer: 'core',
-    summary: 'Fixture e2e asserts journey invariants offline (MON-2 mon2-live-poll-cycle on Target product + checkout (Walmart-only monitor + Target page reload during live poll, retailer filter holds); WM-2/SC-5 no sacred lock, WM-4 sacred lock, TGT-4 manual review)',
+    summary: 'Fixture e2e asserts journey invariants offline (MON-2 mon2-live-poll-cycle on Target product + checkout (Walmart-only monitor + Target page reload during live poll, retailer filter holds); WM-2/SC-5 no sacred lock, WM-4 sacred lock, wm5-pre-timeout-live-poll-cycle on monitored /qp + /checkout queue timeout routes — sacred lock survives live poll before QUEUE_TIMEOUT fires, TGT-4 manual review)',
     impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],
@@ -269,6 +269,10 @@ export const MOCK_URLS = {
   walmartQpRoom: 'fixtures/walmart-qp-room.html',
   walmartCheckoutQueue: 'fixtures/walmart-checkout-queue.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
+  walmartQpRoomMonitoredPretimeout: 'fixtures/walmart-qp-room-monitored-pretimeout.html',
+  walmartCheckoutMonitoredPretimeout: 'fixtures/walmart-checkout-monitored-pretimeout.html',
+  walmartProductPollRecovery: 'fixtures/walmart-product-poll-recovery.html',
+  walmartCheckoutPollRecovery: 'fixtures/walmart-checkout-poll-recovery.html',
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */

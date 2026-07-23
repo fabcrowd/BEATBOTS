@@ -72,6 +72,40 @@ const FIXTURE_MARKERS = {
       'data-automation-id="add-to-cart-btn"',
     ],
   },
+  walmartQpRoomMonitoredPretimeout: {
+    fixtureId: 'walmart-qp-room-monitored-pretimeout',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-qp-room-monitored-pretimeout"',
+      'data-tch-queue-timeout-ms="5000"',
+      'estimated wait time',
+    ],
+  },
+  walmartCheckoutMonitoredPretimeout: {
+    fixtureId: 'walmart-checkout-monitored-pretimeout',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-monitored-pretimeout"',
+      'data-tch-queue-timeout-ms="5000"',
+      'estimated wait time',
+    ],
+  },
+  walmartProductPollRecovery: {
+    fixtureId: 'walmart-product-poll-recovery',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-poll-recovery"',
+      'data-tch-atc-wait-ms="750"',
+    ],
+  },
+  walmartCheckoutPollRecovery: {
+    fixtureId: 'walmart-checkout-poll-recovery',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-poll-recovery"',
+      'data-tch-atc-wait-ms="750"',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {
