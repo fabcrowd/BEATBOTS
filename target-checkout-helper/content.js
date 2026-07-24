@@ -1485,6 +1485,8 @@ let lastReviewAt = 0;
 /** Prevents concurrent handleReviewStep runs for the same URL (e.g. payment .then + watcher). */
 let reviewStepInFlight = false;
 let reviewStepInFlightKey = '';
+/** Prevents concurrent watchForCheckoutStep handler runs (observer + interval race). */
+let checkoutStepRunInFlight = false;
 /** Prevents concurrent handleSignInPage from checkout pending retries during email→password transition. */
 let autoSignInInFlight = false;
 
@@ -1613,9 +1615,11 @@ function watchForCheckoutStep(settings, options = {}) {
       }
       return;
     }
+    if (checkoutStepRunInFlight) return;
+    checkoutStepRunInFlight = true;
+    handled = true;
     try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
     try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-    handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {
       checkoutStepObserver.disconnect();
@@ -1629,10 +1633,14 @@ function watchForCheckoutStep(settings, options = {}) {
       clearTimeout(checkoutStepPollTimer);
       checkoutStepPollTimer = null;
     }
-    if (step === 'shipping') await handleShippingStep(settings);
-    else if (step === 'payment') await handlePaymentStep(settings);
-    else if (step === 'review') await handleReviewStep(settings);
-    else if (step === 'saved') await handleSavedStep(settings);
+    try {
+      if (step === 'shipping') await handleShippingStep(settings);
+      else if (step === 'payment') await handlePaymentStep(settings);
+      else if (step === 'review') await handleReviewStep(settings);
+      else if (step === 'saved') await handleSavedStep(settings);
+    } finally {
+      checkoutStepRunInFlight = false;
+    }
   };
 
   const observer = new MutationObserver(async () => {

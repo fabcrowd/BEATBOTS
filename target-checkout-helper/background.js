@@ -177,8 +177,13 @@ const TARGET_SESSION_RECOVERY_ORIGINS = [
 
 let lastTargetSessionRecoveryMs = 0;
 const TARGET_SESSION_RECOVERY_COOLDOWN_MS = 12 * 60 * 1000;
+let lastSessionHintMs = 0;
+const SESSION_HINT_COOLDOWN_MS = 60 * 1000;
 
 function notifyTargetTabsSessionHint() {
+  const now = Date.now();
+  if (now - lastSessionHintMs < SESSION_HINT_COOLDOWN_MS) return;
+  lastSessionHintMs = now;
   chrome.tabs.query({ url: '*://*.target.com/*' }, (tabs) => {
     for (const tab of tabs) {
       chrome.tabs.sendMessage(tab.id, { type: 'TCH_SESSION_HINT' }).catch(() => {});
