@@ -106,6 +106,16 @@ const FIXTURE_MARKERS = {
       'data-tch-atc-wait-ms="750"',
     ],
   },
+  walmartProductQueueTimeout: {
+    fixtureId: 'walmart-product-queue-timeout',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-queue-timeout"',
+      'data-tch-queue-timeout-ms="750"',
+      'estimated wait time',
+      'data-automation-id="queue-hold-spot-btn"',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {
