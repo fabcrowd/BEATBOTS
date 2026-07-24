@@ -116,6 +116,26 @@ const FIXTURE_MARKERS = {
       'data-automation-id="queue-hold-spot-btn"',
     ],
   },
+  walmartQpRoomTimeout: {
+    fixtureId: 'walmart-qp-room-timeout',
+    journeys: ['WM-4', 'WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-qp-room-timeout"',
+      'data-tch-path="/qp/waiting-room-timeout"',
+      'data-tch-queue-timeout-ms="750"',
+      'estimated wait time',
+    ],
+  },
+  walmartCheckoutQueueTimeout: {
+    fixtureId: 'walmart-checkout-queue-timeout',
+    journeys: ['WM-4', 'WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-queue-timeout"',
+      'data-tch-path="/checkout/unmonitored-timeout"',
+      'data-tch-queue-timeout-ms="750"',
+      'estimated wait time',
+    ],
+  },
 };
 
 function assertFixture(key, relPath) {

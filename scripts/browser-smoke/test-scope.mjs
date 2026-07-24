@@ -185,7 +185,7 @@ export const JOURNEYS = {
   'FIX-3': {
     id: 'FIX-3',
     retailer: 'core',
-    summary: 'Fixture e2e asserts journey invariants offline (MON-2 mon2-live-poll-cycle on Target product + checkout (Walmart-only monitor + Target page reload during live poll, retailer filter holds); WM-2/SC-5 no sacred lock, WM-4 sacred lock, wm5-pre-timeout-live-poll-cycle + wm4-qp/checkout-timeout-with-producturl + wm5-queue-timeout-clears-sacred-lock + wm5-poll-recovery-rearm on monitored /qp + /checkout queue timeout routes, wm5-product-queue-pretimeout + wm5-product-queue-timeout (750ms fast timeout) on monitored product-page queue timeout — sacred lock survives page reload + NAV_FAILED live poll before QUEUE_TIMEOUT fires, TGT-4 manual review)',
+    summary: 'Fixture e2e asserts journey invariants offline (MON-2 mon2-live-poll-cycle on Target product + checkout (Walmart-only monitor + Target page reload during live poll, retailer filter holds); WM-2/SC-5 no sacred lock, WM-4 sacred lock, wm4-qp-timeout-no-producturl + wm4-checkout-timeout-no-producturl + wm4-live-poll-cycle + wm4-poll-recovery-rearm on unmonitored /qp/waiting-room-timeout + /checkout/unmonitored-timeout (750ms NAV_FAILED without sacred lock), wm5-pre-timeout-live-poll-cycle + wm4-qp/checkout-timeout-with-producturl + wm5-queue-timeout-clears-sacred-lock + wm5-poll-recovery-rearm on monitored /qp + /checkout queue timeout routes, wm5-product-queue-pretimeout + wm5-product-queue-timeout (750ms fast timeout) on monitored product-page queue timeout — sacred lock survives page reload + NAV_FAILED live poll before QUEUE_TIMEOUT fires, TGT-4 manual review)',
     impl: ['scripts/browser-smoke/fixture-e2e.mjs'],
     coverage: 'strong',
     tests: ['fixture-e2e.mjs'],
@@ -274,6 +274,8 @@ export const MOCK_URLS = {
   walmartProductPollRecovery: 'fixtures/walmart-product-poll-recovery.html',
   walmartCheckoutPollRecovery: 'fixtures/walmart-checkout-poll-recovery.html',
   walmartProductQueueTimeout: 'fixtures/walmart-product-queue-timeout.html',
+  walmartQpRoomTimeout: 'fixtures/walmart-qp-room-timeout.html',
+  walmartCheckoutQueueTimeout: 'fixtures/walmart-checkout-queue-timeout.html',
 };
 
 /** Lowest journey ID with weak or missing coverage (automation priority #2). */

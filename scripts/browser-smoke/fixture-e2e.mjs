@@ -288,6 +288,119 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
   }
 
+  if (invariants.includes('wm4-qp-timeout-no-producturl')) {
+    assert.ok(
+      logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-6: /qp timeout without monitor must warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-6: /qp timeout must log no-productUrl NAV_FAILED path on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      (after?.inQueueUrls || []).length,
+      0,
+      `FIX-3 WM-6: /qp timeout without productUrl must not arm inQueueUrls on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('wm4-checkout-timeout-no-producturl')) {
+    assert.ok(
+      logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-6: checkout queue timeout without monitor must warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-6: checkout queue timeout must log no-productUrl NAV_FAILED path on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      (after?.inQueueUrls || []).length,
+      0,
+      `FIX-3 WM-6: checkout queue timeout without productUrl must not arm inQueueUrls on ${pageUrl}`
+    );
+  }
+
+  if (invariants.includes('wm4-live-poll-cycle')) {
+    const walmartProbePath =
+      route.path.includes('/qp/') ? '/ip/mock-wm4-qp-live/111' : '/ip/mock-wm4-checkout-live/222';
+    const walmartProbeUrl = `http://${route.host}:${port}${walmartProbePath}`;
+    const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+    const targetMonitorUrl = `http://www.target.com:${port}/p/mock-product`;
+
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: targetMonitorUrl, name: `Fixture WM-4 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 WM-4: queue page reload during live poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      !reloadInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-4: queue page URL must not be sacred lock key after reload on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    const queueRedetectLog = route.path.includes('/qp/')
+      ? logs.some((l) => l.includes('/qp waiting room detected'))
+      : logs.some((l) => l.includes('Queue detected'));
+    assert.ok(
+      queueRedetectLog,
+      `FIX-3 WM-4: queue page reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    const minNoProductUrlWarnings =
+      route.sacredLockProductPath || route.monitorProductPath ? 1 : 2;
+    assert.ok(
+      logs.filter((l) => l.includes('no productUrl in settings')).length >= minNoProductUrlWarnings,
+      `FIX-3 WM-4: queue page reload must warn missing productUrl again on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: walmartProbeUrl });
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 WM-4: live poll cycle ${i + 1} must not arm inQueueUrls on unmonitored ${pageUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl),
+          `FIX-3 WM-4: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 WM-4: live poll must not arm inQueueUrls on unmonitored ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normWalmartProbeUrl),
+        `FIX-3 WM-4: navigationLock alone must not imply sacred lock on unmonitored ${normWalmartProbeUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('mon2-live-poll-cycle')) {
     const walmartProbePath = '/ip/mock-mon2-target-live/333';
     const walmartProbeUrl = `http://www.walmart.com:${port}${walmartProbePath}`;
@@ -603,6 +716,82 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.ok(
       recoveryNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl),
       `FIX-3 WM-5: poll recovery must hold navigationLock on ${normMonitorUrl}, got ${JSON.stringify(recoveryNavLock)}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  if (
+    invariants.includes('wm4-poll-recovery-rearm') ||
+    invariants.includes('wm6-poll-recovery-rearm') ||
+    invariants.includes('sc6-poll-recovery-rearm')
+  ) {
+    const pollRecoveryLabel = invariants.includes('wm4-poll-recovery-rearm')
+      ? 'WM-4'
+      : invariants.includes('wm6-poll-recovery-rearm')
+        ? 'WM-6'
+        : 'SC-6';
+    const monitorUrl = route.pollRecoveryProductPath
+      ? `http://${route.host}:${port}${route.pollRecoveryProductPath}`
+      : route.monitorProductPath
+        ? `http://${route.host}:${port}${route.monitorProductPath}`
+        : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [
+        {
+          url: monitorUrl,
+          name: `Fixture ${pollRecoveryLabel} ${route.journey} poll recovery`,
+          qty: route.monitorQty || 5,
+        },
+      ],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+
+    let sawLockCleared = false;
+    let sawLockRearmed = false;
+    for (let i = 0; i < 24; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 ${pollRecoveryLabel}: poll recovery must never arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      const hasLock = cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl);
+      if (!hasLock) sawLockCleared = true;
+      if (hasLock && sawLockCleared) {
+        sawLockRearmed = true;
+        break;
+      }
+    }
+    assert.ok(
+      sawLockCleared,
+      `FIX-3 ${pollRecoveryLabel}: NAV_FAILED must clear navigationLock for poll retry on ${normMonitorUrl}`
+    );
+    assert.ok(
+      sawLockRearmed,
+      `FIX-3 ${pollRecoveryLabel}: background poll must re-arm navigationLock after error-path NAV_FAILED on ${normMonitorUrl}`
+    );
+    const afterRecovery = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const recoveryInQueue = afterRecovery?.inQueueUrls || [];
+    const recoveryNavLock = afterRecovery?.navigationLock || [];
+    assert.equal(
+      recoveryInQueue.length,
+      0,
+      `FIX-3 ${pollRecoveryLabel}: poll recovery must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(recoveryInQueue)}`
+    );
+    assert.ok(
+      recoveryNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+      `FIX-3 ${pollRecoveryLabel}: poll recovery must hold navigationLock on ${normMonitorUrl}, got ${JSON.stringify(recoveryNavLock)}`
     );
     await sendBg(popup, { type: 'STOP_MONITOR' });
     await new Promise((r) => setTimeout(r, 300));
