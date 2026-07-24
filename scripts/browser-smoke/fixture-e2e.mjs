@@ -370,6 +370,181 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await sendBg(popup, { type: 'STOP_MONITOR' });
     await new Promise((r) => setTimeout(r, 300));
   }
+
+  if (invariants.includes('wm4-qp-timeout-with-producturl')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room detected')),
+      `FIX-3 WM-5: monitored /qp timeout must enter waiting room on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-5: monitored /qp timeout must not warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('/qp waiting room timeout')),
+      `FIX-3 WM-5: monitored /qp timeout must log timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('/qp waiting room timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-5: monitored /qp timeout must use QUEUE_TIMEOUT path (not NAV_FAILED) on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: monitored /qp timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    if (!invariants.includes('wm5-poll-recovery-rearm')) {
+      assert.ok(
+        !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+        `FIX-3 WM-5: monitored /qp timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+      );
+    }
+  }
+
+  if (invariants.includes('wm4-checkout-timeout-with-producturl')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      logs.some((l) => l.includes('Queue detected')),
+      `FIX-3 WM-5: monitored checkout timeout must enter queue wait on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('no productUrl in settings')),
+      `FIX-3 WM-5: monitored checkout timeout must not warn missing productUrl on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Queue wait timed out')),
+      `FIX-3 WM-5: monitored checkout timeout must log timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Queue timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-5: monitored checkout timeout must use QUEUE_TIMEOUT path (not NAV_FAILED) on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: monitored checkout timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    if (!invariants.includes('wm5-poll-recovery-rearm')) {
+      assert.ok(
+        !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+        `FIX-3 WM-5: monitored checkout timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+      );
+    }
+  }
+
+  if (invariants.includes('wm5-queue-timeout-clears-sacred-lock')) {
+    const lockPath =
+      route.monitorProductPath && route.path === route.monitorProductPath
+        ? route.monitorProductPath
+        : route.sacredLockProductPath;
+    const productUrl = `http://${route.host}:${port}${lockPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: QUEUE_TIMEOUT must release sacred lock on ${pageUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+    );
+    if (!invariants.includes('wm5-poll-recovery-rearm')) {
+      assert.ok(
+        !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+        `FIX-3 WM-5: QUEUE_TIMEOUT must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+      );
+      const pollAfter = pollWouldSkipNavigation(
+        normProductUrl,
+        new Set(afterInQueue.map(normalizeProductUrl)),
+        new Set(afterNavLock.map(normalizeProductUrl))
+      );
+      assert.equal(
+        pollAfter,
+        false,
+        `FIX-3 WM-5: background poll must be able to re-navigate after QUEUE_TIMEOUT on ${normProductUrl}`
+      );
+    }
+  }
+
+  if (invariants.includes('wm5-poll-recovery-rearm')) {
+    const recoveryPath =
+      route.pollRecoveryProductPath || route.sacredLockProductPath || route.monitorProductPath;
+    const monitorUrl = recoveryPath
+      ? `http://${route.host}:${port}${recoveryPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    const postTimeout = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      postTimeout?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 WM-5: QUEUE_TIMEOUT must clear inQueueUrls before poll recovery on ${normMonitorUrl}`
+    );
+    assert.ok(
+      !(postTimeout?.navigationLock || []).some((u) => normalizeProductUrl(u) === normMonitorUrl),
+      `FIX-3 WM-5: QUEUE_TIMEOUT must clear navigationLock before poll recovery on ${normMonitorUrl}, got ${JSON.stringify(postTimeout?.navigationLock || [])}`
+    );
+
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: 'Fixture WM-5 poll recovery', qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+
+    let sawLockCleared = false;
+    let sawLockRearmed = false;
+    for (let i = 0; i < 24; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 WM-5: poll recovery after QUEUE_TIMEOUT must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      const hasLock = cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl);
+      if (!hasLock) sawLockCleared = true;
+      if (hasLock && sawLockCleared) {
+        sawLockRearmed = true;
+        break;
+      }
+    }
+    assert.ok(
+      sawLockCleared,
+      `FIX-3 WM-5: poll must clear navigationLock via NAV_FAILED before re-arm on ${normMonitorUrl}`
+    );
+    assert.ok(
+      sawLockRearmed,
+      `FIX-3 WM-5: background poll must re-arm navigationLock after QUEUE_TIMEOUT on ${normMonitorUrl}`
+    );
+    const afterRecovery = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const recoveryInQueue = afterRecovery?.inQueueUrls || [];
+    const recoveryNavLock = afterRecovery?.navigationLock || [];
+    assert.equal(
+      recoveryInQueue.length,
+      0,
+      `FIX-3 WM-5: poll recovery must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(recoveryInQueue)}`
+    );
+    assert.ok(
+      recoveryNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+      `FIX-3 WM-5: poll recovery must hold navigationLock on ${normMonitorUrl}, got ${JSON.stringify(recoveryNavLock)}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 function routeWaitMs(route) {
