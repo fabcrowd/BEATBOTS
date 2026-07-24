@@ -119,6 +119,8 @@ async function applyRouteStorage(popup, route, port) {
         },
       ],
     };
+  } else {
+    data.monitor = { active: false, products: [] };
   }
 
   await setStorage(popup, data);
