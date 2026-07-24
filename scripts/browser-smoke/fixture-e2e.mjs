@@ -160,7 +160,7 @@ async function attachCdpConsoleCapture(page) {
 }
 
 /** WM-5: sacred lock must survive live poll before QUEUE_TIMEOUT fires (monitored timeout routes). */
-async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port) {
+async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs) {
   const lockPath =
     route.monitorProductPath && route.path === route.monitorProductPath
       ? route.monitorProductPath
@@ -170,6 +170,7 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port) {
   }
   const lockUrl = `http://${route.host}:${port}${lockPath}`;
   const normLockUrl = normalizeProductUrl(lockUrl);
+  const pageUrl = `http://${route.host}:${port}${route.path}`;
 
   let initialInQueue = [];
   for (let i = 0; i < 16; i++) {
@@ -182,6 +183,38 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port) {
     initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
     `FIX-3 WM-5: pre-timeout live poll expects sacred lock on ${normLockUrl} before QUEUE_TIMEOUT, got inQueueUrls=${JSON.stringify(initialInQueue)}`
   );
+
+  await new Promise((r) => setTimeout(r, 50));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 2000));
+  const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const reloadInQueue = afterReload?.inQueueUrls || [];
+  const reloadNavLock = afterReload?.navigationLock || [];
+  assert.ok(
+    reloadInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: pre-timeout reload must preserve sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(reloadInQueue)}`
+  );
+  assert.equal(
+    pollWouldSkipNavigation(normLockUrl, new Set(reloadInQueue), new Set(reloadNavLock)),
+    true,
+    `FIX-3 WM-5: pre-timeout reload must skip navigate while sacred lock holds on ${normLockUrl}`
+  );
+  if (route.path.includes('/qp/')) {
+    assert.ok(
+      logs.filter((l) => l.includes('/qp waiting room detected')).length >= 2,
+      `FIX-3 WM-5: pre-timeout /qp reload must re-detect waiting room on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+  } else if (route.path.includes('checkout')) {
+    assert.ok(
+      logs.filter((l) => l.includes('Queue detected')).length >= 2,
+      `FIX-3 WM-5: pre-timeout checkout reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+  } else {
+    assert.ok(
+      logs.filter((l) => l.includes('Product-page queue detected')).length >= 2,
+      `FIX-3 WM-5: pre-timeout product-page reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+  }
 
   await new Promise((r) => setTimeout(r, 50));
   await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
@@ -406,6 +439,35 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     }
   }
 
+  if (invariants.includes('wm5-product-queue-timeout')) {
+    const productUrl = `http://${route.host}:${port}${route.monitorProductPath || route.path}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    assert.ok(
+      logs.some((l) => l.includes('Product-page queue detected')),
+      `FIX-3 WM-5: product-page queue timeout must enter queue wait on ${pageUrl}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Product-page queue wait timed out')),
+      `FIX-3 WM-5: product-page queue timeout must log timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Queue timeout') && l.includes('no productUrl')),
+      `FIX-3 WM-5: product-page queue timeout must use QUEUE_TIMEOUT path (not NAV_FAILED) on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: product-page queue timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: product-page queue timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
   if (invariants.includes('wm4-checkout-timeout-with-producturl')) {
     const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
     const normProductUrl = normalizeProductUrl(productUrl);
@@ -605,7 +667,7 @@ async function main() {
     assert.ok(fixtureAttr, `FIX-2 ${route.journey}: missing data-tch-fixture on ${url}`);
 
     if (route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')) {
-      await assertWm5PreTimeoutLivePollCycle(popup, route, page, port);
+      await assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs);
     }
 
     await new Promise((r) => setTimeout(r, routeWaitMs(route)));
