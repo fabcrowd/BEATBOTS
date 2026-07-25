@@ -982,6 +982,7 @@ tabWalmart.addEventListener('click', () => setActiveTab('walmart'));
 tabForms.addEventListener('click',   () => setActiveTab('forms'));
 tabAccounts?.addEventListener('click', () => setActiveTab('accounts'));
 tabGuide.addEventListener('click',   () => setActiveTab('guide'));
+setActiveTab('main');
 
 document.addEventListener('click', (e) => {
   const link = e.target.closest('.guide-setting-link');
