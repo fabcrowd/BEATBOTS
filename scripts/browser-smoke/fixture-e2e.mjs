@@ -1607,7 +1607,9 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
 
     let sawLockCleared = false;
     let sawLockRearmed = false;
-    for (let i = 0; i < 24; i++) {
+    // Cart checkout-missing needs product → cart → NAV_FAILED per cycle (~10s each).
+    const pollRecoveryMaxCycles = invariants.includes('wm6-cart-checkout-missing') ? 48 : 24;
+    for (let i = 0; i < pollRecoveryMaxCycles; i++) {
       await new Promise((r) => setTimeout(r, 500));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
