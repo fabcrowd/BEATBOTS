@@ -148,6 +148,31 @@
   }
 
   /**
+   * Body/header text heuristics for logged-in state — excludes guest-checkout copy.
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function bodyTextLooksSignedIn(text) {
+    var body = String(text || '').slice(0, 14000);
+    if (/\bSign out\b/i.test(body) || /\bSign Out\b/i.test(body)) return true;
+    if (/\bHi,?\s+\w/i.test(body)) return true;
+    if (/welcome back/i.test(body)) return true;
+    if (/signed in as(?!\s+a\s+guest)/i.test(body)) return true;
+    if (/checking out as(?!\s+(?:a\s+)?guest)/i.test(body)) return true;
+    return false;
+  }
+
+  /**
+   * Checkout auth modal copy indicating an already-signed-in account.
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function modalTextLooksSignedInConfirm(text) {
+    var tx = String(text || '').toLowerCase();
+    return /signed in as(?!\s+a\s+guest)|welcome back|use this account|checking out as(?!\s+(?:a\s+)?guest)/.test(tx);
+  }
+
+  /**
    * @param {'ok'|'fail'|'unknown'|'checking'} state
    * @param {string} [labelKey]
    * @returns {string}
@@ -171,6 +196,8 @@
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,
+    bodyTextLooksSignedIn: bodyTextLooksSignedIn,
+    modalTextLooksSignedInConfirm: modalTextLooksSignedInConfirm,
     formatLoginStatusLabel: formatLoginStatusLabel,
     LOGIN_STATUS_LABELS: LOGIN_STATUS_LABELS,
   };
