@@ -67,7 +67,13 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartQpRoom,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['no-sacred-lock', 'wm4-qp-no-producturl', 'wm4-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'wm4-qp-no-producturl',
+      'wm4-live-poll-cycle',
+      'wm4-poll-recovery-rearm',
+    ],
+    pollRecoveryProductPath: '/ip/mock-qp-unmonitored-recovery/996',
   },
   {
     host: 'www.walmart.com',
@@ -97,8 +103,10 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'wm4-checkout-no-producturl',
       'wm4-live-poll-cycle',
+      'wm4-poll-recovery-rearm',
       'mon2-samsclub-live-poll-cycle',
     ],
+    pollRecoveryProductPath: '/ip/mock-checkout-unmonitored-recovery/997',
   },
   {
     host: 'www.walmart.com',
