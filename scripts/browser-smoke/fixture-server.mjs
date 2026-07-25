@@ -218,7 +218,6 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: ['no-sacred-lock', 'wm6-cart-checkout-missing', 'wm6-cart-live-poll-cycle', 'wm6-poll-recovery-rearm'],
     monitorProductPath: '/ip/mock-cart-missing/888',
     pollRecoveryProductPath: '/ip/mock-cart-missing/888',
-    monitorQty: 1,
   },
   {
     host: 'www.walmart.com',

@@ -817,7 +817,14 @@ async function wmHandleCart(settings) {
   if (!checkoutBtn) {
     wmShowToast('Checkout button not found — take over manually', 'error');
     console.warn('[WMT] Checkout button not found on cart page — releasing navigation lock');
-    wmSignalNavFailed(settings?.productUrl || location.href);
+    const productUrl = settings?.productUrl || null;
+    wmSignalNavFailed(productUrl || location.href);
+    // WM-6 poll recovery: background poll skips tabs in /cart — return to product URL
+    // so the next cycle can re-arm navigationLock (no sacred lock on this path).
+    if (productUrl) {
+      await wmSleep(100);
+      window.location.href = productUrl;
+    }
     return;
   }
   console.log('[WMT] Clicking checkout button');

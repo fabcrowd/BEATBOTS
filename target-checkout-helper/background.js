@@ -1145,7 +1145,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // /cart or /checkout. Poll skips isInCheckoutFlow tabs — return to product URL so
       // the next cycle can re-arm navigationLock (never when sacred lock is active).
       if (normFailUrl && message.type === 'WALMART_NAV_FAILED' && !inQueueUrls.has(normFailUrl)) {
-        const failTabId = urlToTabId[normFailUrl];
+        const failTabId = urlToTabId[normFailUrl] ?? sender.tab?.id;
         if (failTabId) {
           void (async () => {
             try {
