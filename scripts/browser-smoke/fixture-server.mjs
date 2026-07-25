@@ -129,7 +129,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPxCaptcha,
     initLog: '[WMT] PX/loading page detected',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'px-timeout-nav-failed', 'wm6-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'px-timeout-nav-failed',
+      'wm6-live-poll-cycle',
+      'wm6-poll-recovery-rearm',
+    ],
     sacredLockProductPath: '/ip/mock-px-captcha/556',
   },
   {
@@ -138,7 +143,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartProductPxBlock,
     initLog: '[WMT] PX/loading page detected',
     journey: 'WM-6',
-    invariants: ['no-sacred-lock', 'px-timeout-nav-failed', 'wm6-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'px-timeout-nav-failed',
+      'wm6-live-poll-cycle',
+      'wm6-poll-recovery-rearm',
+    ],
     sacredLockProductPath: '/ip/mock-px-block/557',
   },
   {
@@ -168,6 +178,7 @@ export const FIXTURE_E2E_ROUTES = [
       'px-timeout-nav-failed',
       'px-timeout-ms-override',
       'wm6-live-poll-cycle',
+      'wm6-poll-recovery-rearm',
     ],
     sacredLockProductPath: '/ip/mock-px-override/558',
     pxTimeoutMs: 750,
