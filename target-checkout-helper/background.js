@@ -652,14 +652,22 @@ async function runBackgroundPoll() {
     });
     if (!pendingProducts.length) { await sleep(1000); continue; }
 
+    // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
+    const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
+    const dropArmed = !dropMs || accurateNow() >= dropMs;
+
     // Split by retailer — Walmart doesn't need the Target API key.
     const targetProducts  = pendingProducts.filter(p => !extractWalmartItemId(p.url));
     const walmartProducts = pendingProducts.filter(p =>  extractWalmartItemId(p.url));
+    const samsclubProducts = pendingProducts.filter(
+      (p) => typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(p.url) === 'samsclub'
+    );
 
     const hasTargetWork  = targetProducts.length > 0 && !!cachedApiKey;
     const hasWalmartWork = walmartProducts.length > 0;
-    if (!hasTargetWork && !hasWalmartWork) {
-      // No Target API key yet and no Walmart products — wait and try to get key.
+    const hasSamsclubWork = samsclubProducts.length > 0 && !!monitor.skipMonitoring && dropArmed;
+    if (!hasTargetWork && !hasWalmartWork && !hasSamsclubWork) {
+      // No Target API key yet and no Walmart/Sam's skip-monitoring work — wait and try to get key.
       if (targetProducts.length > 0 && !cachedApiKey) requestApiKeyFromTabs();
       await sleep(1000);
       continue;
@@ -689,10 +697,6 @@ async function runBackgroundPoll() {
       syncServerClock().catch(() => {});
     }
 
-    // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
-    const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
-    const dropArmed = !dropMs || accurateNow() >= dropMs;
-
     // Per-product skip monitoring for Target: treat product as in-stock when drop is armed.
     for (const tp of targetProducts) {
       if (!tp.skipMonitoring || !dropArmed) continue;
@@ -711,6 +715,13 @@ async function runBackgroundPoll() {
         // but dropExpectedAt hasn't arrived, this keeps the bot quiet until go-time.
         const res = await checkWalmartItemStock(itemId);
         if (res != null) stockMap.set(normalizeProductUrl(wp.url), res);
+      }
+    }
+
+    // Sam's Club FCFS — skip monitoring arms product URL as in-stock (SC-5: no sacred lock).
+    if (monitor.skipMonitoring && dropArmed) {
+      for (const sp of samsclubProducts) {
+        stockMap.set(normalizeProductUrl(sp.url), { stock: true, qty: 999 });
       }
     }
 
@@ -830,7 +841,15 @@ async function runBackgroundPoll() {
       let navigated = false;
       if (tabId) {
         try {
-          await chrome.tabs.update(tabId, { url: product.url, active: true });
+          const currentTab = await chrome.tabs.get(tabId);
+          const currentNorm = normalizeProductUrl(currentTab?.url || '');
+          // Same-URL update is a no-op in Chrome — reload so content script re-runs
+          // (FCFS NAV_FAILED poll recovery, WM error-path retry).
+          if (currentNorm === normUrl) {
+            await chrome.tabs.reload(tabId);
+          } else {
+            await chrome.tabs.update(tabId, { url: product.url, active: true });
+          }
           navigated = true;
         } catch { /* tab may have been closed */ }
       }
@@ -839,7 +858,7 @@ async function runBackgroundPoll() {
         // Skip any tab already in checkout flow
         const match = existing.find(t => t.url && normalizeProductUrl(t.url) === normUrl && !isInCheckoutFlow(t.url));
         if (match) {
-          chrome.tabs.update(match.id, { url: product.url, active: true }).catch(() => {});
+          chrome.tabs.reload(match.id).catch(() => {});
           navigated = true;
         }
       }
@@ -848,6 +867,12 @@ async function runBackgroundPoll() {
       }
       // Lock this URL — content script is now loading on the product page.
       // Don't navigate again until it reports back (ATC_SUCCESS or NAV_FAILED).
+      // Re-check after async tab work — stopMonitor may have run while we navigated
+      // or while we read monitor state from storage; sacred lock may have been set too.
+      if (!bgPollActive) break;
+      const { monitor: monAfterNav } = await chrome.storage.local.get('monitor').catch(() => ({}));
+      if (!bgPollActive || !monAfterNav?.active) break;
+      if (inQueueUrls.has(normUrl)) break;
       navigationLock.add(normUrl);
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
       // Avoid hammering the same product multiple times per cycle.
@@ -1107,6 +1132,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       stopMonitor().then(() => sendResponse({ ok: true }));
       return true;
 
+    case 'NAV_FAILED':
     case 'WALMART_NAV_FAILED': {
       // Content script signals it couldn't proceed (PX timeout, ATC unavailable, etc.)
       // Release the navigation lock so the poll can try again on next cycle.
@@ -1114,6 +1140,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (normFailUrl) {
         navigationLock.delete(normFailUrl);
         console.log('[TCH bg] Navigation lock released (failed):', normFailUrl);
+      }
+      // WM-6: after cart/checkout error-path NAV_FAILED the monitor tab can remain on
+      // /cart or /checkout. Poll skips isInCheckoutFlow tabs — return to product URL so
+      // the next cycle can re-arm navigationLock (never when sacred lock is active).
+      if (normFailUrl && message.type === 'WALMART_NAV_FAILED' && !inQueueUrls.has(normFailUrl)) {
+        const failTabId = urlToTabId[normFailUrl] ?? sender.tab?.id;
+        if (failTabId) {
+          void (async () => {
+            try {
+              const tab = await chrome.tabs.get(failTabId);
+              if (!tab?.url || !isInCheckoutFlow(tab.url)) return;
+              const { monitor } = await chrome.storage.local.get('monitor');
+              if (!monitor?.active || !bgPollActive) return;
+              const product = monitor.products?.find((p) => normalizeProductUrl(p.url) === normFailUrl);
+              if (product?.url) {
+                await chrome.tabs.update(failTabId, { url: product.url });
+              }
+            } catch (_) {}
+          })();
+        }
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'WALMART_QUEUE_TIMEOUT': {
+      // Queue wait exceeded max duration — release sacred lock so poll/user can recover.
+      const normTimeoutUrl = normalizeProductUrl(message.url || '');
+      if (normTimeoutUrl) {
+        inQueueUrls.delete(normTimeoutUrl);
+        navigationLock.delete(normTimeoutUrl);
+        console.log('[TCH bg] Queue timeout — released sacred lock:', normTimeoutUrl);
       }
       sendResponse({ ok: true });
       return true;
@@ -1171,6 +1229,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const baseMonitor = monitor || { active: false, products: [], counts: {} };
         sendResponse({
           ...baseMonitor,
+          inQueueUrls: [...inQueueUrls],
+          navigationLock: [...navigationLock],
           checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
         });
       });
@@ -1606,18 +1666,27 @@ async function handleATCSuccess(url, tabId) {
   if (product && currentCount < product.qty) {
     // Detach debugger before reload — next DEBUGGER_CLICK will re-attach on demand.
     tchDebuggerDetach().catch(() => {});
-    setTimeout(() => {
-      chrome.tabs.reload(tabId).catch(() => {});
-    }, (monitor.refreshInterval || 1) * 1000);
+    // Walmart content navigates product → cart → checkout after ATC; reloading here
+    // races that flow and breaks WM-6 poll recovery. Poll + NAV_FAILED retry instead.
+    const isWalmart = !!extractWalmartItemId(url);
+    if (!isWalmart) {
+      setTimeout(() => {
+        chrome.tabs.reload(tabId).catch(() => {});
+      }, (monitor.refreshInterval || 1) * 1000);
+    }
     return;
   }
 
   // Consider "done" if every product whose ID can be resolved is satisfied.
-  // Products with no extractable TCIN *and* no Walmart item ID can't be auto-ATC'd — skip them.
+  // Unknown retailers (no TCIN / Walmart id / Sam's Club host) can't be auto-ATC'd — skip them.
   const allDone = monitor.products.every((p) => {
     const c = monitor.counts[normalizeProductUrl(p.url)] || 0;
     if (c >= p.qty) return true;
-    return !extractTcin(p.url) && !extractWalmartItemId(p.url);
+    if (extractTcin(p.url) || extractWalmartItemId(p.url)) return false;
+    if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(p.url) === 'samsclub') {
+      return false;
+    }
+    return true;
   });
 
   if (allDone) {
