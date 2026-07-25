@@ -841,7 +841,15 @@ async function runBackgroundPoll() {
       let navigated = false;
       if (tabId) {
         try {
-          await chrome.tabs.update(tabId, { url: product.url, active: true });
+          const currentTab = await chrome.tabs.get(tabId);
+          const currentNorm = normalizeProductUrl(currentTab?.url || '');
+          // Same-URL update is a no-op in Chrome — reload so content script re-runs
+          // (FCFS NAV_FAILED poll recovery, WM error-path retry).
+          if (currentNorm === normUrl) {
+            await chrome.tabs.reload(tabId);
+          } else {
+            await chrome.tabs.update(tabId, { url: product.url, active: true });
+          }
           navigated = true;
         } catch { /* tab may have been closed */ }
       }
@@ -850,7 +858,7 @@ async function runBackgroundPoll() {
         // Skip any tab already in checkout flow
         const match = existing.find(t => t.url && normalizeProductUrl(t.url) === normUrl && !isInCheckoutFlow(t.url));
         if (match) {
-          chrome.tabs.update(match.id, { url: product.url, active: true }).catch(() => {});
+          chrome.tabs.reload(match.id).catch(() => {});
           navigated = true;
         }
       }
@@ -1645,11 +1653,15 @@ async function handleATCSuccess(url, tabId) {
   }
 
   // Consider "done" if every product whose ID can be resolved is satisfied.
-  // Products with no extractable TCIN *and* no Walmart item ID can't be auto-ATC'd — skip them.
+  // Unknown retailers (no TCIN / Walmart id / Sam's Club host) can't be auto-ATC'd — skip them.
   const allDone = monitor.products.every((p) => {
     const c = monitor.counts[normalizeProductUrl(p.url)] || 0;
     if (c >= p.qty) return true;
-    return !extractTcin(p.url) && !extractWalmartItemId(p.url);
+    if (extractTcin(p.url) || extractWalmartItemId(p.url)) return false;
+    if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(p.url) === 'samsclub') {
+      return false;
+    }
+    return true;
   });
 
   if (allDone) {

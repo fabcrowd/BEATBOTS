@@ -233,8 +233,15 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-if (document.body) {
-  scInit();
-} else {
-  document.addEventListener('DOMContentLoaded', scInit, { once: true });
+function scScheduleInit() {
+  if (document.body) scInit();
+  else document.addEventListener('DOMContentLoaded', scInit, { once: true });
 }
+
+// Poll may reload the tab while scInit is waiting for ATC — allow the next pass to run.
+window.addEventListener('pageshow', () => {
+  scInitInFlight = false;
+  scScheduleInit();
+});
+
+scScheduleInit();
