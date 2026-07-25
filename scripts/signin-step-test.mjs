@@ -94,6 +94,14 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+assert(S.bodyTextLooksSignedIn('Hi, Alex\nSign out'), 'greeting looks signed in');
+assert(S.bodyTextLooksSignedIn('Welcome back!'), 'welcome back looks signed in');
+assert(S.bodyTextLooksSignedIn('You are signed in as user@example.com'), 'signed in as email');
+assert(!S.bodyTextLooksSignedIn('Continue checking out as a guest'), 'guest checkout is not signed in');
+assert(!S.bodyTextLooksSignedIn('Checking out as a guest? Sign in for faster checkout.'), 'guest prompt is not signed in');
+assert(S.modalTextLooksSignedInConfirm('signed in as user@example.com'), 'modal signed in confirm');
+assert(!S.modalTextLooksSignedInConfirm('checking out as a guest'), 'modal guest is not signed in confirm');
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);

@@ -470,8 +470,11 @@ function looksLoggedInOnTarget() {
     'a[data-test*="signout" i], a[href*="/account/logout"]'
   )) return true;
   const body = (document.body?.innerText || '').slice(0, 14000);
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.bodyTextLooksSignedIn) {
+    return TCH_SIGNIN_STEP.bodyTextLooksSignedIn(body);
+  }
   return /\bSign out\b/i.test(body) || /\bSign Out\b/i.test(body) || /\bHi,?\s+\w/i.test(body)
-    || /signed in as|welcome back|checking out as/i.test(body);
+    || /signed in as(?!\s+a\s+guest)|welcome back|checking out as(?!\s+(?:a\s+)?guest)/i.test(body);
 }
 
 function getCheckoutAuthRoot() {
@@ -498,7 +501,11 @@ function isCheckoutSignedInConfirm() {
   const root = getCheckoutAuthRoot();
   const scope = root || document;
   const tx = (scope.innerText || '').toLowerCase();
-  if (/signed in as|welcome back|use this account|checking out as/.test(tx)) return true;
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.modalTextLooksSignedInConfirm) {
+    if (TCH_SIGNIN_STEP.modalTextLooksSignedInConfirm(tx)) return true;
+  } else if (/signed in as(?!\s+a\s+guest)|welcome back|use this account|checking out as(?!\s+(?:a\s+)?guest)/.test(tx)) {
+    return true;
+  }
   if (scope.querySelector('[data-test="accountUserName"], [data-test="account-greeting"]')) return true;
   const email = scope.querySelector('input#username, input[type="email"]');
   if (email && isVisible(email) && (email.readOnly || email.disabled)) return true;
@@ -784,6 +791,21 @@ function writeRetryState(state) {
   } catch {}
 }
 
+function stopCheckoutStepWatcher() {
+  if (checkoutStepObserver) {
+    checkoutStepObserver.disconnect();
+    checkoutStepObserver = null;
+  }
+  if (checkoutStepPollId) {
+    clearInterval(checkoutStepPollId);
+    checkoutStepPollId = null;
+  }
+  if (checkoutStepPollTimer) {
+    clearTimeout(checkoutStepPollTimer);
+    checkoutStepPollTimer = null;
+  }
+}
+
 function clearCheckoutRetryState() {
   checkoutRetryScheduled = false;
   if (checkoutRetryTimer) {
@@ -796,6 +818,7 @@ function clearCheckoutRetryState() {
   }
   stockWatchActive = false;
   stockWatchPolls = 0;
+  stopCheckoutStepWatcher();
   try { sessionStorage.removeItem(RETRY_STATE_KEY); } catch {}
   try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
   try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
@@ -1574,24 +1597,13 @@ async function handleCheckoutPendingStep(settings, step) {
 }
 
 function watchForCheckoutStep(settings, options = {}) {
-  if (checkoutStepObserver) {
-    checkoutStepObserver.disconnect();
-    checkoutStepObserver = null;
-  }
-  if (checkoutStepPollId) {
-    clearInterval(checkoutStepPollId);
-    checkoutStepPollId = null;
-  }
-  if (checkoutStepPollTimer) {
-    clearTimeout(checkoutStepPollTimer);
-    checkoutStepPollTimer = null;
-  }
+  stopCheckoutStepWatcher();
 
   let handled = false;
   let pendingRetryCount = 0;
   let lastPendingRetryMs = 0;
   const runStep = async (step) => {
-    if (handled) return;
+    if (handled || !runtimeEnabled) return;
     if (step === 'unknown' || step === 'signin') {
       if (autoSignInInFlight) return;
       const shouldRetry = typeof TCH_SIGNIN_STEP !== 'undefined'
