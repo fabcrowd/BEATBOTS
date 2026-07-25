@@ -1141,6 +1141,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         navigationLock.delete(normFailUrl);
         console.log('[TCH bg] Navigation lock released (failed):', normFailUrl);
       }
+      // WM-6: after cart/checkout error-path NAV_FAILED the monitor tab can remain on
+      // /cart or /checkout. Poll skips isInCheckoutFlow tabs — return to product URL so
+      // the next cycle can re-arm navigationLock (never when sacred lock is active).
+      if (normFailUrl && message.type === 'WALMART_NAV_FAILED' && !inQueueUrls.has(normFailUrl)) {
+        const failTabId = urlToTabId[normFailUrl];
+        if (failTabId) {
+          void (async () => {
+            try {
+              const tab = await chrome.tabs.get(failTabId);
+              if (!tab?.url || !isInCheckoutFlow(tab.url)) return;
+              const { monitor } = await chrome.storage.local.get('monitor');
+              if (!monitor?.active || !bgPollActive) return;
+              const product = monitor.products?.find((p) => normalizeProductUrl(p.url) === normFailUrl);
+              if (product?.url) {
+                await chrome.tabs.update(failTabId, { url: product.url });
+              }
+            } catch (_) {}
+          })();
+        }
+      }
       sendResponse({ ok: true });
       return true;
     }
@@ -1646,9 +1666,14 @@ async function handleATCSuccess(url, tabId) {
   if (product && currentCount < product.qty) {
     // Detach debugger before reload — next DEBUGGER_CLICK will re-attach on demand.
     tchDebuggerDetach().catch(() => {});
-    setTimeout(() => {
-      chrome.tabs.reload(tabId).catch(() => {});
-    }, (monitor.refreshInterval || 1) * 1000);
+    // Walmart content navigates product → cart → checkout after ATC; reloading here
+    // races that flow and breaks WM-6 poll recovery. Poll + NAV_FAILED retry instead.
+    const isWalmart = !!extractWalmartItemId(url);
+    if (!isWalmart) {
+      setTimeout(() => {
+        chrome.tabs.reload(tabId).catch(() => {});
+      }, (monitor.refreshInterval || 1) * 1000);
+    }
     return;
   }
 
