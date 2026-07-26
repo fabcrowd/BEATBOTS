@@ -832,7 +832,13 @@ async function runBackgroundPoll() {
       let navigated = false;
       if (tabId) {
         try {
-          await chrome.tabs.update(tabId, { url: product.url, active: true });
+          const currentTab = await chrome.tabs.get(tabId);
+          const onSameProduct = currentTab?.url && normalizeProductUrl(currentTab.url) === normUrl;
+          if (onSameProduct && !isInCheckoutFlow(currentTab.url)) {
+            await chrome.tabs.reload(tabId);
+          } else {
+            await chrome.tabs.update(tabId, { url: product.url, active: true });
+          }
           navigated = true;
         } catch { /* tab may have been closed */ }
       }
@@ -841,7 +847,7 @@ async function runBackgroundPoll() {
         // Skip any tab already in checkout flow
         const match = existing.find(t => t.url && normalizeProductUrl(t.url) === normUrl && !isInCheckoutFlow(t.url));
         if (match) {
-          chrome.tabs.update(match.id, { url: product.url, active: true }).catch(() => {});
+          chrome.tabs.reload(match.id).catch(() => {});
           navigated = true;
         }
       }

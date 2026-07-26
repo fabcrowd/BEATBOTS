@@ -733,7 +733,20 @@ const CART_READY_KEY = 'tch:cartReady'; // set after ATC succeeds; cleared on ch
 const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
 const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
-const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; cleared on checkout load
+const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; confirmed once checkout passes auth gate
+
+/** Fire deferred monitor ATC_SUCCESS only after checkout shows a real step (not sign-in shell). */
+function maybeConfirmMonitorBinAtc() {
+  try {
+    const binUrl = sessionStorage.getItem(MONITOR_BIN_PENDING_KEY);
+    if (!binUrl) return false;
+    sessionStorage.removeItem(MONITOR_BIN_PENDING_KEY);
+    chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: binUrl }).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
 let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
@@ -1499,17 +1512,13 @@ function markCheckoutFlow(step) {
 
 async function handleCheckoutPage(settings) {
   markCheckoutFlow('page_ready');
-  // If a monitor Buy It Now click was pending confirmation, fire ATC_SUCCESS now that
-  // checkout has loaded (the only reliable signal we have after cross-page navigation).
-  try {
-    const binUrl = sessionStorage.getItem(MONITOR_BIN_PENDING_KEY);
-    if (binUrl) {
-      sessionStorage.removeItem(MONITOR_BIN_PENDING_KEY);
-      chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url: binUrl }).catch(() => {});
-    }
-  } catch {}
   const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
+  // BIN defers ATC_SUCCESS until checkout passes sign-in — avoids false counts and
+  // handleATCSuccess reloading the checkout tab when monitor qty > 1.
+  if (step !== 'signin' && step !== 'unknown') {
+    maybeConfirmMonitorBinAtc();
+  }
   if (step === 'shipping')    return handleShippingStep(settings);
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
@@ -1615,6 +1624,7 @@ function watchForCheckoutStep(settings, options = {}) {
     }
     try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
     try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+    maybeConfirmMonitorBinAtc();
     handled = true;
     markCheckoutFlow(`${step}_detected`);
     if (checkoutStepObserver) {
