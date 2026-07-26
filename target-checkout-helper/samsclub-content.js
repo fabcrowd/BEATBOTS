@@ -143,7 +143,7 @@ async function scHandleProductPage(settings) {
   scSignalAtcSuccess(settings.productUrl || location.href);
 
   // SC-5/SC-6: multi-qty monitor — stay on product so background poll can re-arm
-  // navigationLock (/cart trips isInCheckoutFlow and blocks poll recovery).
+  // (cart path blocks poll retry via isInCheckoutFlow).
   const data = await scGetSettings();
   const mon = data.monitor;
   if (mon?.active && settings.productUrl) {
