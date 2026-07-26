@@ -848,27 +848,49 @@ async function wmHandlePayment(settings) {
   }
 }
 
+let wmReviewStepInFlight = false;
+let wmReviewStepInFlightKey = '';
+let wmLastReviewKey = null;
+let wmLastReviewAt = 0;
+const WM_REVIEW_DEDUP_MS = 15000;
+
 async function wmHandleReview(settings) {
-  console.log('[WMT] Review reached');
+  const reviewKey = `${location.pathname}${location.search}`;
+  const now = Date.now();
+  if (wmLastReviewKey === reviewKey && now - wmLastReviewAt < WM_REVIEW_DEDUP_MS) return;
+  if (wmReviewStepInFlight && wmReviewStepInFlightKey === reviewKey) return;
+  wmReviewStepInFlight = true;
+  wmReviewStepInFlightKey = reviewKey;
+
   try {
-    if (!sessionStorage.getItem('wm:checkoutTelemetrySent')) {
-      sessionStorage.setItem('wm:checkoutTelemetrySent', '1');
-      await wmReportCheckoutSuccess();
+    console.log('[WMT] Review reached');
+    try {
+      if (!sessionStorage.getItem('wm:checkoutTelemetrySent')) {
+        sessionStorage.setItem('wm:checkoutTelemetrySent', '1');
+        await wmReportCheckoutSuccess();
+      }
+    } catch (_) {}
+    if (settings.checkoutSound !== false) wmPlayBeep();
+    if (!settings.autoPlaceOrder) {
+      wmShowToast('Reached review — Place Order remains manual', 'persistent');
+      wmLastReviewKey = reviewKey;
+      wmLastReviewAt = Date.now();
+      return;
     }
-  } catch (_) {}
-  if (settings.checkoutSound !== false) wmPlayBeep();
-  if (!settings.autoPlaceOrder) {
-    wmShowToast('Reached review — Place Order remains manual', 'persistent');
-    return;
-  }
-  const btn = document.querySelector(WM_SEL.placeOrder) || wmFindByText('place order');
-  if (btn && wmIsVisible(btn)) {
-    wmShowToast('Auto placing order…', 'success');
-    console.log('[WMT] Auto-clicking Place Order');
-    await wmDebuggerClick(btn);
-  } else {
-    wmShowToast('Place Order button not found — take over manually', 'error');
-    console.warn('[WMT] Place Order button not found');
+    const btn = document.querySelector(WM_SEL.placeOrder) || wmFindByText('place order');
+    if (btn && wmIsVisible(btn)) {
+      wmShowToast('Auto placing order…', 'success');
+      console.log('[WMT] Auto-clicking Place Order');
+      await wmDebuggerClick(btn);
+      wmLastReviewKey = reviewKey;
+      wmLastReviewAt = Date.now();
+    } else {
+      wmShowToast('Place Order button not found — take over manually', 'error');
+      console.warn('[WMT] Place Order button not found');
+    }
+  } finally {
+    wmReviewStepInFlight = false;
+    wmReviewStepInFlightKey = '';
   }
 }
 
