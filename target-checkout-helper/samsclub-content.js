@@ -141,6 +141,28 @@ async function scHandleProductPage(settings) {
   console.log('[SC] Clicking ATC button');
   atcBtn.click();
   scSignalAtcSuccess(settings.productUrl || location.href);
+
+  // SC-5/SC-6: multi-qty monitor — stay on product so background poll can re-arm
+  // navigationLock (/cart trips isInCheckoutFlow and blocks poll recovery).
+  const data = await scGetSettings();
+  const mon = data.monitor;
+  if (mon?.active && settings.productUrl) {
+    try {
+      const pathNorm = new URL(settings.productUrl).pathname;
+      const matched = (mon.products || []).find((p) => {
+        try {
+          return new URL(p.url).pathname === pathNorm;
+        } catch {
+          return false;
+        }
+      });
+      if (matched && (matched.qty || 1) > 1) {
+        console.log('[SC] Multi-qty monitor — staying on product for poll recovery');
+        return;
+      }
+    } catch (_) {}
+  }
+
   await scSleep(1500);
 
   const cartLink =
