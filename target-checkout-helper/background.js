@@ -828,24 +828,30 @@ async function runBackgroundPoll() {
 
       // Never navigate a tab that is already in cart/checkout/queue.
       // That would kick the user out of their queue position.
-      // SC-5/SC-6: Sam's Club FCFS multi-qty — cart after ATC blocks poll; return to product.
+      // WM-6 / SC-5: multi-qty error-path — cart after ATC blocks poll; return to product
+      // when not in sacred lock so navigationLock can re-arm (qty=1 skips — product not pending).
       if (tabId) {
         try {
           const currentTab = await chrome.tabs.get(tabId);
           if (isInCheckoutFlow(currentTab?.url)) {
-            const isSamsclubFcfs =
-              typeof TCH_HOSTS !== 'undefined' &&
-              TCH_HOSTS.detectRetailer(product.url) === 'samsclub';
-            const scCount = monitor.counts?.[normUrl] || 0;
-            const scNeedMore = scCount < (product.qty || 1);
-            if (isSamsclubFcfs && scNeedMore && !inQueueUrls.has(normUrl) && product.url) {
+            const retailer =
+              typeof TCH_HOSTS !== 'undefined' ? TCH_HOSTS.detectRetailer(product.url) : null;
+            const atcCount = monitor.counts?.[normUrl] || 0;
+            const needMoreAtc = atcCount < (product.qty || 1);
+            const canPollRecover =
+              (retailer === 'walmart' || retailer === 'samsclub') &&
+              needMoreAtc &&
+              !inQueueUrls.has(normUrl) &&
+              product.url;
+            if (canPollRecover) {
+              const label = retailer === 'walmart' ? 'Walmart' : "Sam's Club FCFS";
               console.log(
-                `[TCH bg] Sam's Club FCFS tab in checkout flow (${currentTab.url}) — returning to product for poll recovery`
+                `[TCH bg] ${label} tab in checkout flow (${currentTab.url}) — returning to product for poll recovery`
               );
               await chrome.tabs.update(tabId, { url: product.url, active: true });
               if (!bgPollActive) break;
-              const { monitor: monAfterSc } = await chrome.storage.local.get('monitor').catch(() => ({}));
-              if (!bgPollActive || !monAfterSc?.active) break;
+              const { monitor: monAfterRecover } = await chrome.storage.local.get('monitor').catch(() => ({}));
+              if (!bgPollActive || !monAfterRecover?.active) break;
               if (inQueueUrls.has(normUrl)) break;
               navigationLock.add(normUrl);
               console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
