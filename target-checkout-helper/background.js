@@ -1669,9 +1669,24 @@ async function handleATCSuccess(url, tabId) {
     // Walmart content navigates product → cart → checkout after ATC; reloading here
     // races that flow and breaks WM-6 poll recovery. Poll + NAV_FAILED retry instead.
     const isWalmart = !!extractWalmartItemId(url);
+    const isSamsclub =
+      !isWalmart &&
+      typeof TCH_HOSTS !== 'undefined' &&
+      TCH_HOSTS.detectRetailer(url) === 'samsclub';
     if (!isWalmart) {
       setTimeout(() => {
-        chrome.tabs.reload(tabId).catch(() => {});
+        void (async () => {
+          try {
+            const tab = await chrome.tabs.get(tabId);
+            // SC-5/SC-6: FCFS multi-qty poll recovery — cart blocks isInCheckoutFlow poll;
+            // return monitor tab to product so navigationLock can re-arm.
+            if (isSamsclub && tab?.url && isInCheckoutFlow(tab.url) && product?.url) {
+              await chrome.tabs.update(tabId, { url: product.url });
+            } else {
+              await chrome.tabs.reload(tabId);
+            }
+          } catch (_) {}
+        })();
       }, (monitor.refreshInterval || 1) * 1000);
     }
     return;

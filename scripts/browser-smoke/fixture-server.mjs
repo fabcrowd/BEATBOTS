@@ -423,7 +423,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.samsclubProductFcfs,
     initLog: '[TCH] init',
     journey: 'SC-3',
-    invariants: ['no-sacred-lock', 'sc5-repeated-atc-success', 'sc5-sc6-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'sc5-repeated-atc-success',
+      'sc6-poll-recovery-rearm',
+      'sc5-sc6-live-poll-cycle',
+    ],
     monitorProductPath: '/p/mock-fcfs/789',
     monitorQty: 5,
   },
