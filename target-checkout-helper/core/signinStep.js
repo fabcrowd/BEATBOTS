@@ -148,6 +148,27 @@
   }
 
   /**
+   * Persistent header/footer copy that can remain after the auth gate is cleared.
+   * @param {string} bodyText
+   * @returns {boolean}
+   */
+  function bodyTextImpliesAuthGate(bodyText) {
+    var t = String(bodyText || '').toLowerCase();
+    return t.indexOf('sign in or create account') !== -1 || t.indexOf('sign in to checkout') !== -1;
+  }
+
+  /**
+   * Ignore body-text auth heuristics when shipping/payment/review is already visible.
+   * @param {{ bodyText?: string, hasVisibleLaterStep?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldUseBodyTextAuthGateHeuristic(opts) {
+    opts = opts || {};
+    if (opts.hasVisibleLaterStep) return false;
+    return bodyTextImpliesAuthGate(opts.bodyText);
+  }
+
+  /**
    * @param {'ok'|'fail'|'unknown'|'checking'} state
    * @param {string} [labelKey]
    * @returns {string}
@@ -171,6 +192,8 @@
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,
+    bodyTextImpliesAuthGate: bodyTextImpliesAuthGate,
+    shouldUseBodyTextAuthGateHeuristic: shouldUseBodyTextAuthGateHeuristic,
     formatLoginStatusLabel: formatLoginStatusLabel,
     LOGIN_STATUS_LABELS: LOGIN_STATUS_LABELS,
   };

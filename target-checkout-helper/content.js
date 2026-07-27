@@ -584,6 +584,18 @@ function findVisibleSignInInputs() {
 }
 
 /** Target often shows sign-in / guest choice before shipping — not "unknown" checkout. */
+function hasVisibleLaterCheckoutStep() {
+  const placeOrder = document.querySelector(SEL.placeOrder) || findByText('place order');
+  if (placeOrder && isVisible(placeOrder)) return true;
+  const card = document.querySelector(SEL.cardNumber);
+  if (card && isVisible(card)) return true;
+  return ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
+    .some((s) => {
+      const el = document.querySelector(s);
+      return el && isVisible(el);
+    });
+}
+
 function hasCheckoutAuthGate() {
   if (getPageType() !== 'checkout') return false;
   const authTest = document.querySelector(
@@ -596,9 +608,17 @@ function hasCheckoutAuthGate() {
     const tx = (d.innerText || '').toLowerCase();
     if (tx.includes('sign in') && (tx.includes('password') || tx.includes('email'))) return true;
   }
-  const t = (document.body?.innerText || '').slice(0, 14000).toLowerCase();
-  if (t.includes('sign in or create account')) return true;
-  if (t.includes('sign in to checkout')) return true;
+  const t = (document.body?.innerText || '').slice(0, 14000);
+  if (typeof TCH_SIGNIN_STEP !== 'undefined' && TCH_SIGNIN_STEP.shouldUseBodyTextAuthGateHeuristic) {
+    return TCH_SIGNIN_STEP.shouldUseBodyTextAuthGateHeuristic({
+      bodyText: t,
+      hasVisibleLaterStep: hasVisibleLaterCheckoutStep(),
+    });
+  }
+  if (hasVisibleLaterCheckoutStep()) return false;
+  const lower = t.toLowerCase();
+  if (lower.includes('sign in or create account')) return true;
+  if (lower.includes('sign in to checkout')) return true;
   return false;
 }
 
