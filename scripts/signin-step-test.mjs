@@ -94,6 +94,17 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+assert(S.bodyTextImpliesAuthGate('Sign in or create account'), 'body text auth gate copy');
+assert(!S.bodyTextImpliesAuthGate('Shipping address'), 'shipping copy is not auth gate');
+assert(
+  !S.shouldUseBodyTextAuthGateHeuristic({ bodyText: 'Sign in or create account', hasVisibleLaterStep: true }),
+  'ignore header auth copy when later checkout step is visible'
+);
+assert(
+  S.shouldUseBodyTextAuthGateHeuristic({ bodyText: 'Sign in or create account', hasVisibleLaterStep: false }),
+  'body text auth when no later checkout step'
+);
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);
