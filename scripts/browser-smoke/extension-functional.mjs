@@ -93,6 +93,116 @@ async function main() {
   const afterMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.equal(afterMon.active, false, 'STOP_MONITOR should clear active');
 
+  // ─── MON-2: single-retailer monitor filter (popup toggleMonitor) ───────────
+  const targetUrl = 'https://www.target.com/p/mon2-target/-/A-100';
+  const walmartUrl = 'https://www.walmart.com/ip/mon2-walmart/200';
+  await popup.evaluate(
+    async (urls) => {
+      const products = [
+        { url: urls.target, qty: 1, name: 'MON-2 Target' },
+        { url: urls.walmart, qty: 1, name: 'MON-2 Walmart' },
+      ];
+      await chrome.storage.local.set({
+        monitor: { active: false, products, counts: {}, refreshInterval: 2 },
+      });
+    },
+    { target: targetUrl, walmart: walmartUrl }
+  );
+  await popup.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+  await popup.waitForSelector('#monitorBtn', { timeout: 15000 });
+  await popup.waitForFunction(
+    () => {
+      const btn = document.getElementById('monitorBtn');
+      return btn && !btn.disabled;
+    },
+    { timeout: 15000 }
+  );
+
+  await popup.evaluate(() => document.getElementById('monitorBtn')?.click());
+  await popup.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' }, (m) => {
+          const err = chrome.runtime.lastError;
+          resolve(!err && m?.active === true);
+        });
+      }),
+    { timeout: 15000 }
+  );
+  let mon2 = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon2.active, true, 'MON-2: Target Start monitoring sets active');
+  assert.equal(mon2.products?.length, 1, 'MON-2: Target monitor sends one product');
+  assert.ok(
+    mon2.products.every((p) => /target\.com/i.test(p.url)),
+    'MON-2: Target monitor filters to target.com only'
+  );
+
+  const wmBtnWhileTarget = await popup.$eval('#wmMonitorBtn', (el) => el.textContent?.trim());
+  assert.equal(wmBtnWhileTarget, 'Stop monitoring', 'MON-2: shared monitorActive on Walmart btn');
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  await popup.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' }, (m) => {
+          const err = chrome.runtime.lastError;
+          resolve(!err && m?.active === false);
+        });
+      }),
+    { timeout: 15000 }
+  );
+
+  // startMonitor persists only the filtered subset — restore both for Walmart filter test
+  await popup.evaluate(
+    async (urls) => {
+      const products = [
+        { url: urls.target, qty: 1, name: 'MON-2 Target' },
+        { url: urls.walmart, qty: 1, name: 'MON-2 Walmart' },
+      ];
+      const { monitor } = await chrome.storage.local.get('monitor');
+      await chrome.storage.local.set({
+        monitor: { ...(monitor || {}), active: false, products, tabIds: [], counts: {} },
+      });
+    },
+    { target: targetUrl, walmart: walmartUrl }
+  );
+
+  await popup.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+  await popup.waitForSelector('#tabWalmart', { timeout: 15000 });
+  await popup.waitForFunction(
+    () => !document.getElementById('monitorBtn')?.disabled,
+    { timeout: 15000 }
+  );
+  await popup.evaluate(() => document.getElementById('tabWalmart')?.click());
+  await popup.waitForSelector('#wmMonitorBtn', { timeout: 5000 });
+  await popup.waitForFunction(
+    () => {
+      const btn = document.getElementById('wmMonitorBtn');
+      return btn && !btn.disabled;
+    },
+    { timeout: 15000 }
+  );
+  await popup.evaluate(() => document.getElementById('wmMonitorBtn')?.click());
+  await popup.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' }, (m) => {
+          const err = chrome.runtime.lastError;
+          resolve(!err && m?.active === true);
+        });
+      }),
+    { timeout: 15000 }
+  );
+  mon2 = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon2.active, true, 'MON-2: Walmart Start monitoring sets active');
+  assert.equal(mon2.products?.length, 1, 'MON-2: Walmart monitor sends one product');
+  assert.ok(
+    mon2.products.every((p) => /walmart\.com/i.test(p.url)),
+    'MON-2: Walmart monitor filters to walmart.com only'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
     type: 'CHECKOUT_RETRY_EVENT',
