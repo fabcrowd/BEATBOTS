@@ -186,12 +186,14 @@ async function handleSignInPage(settings, opts = {}) {
   }
   try {
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
-  const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
+  let { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
   if (getPageType() === 'checkout') {
     if (isCheckoutSignedInConfirm()) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) return;
+      console.log('[TCH] auto sign-in: signed-in confirm — continue not found, waiting');
+      return;
     }
     if (isCheckoutPasswordOnlyReauth() && passInput) {
       console.log('[TCH] auto sign-in: checkout password-only re-auth');
@@ -270,7 +272,7 @@ async function handleSignInPage(settings, opts = {}) {
 
   console.log('[TCH] auto sign-in: login form not found — will wait for DOM');
   } finally {
-    if (!nested) autoSignInInFlight = false;
+    if (!nested && !otpWatchActive) autoSignInInFlight = false;
   }
 }
 
@@ -316,9 +318,15 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
     );
     if (otpInput) {
       if (observer) observer.disconnect();
+      otpWatchActive = true;
+      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       console.log('[TCH] auto sign-in: 2FA prompt — polling Gmail for OTP');
       showToast('2FA detected — checking Gmail for code…', 'persistent');
 
+      const finishOtpWatch = () => {
+        otpWatchActive = false;
+        autoSignInInFlight = false;
+      };
       const otpListener = async (msg) => {
         if (msg.type === 'OTP_FOUND') {
           chrome.runtime.onMessage.removeListener(otpListener);
@@ -328,15 +336,20 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
           await sleep(200);
           const btn = document.querySelector('button[type="submit"],[data-test="account-signin-button"]');
           if (btn) await signInCdpClick(btn);
+          finishOtpWatch();
         } else if (msg.type === 'OTP_TIMEOUT') {
           chrome.runtime.onMessage.removeListener(otpListener);
           showToast('Gmail OTP timed out — enter code manually', 'persistent');
+          finishOtpWatch();
         }
       };
       chrome.runtime.onMessage.addListener(otpListener);
 
       chrome.runtime.sendMessage({ type: 'START_OTP_WATCH', startMs: Date.now() })
-        .catch(() => showToast('Gmail not configured — enter code manually', 'persistent'));
+        .catch(() => {
+          showToast('Gmail not configured — enter code manually', 'persistent');
+          finishOtpWatch();
+        });
 
       return true;
     }
@@ -481,7 +494,8 @@ function getCheckoutAuthRoot() {
   return Array.from(document.querySelectorAll('[role="dialog"]')).find((d) => {
     if (!isVisible(d)) return false;
     const tx = (d.innerText || '').toLowerCase();
-    return tx.includes('sign in') || tx.includes('account') || tx.includes('checkout');
+    return tx.includes('sign in')
+      || (tx.includes('account') && (tx.includes('password') || tx.includes('email')));
   }) || null;
 }
 
@@ -502,7 +516,9 @@ function isCheckoutSignedInConfirm() {
   if (scope.querySelector('[data-test="accountUserName"], [data-test="account-greeting"]')) return true;
   const email = scope.querySelector('input#username, input[type="email"]');
   if (email && isVisible(email) && (email.readOnly || email.disabled)) return true;
-  if (email && isVisible(email) && !scope.querySelector('input#password, input[type="password"]')) {
+  const hasVisiblePassword = Array.from(scope.querySelectorAll('input#password, input[type="password"]'))
+    .some((el) => isVisible(el));
+  if (email && isVisible(email) && !hasVisiblePassword) {
     if (/sign in or create account|create account/.test(tx)) return false;
     if (looksLoggedInOnTarget()) return true;
   }
@@ -1487,6 +1503,8 @@ let reviewStepInFlight = false;
 let reviewStepInFlightKey = '';
 /** Prevents concurrent handleSignInPage from checkout pending retries during email→password transition. */
 let autoSignInInFlight = false;
+/** Holds checkout pending retries while Gmail OTP watch is active. */
+let otpWatchActive = false;
 
 function markCheckoutFlow(step) {
   if (checkoutFlowStart === null) {
@@ -1510,6 +1528,9 @@ async function handleCheckoutPage(settings) {
   } catch {}
   const step = getCheckoutStep(settings.useSavedPayment);
   console.log('[TCH] checkout step:', step);
+  if (step === 'saved' && isCheckoutSignedInConfirm()) {
+    return handleCheckoutPendingStep(settings, 'signin');
+  }
   if (step === 'shipping')    return handleShippingStep(settings);
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
@@ -1589,11 +1610,11 @@ function watchForCheckoutStep(settings, options = {}) {
 
   let handled = false;
   let pendingRetryCount = 0;
-  let lastPendingRetryMs = 0;
+  let lastPendingRetryMs = Date.now();
   const runStep = async (step) => {
     if (handled) return;
     if (step === 'unknown' || step === 'signin') {
-      if (autoSignInInFlight) return;
+      if (autoSignInInFlight || otpWatchActive) return;
       const shouldRetry = typeof TCH_SIGNIN_STEP !== 'undefined'
         ? TCH_SIGNIN_STEP.shouldRetryCheckoutPending({
           step,
@@ -1602,7 +1623,7 @@ function watchForCheckoutStep(settings, options = {}) {
           retryCount: pendingRetryCount,
           intervalMs: PENDING_RETRY_INTERVAL_MS,
           maxRetries: PENDING_MAX_RETRIES,
-          signInInFlight: autoSignInInFlight,
+          signInInFlight: autoSignInInFlight || otpWatchActive,
         })
         : Date.now() - lastPendingRetryMs >= PENDING_RETRY_INTERVAL_MS
           && pendingRetryCount < PENDING_MAX_RETRIES;

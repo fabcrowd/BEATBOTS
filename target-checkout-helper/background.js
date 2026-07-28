@@ -143,6 +143,8 @@ async function gmailFindOtpCode(token) {
 }
 
 /** Poll Gmail every 4s for up to 3 minutes; send OTP_FOUND or OTP_TIMEOUT to the tab. */
+const otpWatchTabs = new Set();
+
 async function watchForOtp(tabId, startMs) {
   const deadline = startMs + 3 * 60 * 1000;
   console.log('[TCH bg] Gmail OTP watch started for tab', tabId);
@@ -1242,7 +1244,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tabId = Number(sender?.tab?.id);
       const startMs = Number(message.startMs) || Date.now();
       if (!tabId) { sendResponse({ ok: false }); return false; }
-      void watchForOtp(tabId, startMs);
+      if (otpWatchTabs.has(tabId)) {
+        sendResponse({ ok: true, deduped: true });
+        return false;
+      }
+      otpWatchTabs.add(tabId);
+      void watchForOtp(tabId, startMs).finally(() => otpWatchTabs.delete(tabId));
       sendResponse({ ok: true });
       return false;
     }
