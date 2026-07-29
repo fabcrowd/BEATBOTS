@@ -1539,9 +1539,14 @@ async function toggleMonitor(retailerFilter) {
     monitorStatusEl.classList.remove('is-live');
     showToast('Monitoring stopped');
   } else {
-    const filtered = retailerFilter
-      ? products.filter(p => retailerFilter.test(p.url))
-      : products;
+    const scope = typeof TCH_MONITOR_SCOPE !== 'undefined'
+      ? TCH_MONITOR_SCOPE.resolvePollScope(retailerFilter)
+      : (typeof retailerFilter?.test === 'function' ? 'walmart' : 'target');
+    const filtered = typeof TCH_MONITOR_SCOPE !== 'undefined'
+      ? TCH_MONITOR_SCOPE.filterProductsByPollScope(products, scope)
+      : (typeof retailerFilter?.test === 'function'
+        ? products.filter(p => retailerFilter.test(p.url))
+        : products.filter(p => !/walmart\.com/i.test(p.url)));
     if (!filtered.length) {
       showToast('No matching products to monitor');
       return;
@@ -1550,7 +1555,8 @@ async function toggleMonitor(retailerFilter) {
     await autoSaveToggle().catch(() => {});
     await chrome.runtime.sendMessage({
       type: 'START_MONITOR',
-      products: filtered,
+      products,
+      pollScope: scope,
       refreshInterval: parseInt(refreshIntervalIn.value, 10) || 1,
       dropExpectedAt: readDropExpectedAtValue(),
       walmartSkipMonitoring: !!$('walmartSkipMonitoring')?.checked,
@@ -1592,7 +1598,7 @@ function updateMonitorUI() {
   renderProducts();
 }
 
-monitorBtn.addEventListener('click', toggleMonitor);
+monitorBtn.addEventListener('click', () => toggleMonitor());
 
 async function pollStatus() {
   if (!hasChromeStorage()) return;

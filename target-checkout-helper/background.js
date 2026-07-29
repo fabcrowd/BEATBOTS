@@ -2,7 +2,7 @@
 // Relays messages between popup/content scripts + orchestrates product monitoring.
 // Background TCIN polling runs here — no browser tab throttling.
 
-importScripts('dropPollingTiming.js', 'core/hosts.js', 'core/debuggerBridge.js', 'cookieHarvest.js');
+importScripts('dropPollingTiming.js', 'core/hosts.js', 'core/monitorScope.js', 'core/debuggerBridge.js', 'cookieHarvest.js');
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
@@ -648,7 +648,7 @@ async function runBackgroundPoll() {
     const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
     if (!monitor?.active) { bgPollActive = false; break; }
 
-    const pendingProducts = (monitor.products || []).filter(p => {
+    const pendingProducts = productsForMonitorPoll(monitor).filter(p => {
       const n = normalizeProductUrl(p.url);
       return (monitor.counts?.[n] || 0) < p.qty;
     });
@@ -989,6 +989,7 @@ async function maybeRestartEndlessMonitor() {
       highStockOnly: !!monitor.highStockOnly,
       highStockThreshold: Number(monitor.highStockThreshold) || 10,
       targetMaxPrice: Number(monitor.targetMaxPrice) || 0,
+      pollScope: monitor.pollScope || 'all',
       resetEndlessSuccessCount: false,
     }
   );
@@ -1100,6 +1101,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           targetMaxPrice: Number(message.targetMaxPrice) || 0,
           walmartMaxPrice: Number(message.walmartMaxPrice) || 0,
           errorRetryDelayMs: Number(message.errorRetryDelayMs) || 3500,
+          pollScope: message.pollScope || 'all',
           resetEndlessSuccessCount: true,
         }
       )
@@ -1493,6 +1495,14 @@ function notifyTargetTabsMonitorChanged() {
 
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
 
+function productsForMonitorPoll(monitor) {
+  const all = monitor?.products || [];
+  const scope = monitor?.pollScope || 'all';
+  return typeof TCH_MONITOR_SCOPE !== 'undefined'
+    ? TCH_MONITOR_SCOPE.filterProductsByPollScope(all, scope)
+    : all;
+}
+
 async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonitoring, opts = {}) {
   const {
     highStockOnly = false,
@@ -1501,6 +1511,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     walmartMaxPrice = 0,
     errorRetryDelayMs = 3500,
     resetEndlessSuccessCount = true,
+    pollScope = 'all',
   } = opts;
 
   await stopMonitor();
@@ -1509,12 +1520,14 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     await chrome.storage.local.set({ endlessSuccessCount: 0 });
   }
 
+  const pollProducts = productsForMonitorPoll({ products, pollScope });
   const counts = {};
-  for (const p of products) counts[normalizeProductUrl(p.url)] = 0;
+  for (const p of pollProducts) counts[normalizeProductUrl(p.url)] = 0;
 
   const monitor = {
     active: true,
     products,
+    pollScope,
     refreshInterval: refreshInterval || 1,
     counts,
     tabIds: [],
@@ -1538,15 +1551,15 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   // Open one background tab per product for the content-script ATC click
   // after the background poll navigates it on restock detection.
   const tabResults = await Promise.allSettled(
-    products.map(p => chrome.tabs.create({ url: p.url, active: false }))
+    pollProducts.map(p => chrome.tabs.create({ url: p.url, active: false }))
   );
   monitor.tabIds = [];
   monitor.urlToTabId = {};
   urlToTabId = {};
-  for (let i = 0; i < products.length; i++) {
+  for (let i = 0; i < pollProducts.length; i++) {
     if (tabResults[i].status === 'fulfilled') {
       const tabId = tabResults[i].value.id;
-      const norm  = normalizeProductUrl(products[i].url);
+      const norm  = normalizeProductUrl(pollProducts[i].url);
       monitor.tabIds.push(tabId);
       monitor.urlToTabId[norm] = tabId;
       urlToTabId[norm] = tabId;
@@ -1619,7 +1632,8 @@ async function handleATCSuccess(url, tabId) {
 
   // Consider "done" if every product whose ID can be resolved is satisfied.
   // Products with no extractable TCIN *and* no Walmart item ID can't be auto-ATC'd — skip them.
-  const allDone = monitor.products.every((p) => {
+  const scopeProducts = productsForMonitorPoll(monitor);
+  const allDone = scopeProducts.every((p) => {
     const c = monitor.counts[normalizeProductUrl(p.url)] || 0;
     if (c >= p.qty) return true;
     return !extractTcin(p.url) && !extractWalmartItemId(p.url);
