@@ -39,7 +39,7 @@ export const JOURNEYS = {
     summary:
       'Background poll navigationLock + inQueueUrls skip re-navigation; isInCheckoutFlow guard; START_MONITOR restart clears inQueueUrls',
     impl: ['target-checkout-helper/background.js'],
-    coverage: 'weak',
+    coverage: 'strong',
     tests: ['extension-functional.mjs'],
   },
   'TGT-1': {
