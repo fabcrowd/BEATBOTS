@@ -1,11 +1,21 @@
 #!/usr/bin/env node
 /**
- * WM-1: Mirrors walmart-content.js page detection + product → cart → checkout dispatch.
- * Offline simulation — no browser required.
+ * WM-1 / WM-2 / WM-3: Offline Walmart journey simulations (no browser required).
+ *
+ * WM-1: walmart-content.js page detection + product → cart → checkout dispatch.
+ * WM-2: pre-drop disabled ATC is not sacred queue lock.
+ * WM-3: walmart-main-world.js Queue-it WebSocket sniff → TCH_QUEUE_PASSED.
  *
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MAIN_WORLD_PATH = path.resolve(__dirname, '../../target-checkout-helper/walmart-main-world.js');
 
 /** Mirrors WM_SEL in walmart-content.js (subset used by WM-1 flow). */
 const WM_SEL = {
@@ -450,6 +460,111 @@ function runWm2PredropQueueTests() {
   );
 }
 
+/**
+ * WM-3: Load walmart-main-world.js in a VM sandbox and assert Queue-it WebSocket
+ * frames dispatch TCH_QUEUE_PASSED on document.documentElement.
+ */
+function runWm3MainWorldQueueTests() {
+  const code = fs.readFileSync(MAIN_WORLD_PATH, 'utf8');
+  let capturedEvents = [];
+
+  class FakeWS {
+    constructor(url) {
+      this.url = url;
+      this._listeners = {};
+    }
+    addEventListener(type, fn) {
+      if (!this._listeners[type]) this._listeners[type] = [];
+      this._listeners[type].push(fn);
+    }
+    _emit(type, data) {
+      for (const fn of this._listeners[type] || []) fn(data);
+    }
+  }
+  FakeWS.CONNECTING = 0;
+  FakeWS.OPEN = 1;
+  FakeWS.CLOSING = 2;
+  FakeWS.CLOSED = 3;
+  FakeWS.prototype.CONNECTING = 0;
+  FakeWS.prototype.OPEN = 1;
+
+  const docEl = {
+    dispatchEvent(e) {
+      capturedEvents.push(e);
+    },
+  };
+
+  const sandbox = {
+    window: { WebSocket: FakeWS },
+    document: { documentElement: docEl },
+    CustomEvent: class CustomEvent {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+        this.bubbles = init?.bubbles;
+        this.composed = init?.composed;
+      }
+    },
+    console,
+    JSON,
+    String,
+    RegExp,
+  };
+  sandbox.window.WebSocket = FakeWS;
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox);
+
+  const PatchedWS = sandbox.window.WebSocket;
+
+  capturedEvents = [];
+  const ws1 = new PatchedWS('wss://queue-it.walmart.com/ws');
+  ws1._emit('message', { data: JSON.stringify({ type: 'queuePassed' }) });
+  assert.equal(capturedEvents.length, 1, 'WM-3: queuePassed fires TCH_QUEUE_PASSED');
+  assert.equal(capturedEvents[0]?.type, 'TCH_QUEUE_PASSED', 'WM-3: correct event type');
+  assert.equal(capturedEvents[0]?.bubbles, true, 'WM-3: event bubbles');
+  assert.equal(capturedEvents[0]?.composed, true, 'WM-3: event composed');
+
+  capturedEvents = [];
+  const ws2 = new PatchedWS('wss://queueit.example.com/ws');
+  ws2._emit('message', { data: JSON.stringify({ type: 'QueuePassed' }) });
+  assert.equal(capturedEvents.length, 1, 'WM-3: QueuePassed (capitalized) fires event');
+
+  capturedEvents = [];
+  const ws3 = new PatchedWS('wss://queue-it.walmart.com/ws');
+  ws3._emit('message', { data: JSON.stringify({ position: 0 }) });
+  assert.equal(capturedEvents.length, 1, 'WM-3: position 0 fires event');
+
+  capturedEvents = [];
+  const ws4 = new PatchedWS('wss://queue.it-service.com/ws');
+  ws4._emit('message', { data: JSON.stringify({ queueState: 'passed' }) });
+  assert.equal(capturedEvents.length, 1, 'WM-3: queueState passed fires event');
+
+  capturedEvents = [];
+  const ws5 = new PatchedWS('wss://www.walmart.com/api/cart');
+  ws5._emit('message', { data: JSON.stringify({ type: 'queuePassed' }) });
+  assert.equal(capturedEvents.length, 0, 'WM-3: non-queue URL ignored');
+
+  capturedEvents = [];
+  const ws6 = new PatchedWS('wss://queue-it.walmart.com/ws');
+  ws6._emit('message', { data: new ArrayBuffer(8) });
+  assert.equal(capturedEvents.length, 0, 'WM-3: binary message silently ignored');
+
+  capturedEvents = [];
+  const ws7 = new PatchedWS('wss://queue-it.walmart.com/ws');
+  ws7._emit('message', { data: 'not-json{{{' });
+  assert.equal(capturedEvents.length, 0, 'WM-3: invalid JSON silently ignored');
+
+  capturedEvents = [];
+  const ws8 = new PatchedWS('wss://queue-it.walmart.com/ws');
+  ws8._emit('message', { data: JSON.stringify({ position: 5 }) });
+  assert.equal(capturedEvents.length, 0, 'WM-3: position > 0 does not fire');
+
+  assert.equal(PatchedWS.CONNECTING, 0, 'WM-3: CONNECTING constant preserved');
+  assert.equal(PatchedWS.OPEN, 1, 'WM-3: OPEN constant preserved');
+  assert.equal(PatchedWS.CLOSING, 2, 'WM-3: CLOSING constant preserved');
+  assert.equal(PatchedWS.CLOSED, 3, 'WM-3: CLOSED constant preserved');
+}
+
 async function runWm2FlowTests() {
   const predropPage = makePage({
     pathname: '/ip/predrop-flow/111',
@@ -476,7 +591,10 @@ async function main() {
   await runFlowTests();
   runWm2PredropQueueTests();
   await runWm2FlowTests();
-  console.log('walmart-flow-simulation PASS (WM-1 + WM-2): page type, flow, pre-drop queue semantics');
+  runWm3MainWorldQueueTests();
+  console.log(
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3): page type, flow, pre-drop queue, WebSocket sniff'
+  );
 }
 
 main().catch((e) => {
