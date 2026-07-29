@@ -1171,6 +1171,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const baseMonitor = monitor || { active: false, products: [], counts: {} };
         sendResponse({
           ...baseMonitor,
+          inQueueUrls: [...inQueueUrls],
+          navigationLock: [...navigationLock],
           checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
         });
       });
