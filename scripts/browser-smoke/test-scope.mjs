@@ -123,8 +123,8 @@ export const JOURNEYS = {
     retailer: 'walmart',
     summary: 'Walmart queue error paths (PX timeout, NAV_FAILED while not in queue)',
     impl: ['target-checkout-helper/walmart-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-7': {
     id: 'WM-7',
@@ -239,7 +239,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
-  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-3', 'WM-4', 'WM-5'],
+  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-3', 'WM-4', 'WM-5', 'WM-6'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */

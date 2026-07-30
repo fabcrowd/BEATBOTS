@@ -7,6 +7,7 @@
  * WM-3: walmart-main-world.js Queue-it WebSocket sniff → TCH_QUEUE_PASSED.
  * WM-4: sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed.
  * WM-5: sacred lock blocks poll re-navigation; NAV_FAILED clears navigationLock only.
+ * WM-6: queue error paths — PX page wait/timeout NAV_FAILED; NAV_FAILED while not in queue.
  *
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
  */
@@ -109,6 +110,35 @@ function wmFindAtcLikeButton(page) {
 
 function wmIsVisible(el) {
   return !!(el && el.visible);
+}
+
+/** Mirrors wmIsPxPage() — walmart-content.js */
+function wmIsPxPage(page) {
+  const text = (page.bodyText || '').toLowerCase();
+  return (
+    (text.includes('hang tight') && text.includes('loading')) ||
+    text.includes("we're loading your experience") ||
+    !!page.querySelector('#px-captcha') ||
+    !!page.querySelector('[class*="px-block"]') ||
+    !!page.querySelector('[id*="px-captcha"]')
+  );
+}
+
+/** Mirrors wmInit PX branch — wait for redirect; no retry or sacred lock. */
+function wmPxInitDecision(page) {
+  if (!wmIsPxPage(page)) return { action: 'not_px', messages: [] };
+  return { action: 'px_wait', messages: [] };
+}
+
+/**
+ * Mirrors wmInit PX setTimeout (2min) — NAV_FAILED only if still on PX page.
+ * @param {ReturnType<typeof makePage>} page
+ * @param {number} elapsedMs
+ */
+function wmPxTimeoutMessages(page, elapsedMs = 120000) {
+  if (elapsedMs < 120000) return [];
+  if (!wmIsPxPage(page)) return [];
+  return [{ type: 'WALMART_NAV_FAILED', url: `https://www.walmart.com${page.pathname}` }];
 }
 
 /** Mirrors wmHasQueueIndicators() — walmart-content.js */
@@ -739,6 +769,115 @@ function runWm4SacredLockTests() {
   assert.equal(inQueueUrls.size, 0, 'WM-4: NAV_FAILED does not populate inQueueUrls');
 }
 
+function runWm6QueueErrorPathTests() {
+  const hangTightPage = makePage({
+    pathname: '/ip/wm6-px-hang-tight/101',
+    bodyText: 'Hang tight! We are loading your experience.',
+  });
+  assert.ok(wmIsPxPage(hangTightPage), 'WM-6: hang tight + loading text is PX page');
+  const hangTightDecision = wmPxInitDecision(hangTightPage);
+  assert.equal(hangTightDecision.action, 'px_wait', 'WM-6: PX page waits for redirect');
+  assert.equal(hangTightDecision.messages.length, 0, 'WM-6: PX wait does not send messages immediately');
+  assert.deepEqual(
+    wmPxTimeoutMessages(hangTightPage, 119000),
+    [],
+    'WM-6: PX timeout does not fire before 2min'
+  );
+
+  const loadingPage = makePage({
+    pathname: '/ip/wm6-px-loading/102',
+    bodyText: "We're loading your experience — please wait.",
+  });
+  assert.ok(wmIsPxPage(loadingPage), 'WM-6: loading experience text is PX page');
+  const pxCaptchaPage = makePage({
+    pathname: '/ip/wm6-px-captcha/103',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  assert.ok(wmIsPxPage(pxCaptchaPage), 'WM-6: #px-captcha element is PX page');
+
+  const normalProduct = makePage({
+    pathname: '/ip/wm6-normal/104',
+    bodyText: 'Add to cart',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+      },
+    ],
+  });
+  assert.ok(!wmIsPxPage(normalProduct), 'WM-6: normal product page is not PX');
+  assert.equal(wmPxInitDecision(normalProduct).action, 'not_px', 'WM-6: non-PX proceeds past PX guard');
+
+  // PX timeout after 2min while still on PX → NAV_FAILED (not sacred lock).
+  const timeoutMsgs = wmPxTimeoutMessages(pxCaptchaPage, 120000);
+  assert.equal(timeoutMsgs.length, 1, 'WM-6: PX still showing after 2min sends NAV_FAILED');
+  assert.equal(timeoutMsgs[0].type, 'WALMART_NAV_FAILED', 'WM-6: PX timeout message type');
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  const normPx = normalizeProductUrl(timeoutMsgs[0].url);
+  navigationLock.add(normPx);
+  assert.equal(inQueueUrls.size, 0, 'WM-6: PX timeout NAV_FAILED does not arm sacred lock');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, timeoutMsgs[0]);
+  assert.ok(!navigationLock.has(normPx), 'WM-6: PX timeout NAV_FAILED releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normPx, inQueueUrls, navigationLock),
+    'WM-6: poll may retry after PX timeout when not in queue'
+  );
+
+  // PX cleared before timeout — no NAV_FAILED (redirect succeeded).
+  const clearedPxPage = makePage({
+    pathname: '/ip/wm6-px-cleared/105',
+    bodyText: 'Add to cart',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+      },
+    ],
+  });
+  assert.deepEqual(
+    wmPxTimeoutMessages(clearedPxPage, 120000),
+    [],
+    'WM-6: no NAV_FAILED when PX page cleared before timeout'
+  );
+
+  // NAV_FAILED on pre-drop (not in queue) — release lock, no sacred lock, poll may retry.
+  const predropPage = makePage({
+    pathname: '/ip/wm6-predrop/106',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const predropDecision = wmDecideProductPageEntry(predropPage);
+  assert.equal(predropDecision.action, 'atc_unavailable', 'WM-6: pre-drop is not queue');
+  const navFail = predropDecision.messages.find((m) => m.type === 'WALMART_NAV_FAILED');
+  assert.ok(navFail, 'WM-6: pre-drop sends NAV_FAILED');
+  assert.ok(
+    !predropDecision.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-6: pre-drop NAV_FAILED is not sacred lock'
+  );
+  inQueueUrls.clear();
+  navigationLock.clear();
+  const normPredrop = normalizeProductUrl(`https://www.walmart.com${predropPage.pathname}`);
+  navigationLock.add(normPredrop);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: `https://www.walmart.com${predropPage.pathname}`,
+  });
+  assert.equal(inQueueUrls.size, 0, 'WM-6: NAV_FAILED while not in queue keeps inQueueUrls empty');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normPredrop, inQueueUrls, navigationLock),
+    'WM-6: NAV_FAILED while not in queue allows poll retry'
+  );
+}
+
 function runWm5SacredLockNavTests() {
   const productUrl = 'https://www.walmart.com/ip/wm5-sacred-lock/555';
   const normUrl = normalizeProductUrl(productUrl);
@@ -840,8 +979,9 @@ async function main() {
   runWm3MainWorldQueueTests();
   runWm4SacredLockTests();
   runWm5SacredLockNavTests();
+  runWm6QueueErrorPathTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths'
   );
 }
 
