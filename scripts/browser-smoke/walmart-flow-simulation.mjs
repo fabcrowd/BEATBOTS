@@ -8,6 +8,7 @@
  * WM-4: sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed.
  * WM-5: sacred lock blocks poll re-navigation; NAV_FAILED clears navigationLock only.
  * WM-6: queue error paths — PX page wait/timeout NAV_FAILED; NAV_FAILED while not in queue.
+ * WM-7: product-page __NEXT_DATA__ offerId → WM_OFFER_ID_READY updates monitor.products[].oid.
  *
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
  */
@@ -878,6 +879,117 @@ function runWm6QueueErrorPathTests() {
   );
 }
 
+/** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */
+function wmExtractPageOidFromNextData(nextData) {
+  try {
+    return (
+      nextData?.props?.pageProps?.initialData?.data?.product?.primaryOffer?.offerId || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Mirrors _wmInit product-page branch — send WM_OFFER_ID_READY when page OID differs.
+ * @param {{ pageOid: string|null, storedOid: string|null, url: string }} opts
+ */
+function wmDecideOfferIdReadyMessage({ pageOid, storedOid, url }) {
+  if (!pageOid || pageOid === storedOid) return null;
+  return { type: 'WM_OFFER_ID_READY', offerId: pageOid, url };
+}
+
+/**
+ * Mirrors background.js WM_OFFER_ID_READY handler.
+ * @param {{ active?: boolean, products?: Array<{ url: string, oid?: string|null }> }} monitor
+ * @param {{ offerId: string, url: string }} message
+ */
+function bgApplyWalmartOfferIdReady(monitor, message) {
+  const mon = monitor || { products: [] };
+  const normUrl = normalizeProductUrl(message.url || '');
+  let updated = false;
+  for (const p of mon.products || []) {
+    if (normalizeProductUrl(p.url) === normUrl && p.oid !== message.offerId) {
+      p.oid = message.offerId;
+      updated = true;
+    }
+  }
+  return { updated, monitor: mon };
+}
+
+function runWm7OfferIdReadyTests() {
+  const nextData = {
+    props: {
+      pageProps: {
+        initialData: {
+          data: {
+            product: {
+              primaryOffer: { offerId: 'OFFER-WM7-ABC123' },
+            },
+          },
+        },
+      },
+    },
+  };
+  const pageOid = wmExtractPageOidFromNextData(nextData);
+  assert.equal(pageOid, 'OFFER-WM7-ABC123', 'WM-7: extracts offerId from __NEXT_DATA__');
+  assert.equal(wmExtractPageOidFromNextData(null), null, 'WM-7: missing __NEXT_DATA__ returns null');
+  assert.equal(
+    wmExtractPageOidFromNextData({ props: { pageProps: {} } }),
+    null,
+    'WM-7: incomplete __NEXT_DATA__ returns null'
+  );
+
+  const productUrl = 'https://www.walmart.com/ip/wm7-product/999';
+  const readyMsg = wmDecideOfferIdReadyMessage({
+    pageOid,
+    storedOid: null,
+    url: productUrl,
+  });
+  assert.ok(readyMsg, 'WM-7: sends WM_OFFER_ID_READY when stored oid is missing');
+  assert.equal(readyMsg.type, 'WM_OFFER_ID_READY');
+  assert.equal(readyMsg.offerId, pageOid);
+
+  assert.equal(
+    wmDecideOfferIdReadyMessage({ pageOid, storedOid: pageOid, url: productUrl }),
+    null,
+    'WM-7: does not send when stored oid already matches'
+  );
+  assert.equal(
+    wmDecideOfferIdReadyMessage({ pageOid: null, storedOid: null, url: productUrl }),
+    null,
+    'WM-7: does not send when page oid is missing'
+  );
+
+  const monitor = {
+    active: true,
+    products: [
+      { url: productUrl, oid: null, qty: 1 },
+      { url: 'https://www.walmart.com/ip/other/111', oid: 'OTHER-OID', qty: 1 },
+    ],
+  };
+  const apply = bgApplyWalmartOfferIdReady(monitor, readyMsg);
+  assert.ok(apply.updated, 'WM-7: background updates matching product oid');
+  assert.equal(apply.monitor.products[0].oid, pageOid, 'WM-7: monitor.products[].oid set');
+  assert.equal(apply.monitor.products[1].oid, 'OTHER-OID', 'WM-7: unrelated product oid unchanged');
+
+  const noChange = bgApplyWalmartOfferIdReady(apply.monitor, readyMsg);
+  assert.ok(!noChange.updated, 'WM-7: background skips when oid already matches');
+
+  const trailingUrl = 'https://www.walmart.com/ip/wm7-product/999/';
+  const trailingMsg = wmDecideOfferIdReadyMessage({
+    pageOid: 'OFFER-TRAILING',
+    storedOid: null,
+    url: trailingUrl,
+  });
+  const trailingApply = bgApplyWalmartOfferIdReady(
+    { products: [{ url: productUrl, oid: null }] },
+    trailingMsg
+  );
+  assert.ok(trailingApply.updated, 'WM-7: URL normalization matches trailing slash');
+  assert.equal(trailingApply.monitor.products[0].oid, 'OFFER-TRAILING');
+}
+
 function runWm5SacredLockNavTests() {
   const productUrl = 'https://www.walmart.com/ip/wm5-sacred-lock/555';
   const normUrl = normalizeProductUrl(productUrl);
@@ -980,8 +1092,9 @@ async function main() {
   runWm4SacredLockTests();
   runWm5SacredLockNavTests();
   runWm6QueueErrorPathTests();
+  runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, offerId ready'
   );
 }
 
