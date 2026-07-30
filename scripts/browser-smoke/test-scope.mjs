@@ -239,7 +239,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
-  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-3', 'WM-4'],
+  'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-3', 'WM-4', 'WM-5'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */
