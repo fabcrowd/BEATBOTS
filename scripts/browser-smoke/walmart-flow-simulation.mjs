@@ -6,6 +6,7 @@
  * WM-2: pre-drop disabled ATC is not sacred queue lock.
  * WM-3: walmart-main-world.js Queue-it WebSocket sniff → TCH_QUEUE_PASSED.
  * WM-4: sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed.
+ * WM-5: sacred lock blocks poll re-navigation; NAV_FAILED clears navigationLock only.
  *
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
  */

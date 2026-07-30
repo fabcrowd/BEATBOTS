@@ -115,8 +115,8 @@ export const JOURNEYS = {
     summary:
       'Sacred lock blocks background re-navigation; WALMART_NAV_FAILED clears navigationLock only, not inQueueUrls',
     impl: ['target-checkout-helper/background.js', 'target-checkout-helper/walmart-content.js'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['walmart-flow-simulation.mjs'],
   },
   'WM-6': {
     id: 'WM-6',
