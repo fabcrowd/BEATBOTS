@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * SC-1 / SC-3 / SC-5: Sam's Club retailer module — hosts, manifest, FCFS product ATC.
+ * SC-1 / SC-3 / SC-5 / SC-6: Sam's Club retailer module — hosts, manifest, FCFS product ATC.
  * Offline simulation — no browser required.
  *
  * SC-5: FCFS race — no sacred lock / inQueueUrls (contrast WM-4/WM-5).
+ * SC-6: FCFS error-path hardening — SAMS_NAV_FAILED releases poll lock, no sacred lock.
  *
  * Run: node scripts/browser-smoke/samsclub-module-simulation.mjs
  */
@@ -17,6 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '../..');
 const HOSTS_SRC = readFileSync(join(ROOT, 'target-checkout-helper/core/hosts.js'), 'utf8');
 const SC_SRC = readFileSync(join(ROOT, 'target-checkout-helper/samsclub-content.js'), 'utf8');
+const BG_SRC = readFileSync(join(ROOT, 'target-checkout-helper/background.js'), 'utf8');
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'target-checkout-helper/manifest.json'), 'utf8'));
 
 /** Mirrors SC_SEL in samsclub-content.js */
@@ -429,6 +431,131 @@ function testSc5Source() {
   );
 }
 
+/** Mirrors scHandleProductPage when scWaitFor times out — no ATC within 8s. */
+function scSimulateAtcTimeout(pathname) {
+  return {
+    action: 'atc_timeout',
+    messages: [{ type: 'SAMS_NAV_FAILED', url: `https://www.samsclub.com${pathname}` }],
+  };
+}
+
+function scDecideProductPageMissingAtc(page) {
+  const atc = scFindAtcButton(page);
+  if (!atc) {
+    return {
+      action: 'atc_unavailable',
+      messages: [{ type: 'SAMS_NAV_FAILED', url: `https://www.samsclub.com${page.pathname}` }],
+    };
+  }
+  return scDecideProductPageEntry(page);
+}
+
+function scDecideProductPageInvisibleAtc(page) {
+  const atc = scFindAtcButton(page);
+  if (atc && !scIsVisible(atc)) {
+    return {
+      action: 'atc_unavailable',
+      messages: [{ type: 'SAMS_NAV_FAILED', url: `https://www.samsclub.com${page.pathname}` }],
+    };
+  }
+  return scDecideProductPageEntry(page);
+}
+
+function testSc6Source() {
+  assert.ok(SC_SRC.includes('scSignalNavFailed'), 'SC-6: scSignalNavFailed defined');
+  assert.ok(
+    SC_SRC.includes("type: 'SAMS_NAV_FAILED'"),
+    'SC-6: scSignalNavFailed emits SAMS_NAV_FAILED'
+  );
+  assert.ok(
+    SC_SRC.includes('releasing navigation lock'),
+    'SC-6: error path logs navigation lock release'
+  );
+  assert.ok(BG_SRC.includes("case 'SAMS_NAV_FAILED'"), 'SC-6: background handles SAMS_NAV_FAILED');
+  assert.ok(
+    BG_SRC.includes('navigationLock.delete(normFailUrl)'),
+    'SC-6: background releases navigationLock on NAV_FAILED'
+  );
+  const navFailedBlock = BG_SRC.slice(
+    BG_SRC.indexOf("case 'SAMS_NAV_FAILED'"),
+    BG_SRC.indexOf("case 'WALMART_IN_QUEUE'")
+  );
+  assert.ok(
+    !navFailedBlock.includes('inQueueUrls.add'),
+    'SC-6: SAMS_NAV_FAILED handler must not arm sacred lock'
+  );
+}
+
+function runSc6ErrorPathHardeningTests() {
+  const productUrl = 'https://www.samsclub.com/p/sc6-error-path/999';
+  const normUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  // SC-6: missing ATC button → SAMS_NAV_FAILED, releases poll lock.
+  const missingPage = makePage({ pathname: '/p/sc6-error-path/999', elements: [] });
+  const missingDecision = scDecideProductPageMissingAtc(missingPage);
+  assert.equal(missingDecision.action, 'atc_unavailable', 'SC-6: missing ATC is nav_failed');
+  const missingMsg = missingDecision.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(missingMsg, 'SC-6: missing ATC sends SAMS_NAV_FAILED');
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, missingMsg);
+  assert.ok(!navigationLock.has(normUrl), 'SC-6: missing ATC releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, 'SC-6: missing ATC must not arm sacred lock');
+
+  // SC-6: invisible ATC → SAMS_NAV_FAILED.
+  navigationLock.add(normUrl);
+  const invisiblePage = makePage({
+    pathname: '/p/sc6-error-path/999',
+    elements: [
+      {
+        selectors: ['button[data-testid="add-to-cart"]'],
+        text: 'Add to cart',
+        disabled: false,
+        visible: false,
+      },
+    ],
+  });
+  const invisibleDecision = scDecideProductPageInvisibleAtc(invisiblePage);
+  assert.equal(invisibleDecision.action, 'atc_unavailable', 'SC-6: invisible ATC is nav_failed');
+  const invisibleMsg = invisibleDecision.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(invisibleMsg, 'SC-6: invisible ATC sends SAMS_NAV_FAILED');
+  bgApplyNavFailed(navigationLock, inQueueUrls, invisibleMsg);
+  assert.ok(!navigationLock.has(normUrl), 'SC-6: invisible ATC releases navigationLock');
+
+  // SC-6: ATC wait timeout (scWaitFor returns null) → SAMS_NAV_FAILED.
+  navigationLock.add(normUrl);
+  const timeoutResult = scSimulateAtcTimeout('/p/sc6-error-path/999');
+  assert.equal(timeoutResult.action, 'atc_timeout', 'SC-6: timeout path identified');
+  const timeoutMsg = timeoutResult.messages[0];
+  assert.equal(timeoutMsg.type, 'SAMS_NAV_FAILED', 'SC-6: timeout sends SAMS_NAV_FAILED');
+  bgApplyNavFailed(navigationLock, inQueueUrls, timeoutMsg);
+  assert.ok(!navigationLock.has(normUrl), 'SC-6: timeout releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-6: poll may retry after timeout when not in queue'
+  );
+
+  // SC-6: SAMS_NAV_FAILED never adds to inQueueUrls (contrast WM-4 sacred lock).
+  inQueueUrls.clear();
+  navigationLock.clear();
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.equal(inQueueUrls.size, 0, 'SC-6: NAV_FAILED must not populate inQueueUrls');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-6: poll lock released — background may re-navigate on next cycle'
+  );
+
+  // SC-6: stale inQueueUrls from another retailer must survive SAMS_NAV_FAILED (WM-5 parity).
+  const staleUrl = normalizeProductUrl('https://www.walmart.com/ip/stale-wm/1');
+  inQueueUrls.add(staleUrl);
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(inQueueUrls.has(staleUrl), 'SC-6: SAMS_NAV_FAILED must not clear unrelated inQueueUrls');
+  assert.ok(!navigationLock.has(normUrl), 'SC-6: SAMS_NAV_FAILED still releases Sam poll lock');
+}
+
 function main() {
   testSc1Hosts();
   testSc1Manifest();
@@ -439,8 +566,10 @@ function main() {
   testSc3ProductPageNavigateCartFallback();
   testSc5Source();
   runSc5FcfsNoSacredLockTests();
+  testSc6Source();
+  runSc6ErrorPathHardeningTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-3 + SC-5): hosts, manifest, FCFS product-page ATC, no sacred lock"
+    "samsclub-module-simulation PASS (SC-1 + SC-3 + SC-5 + SC-6): hosts, manifest, FCFS product-page ATC, no sacred lock, error-path hardening"
   );
 }
 
