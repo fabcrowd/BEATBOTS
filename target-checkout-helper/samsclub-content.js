@@ -75,7 +75,7 @@ async function scWaitFor(fn, timeoutMs = 8000, intervalMs = 200) {
   return null;
 }
 
-/** SC-5: FCFS success — ATC_SUCCESS only, never WALMART_IN_QUEUE / sacred lock. */
+/** SC-5: FCFS success — ATC_SUCCESS only, never sacred lock / queue messages. */
 function scSignalAtcSuccess(productUrl) {
   const url = productUrl || location.href;
   try {
