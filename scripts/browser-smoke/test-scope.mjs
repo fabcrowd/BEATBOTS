@@ -162,8 +162,8 @@ export const JOURNEYS = {
     retailer: 'samsclub',
     summary: "Sam's Club FCFS race — no sacred lock / inQueueUrls",
     impl: ['target-checkout-helper/samsclub-content.js (scSignalAtcSuccess → ATC_SUCCESS)'],
-    coverage: 'missing',
-    tests: [],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs'],
   },
   'SC-6': {
     id: 'SC-6',
@@ -240,7 +240,7 @@ export const EXTENSION_SUITE = {
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-3', 'WM-4', 'WM-5', 'WM-6', 'WM-7'],
-  'samsclub-module-simulation.mjs': ['SC-1', 'SC-3'],
+  'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5'],
 };
 
 /** Offline / manual scripts — not run by test:extension. */

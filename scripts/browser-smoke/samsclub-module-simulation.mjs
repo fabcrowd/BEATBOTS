@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * SC-1 / SC-3: Sam's Club retailer module — hosts, manifest, FCFS product ATC.
+ * SC-1 / SC-3 / SC-5: Sam's Club retailer module — hosts, manifest, FCFS product ATC.
  * Offline simulation — no browser required.
+ *
+ * SC-5: FCFS race — no sacred lock / inQueueUrls (contrast WM-4/WM-5).
  *
  * Run: node scripts/browser-smoke/samsclub-module-simulation.mjs
  */
@@ -105,7 +107,10 @@ function scDecideProductPageEntry(page) {
   const messages = [];
   const atc = scFindAtcButton(page);
   if (!atc || atc.disabled || !scIsVisible(atc)) {
-    messages.push({ type: 'SAMS_NAV_FAILED' });
+    messages.push({
+      type: 'SAMS_NAV_FAILED',
+      url: `https://www.samsclub.com${page.pathname}`,
+    });
     return { action: 'atc_unavailable', messages };
   }
   return { action: 'proceed_atc', messages: [] };
@@ -277,6 +282,153 @@ function testSc3ProductPageNavigateCartFallback() {
   assert.equal(page.navigatedTo, 'https://www.samsclub.com/cart');
 }
 
+/** Mirrors background.js normalizeProductUrl. */
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/** Mirrors background.js poll loop skip checks (inQueueUrls / navigationLock). */
+function bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return true;
+  if (navigationLock.has(normUrl)) return true;
+  return false;
+}
+
+/** Mirrors background.js SAMS_NAV_FAILED / WALMART_NAV_FAILED — navigationLock only. */
+function bgApplyNavFailed(navigationLock, inQueueUrls, message) {
+  const normFailUrl = normalizeProductUrl(message.url || '');
+  if (normFailUrl) navigationLock.delete(normFailUrl);
+  return normFailUrl;
+}
+
+/** Mirrors background.js handleATCSuccess lock release — never arms inQueueUrls. */
+function bgApplyAtcSuccess(navigationLock, inQueueUrls, message) {
+  const normUrl = normalizeProductUrl(message.url || '');
+  if (normUrl) {
+    navigationLock.delete(normUrl);
+    inQueueUrls.delete(normUrl);
+  }
+  return normUrl;
+}
+
+/** Mirrors scSignalAtcSuccess — SC-5: ATC_SUCCESS only. */
+function scFcfsSuccessMessages(productUrl) {
+  return [{ type: 'ATC_SUCCESS', url: productUrl }];
+}
+
+function runSc5FcfsNoSacredLockTests() {
+  const productUrl = 'https://www.samsclub.com/p/sc5-fcfs-race/123';
+  const normUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  // SC-5: scSignalAtcSuccess path emits ATC_SUCCESS only — never WALMART_IN_QUEUE.
+  const successMsgs = scFcfsSuccessMessages(productUrl);
+  assert.equal(successMsgs.length, 1, 'SC-5: FCFS success sends one message');
+  assert.equal(successMsgs[0].type, 'ATC_SUCCESS', 'SC-5: message type is ATC_SUCCESS');
+  assert.ok(
+    !successMsgs.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'SC-5: FCFS success must not emit WALMART_IN_QUEUE'
+  );
+
+  // SC-5: happy-path sim never arms sacred lock.
+  const happyPage = makePage({
+    pathname: '/p/sc5-fcfs-race/123',
+    elements: [
+      {
+        selectors: ['button[data-testid="add-to-cart"]'],
+        text: 'Add to cart',
+        disabled: false,
+      },
+      {
+        tag: 'a',
+        selectors: ['a[href="/cart"]'],
+        text: 'View cart',
+        href: '/cart',
+      },
+    ],
+  });
+  const happyResult = scHandleProductPageSim(happyPage, { productUrl });
+  assert.ok(
+    !happyResult.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'SC-5: product-page happy path must not arm sacred lock'
+  );
+  for (const msg of happyResult.messages) {
+    if (msg.type === 'ATC_SUCCESS') bgApplyAtcSuccess(navigationLock, inQueueUrls, msg);
+  }
+  assert.equal(inQueueUrls.size, 0, 'SC-5: ATC_SUCCESS must not populate inQueueUrls');
+
+  // SC-5: unavailable ATC → SAMS_NAV_FAILED — releases nav lock, no sacred lock.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  navigationLock.add(normUrl);
+  const failPage = makePage({
+    pathname: '/p/sc5-fcfs-race/123',
+    elements: [
+      {
+        selectors: ['button[data-testid="add-to-cart"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+  const failEntry = scDecideProductPageEntry(failPage);
+  const navFailMsg = failEntry.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(navFailMsg, 'SC-5: unavailable ATC sends SAMS_NAV_FAILED');
+  assert.ok(
+    !failEntry.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'SC-5: unavailable ATC must not arm sacred lock'
+  );
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFailMsg);
+  assert.ok(!navigationLock.has(normUrl), 'SC-5: SAMS_NAV_FAILED releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, 'SC-5: SAMS_NAV_FAILED must not populate inQueueUrls');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-5: FCFS race — poll may retry immediately after SAMS_NAV_FAILED'
+  );
+
+  // SC-5: contrast WM-5 — sacred lock would block poll; Sam's FCFS never arms it.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  navigationLock.add(normUrl);
+  // Simulate poll cycle: nav lock held while content script loads — no sacred lock.
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-5: navigationLock alone blocks poll during load'
+  );
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-5: FCFS race allows poll re-navigation after failure (no sacred lock)'
+  );
+
+  // SC-5: ATC_SUCCESS clears locks without ever adding to inQueueUrls.
+  inQueueUrls.add(normUrl); // hypothetical stale lock — Sam's should never add, but ATC clears.
+  navigationLock.add(normUrl);
+  bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: productUrl });
+  assert.ok(!navigationLock.has(normUrl), 'SC-5: ATC_SUCCESS releases navigationLock');
+  assert.ok(!inQueueUrls.has(normUrl), 'SC-5: ATC_SUCCESS clears inQueueUrls without arming');
+}
+
+function testSc5Source() {
+  assert.ok(SC_SRC.includes('scSignalAtcSuccess'), 'SC-5: scSignalAtcSuccess defined');
+  assert.ok(
+    SC_SRC.includes("type: 'ATC_SUCCESS'"),
+    'SC-5: scSignalAtcSuccess emits ATC_SUCCESS'
+  );
+  assert.ok(!SC_SRC.includes('WALMART_IN_QUEUE'), 'SC-5: source must not emit WALMART_IN_QUEUE');
+  assert.ok(!SC_SRC.includes('inQueueUrls'), 'SC-5: source must not reference sacred lock');
+  assert.ok(
+    SC_SRC.includes('SAMS_NAV_FAILED'),
+    'SC-5: FCFS failure uses SAMS_NAV_FAILED not sacred lock'
+  );
+}
+
 function main() {
   testSc1Hosts();
   testSc1Manifest();
@@ -285,8 +437,10 @@ function main() {
   testSc3DisabledAtcNotQueue();
   testSc3ProductPageHappyPath();
   testSc3ProductPageNavigateCartFallback();
+  testSc5Source();
+  runSc5FcfsNoSacredLockTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-3): hosts, manifest, FCFS product-page ATC"
+    "samsclub-module-simulation PASS (SC-1 + SC-3 + SC-5): hosts, manifest, FCFS product-page ATC, no sacred lock"
   );
 }
 
