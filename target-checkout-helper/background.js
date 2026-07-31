@@ -1107,7 +1107,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       stopMonitor().then(() => sendResponse({ ok: true }));
       return true;
 
-    case 'WALMART_NAV_FAILED': {
+    case 'WALMART_NAV_FAILED':
+    case 'SAMS_NAV_FAILED': {
       // Content script signals it couldn't proceed (PX timeout, ATC unavailable, etc.)
       // Release the navigation lock so the poll can try again on next cycle.
       const normFailUrl = normalizeProductUrl(message.url || '');
