@@ -651,6 +651,16 @@ function bgApplyWalmartNavFailed(navigationLock, inQueueUrls, message) {
   return normFailUrl;
 }
 
+/** Mirrors background.js handleATCSuccess lock release — clears sacred lock for endless re-entry. */
+function bgApplyAtcSuccess(navigationLock, inQueueUrls, message) {
+  const normUrl = normalizeProductUrl(message.url || '');
+  if (normUrl) {
+    navigationLock.delete(normUrl);
+    inQueueUrls.delete(normUrl);
+  }
+  return normUrl;
+}
+
 /** Mirrors wmHandleQueueRoom lock message — uses settings.productUrl, not /qp href. */
 function wmQueueRoomSacredLockMessages(settings) {
   const lockUrl = settings?.productUrl;
@@ -1079,6 +1089,43 @@ function runWm5SacredLockNavTests() {
   assert.ok(
     bgPollWouldSkipNavigation(queueNorm, inQueueUrls, navigationLock),
     'WM-5: poll cannot re-navigate tab while user holds queue position'
+  );
+
+  // WM-5: ATC_SUCCESS after queue clears sacred lock — endless mode may re-enter queue.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  assert.ok(inQueueUrls.has(normUrl), 'WM-5: sacred lock armed before ATC_SUCCESS');
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll blocked while sacred lock active'
+  );
+  bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: productUrl });
+  assert.ok(!inQueueUrls.has(normUrl), 'WM-5: ATC_SUCCESS clears inQueueUrls after queue');
+  assert.ok(!navigationLock.has(normUrl), 'WM-5: ATC_SUCCESS clears navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll may navigate after ATC_SUCCESS releases sacred lock'
+  );
+
+  // WM-5: multiple NAV_FAILED while sacred lock active — inQueueUrls must survive.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: productUrl,
+  });
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: productUrl,
+  });
+  assert.ok(inQueueUrls.has(normUrl), 'WM-5: repeated NAV_FAILED must not clear sacred lock');
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll still blocked after repeated NAV_FAILED during queue'
   );
 }
 

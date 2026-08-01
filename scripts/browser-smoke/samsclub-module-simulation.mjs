@@ -439,6 +439,19 @@ function scSimulateAtcTimeout(pathname) {
   };
 }
 
+/**
+ * Mirrors scHandleProductPage scWaitFor outcome — disabled ATC never satisfies wait.
+ * Contrast scDecideProductPageEntry which fails immediately on disabled button.
+ */
+function scSimulateWaitForDisabledAtc(page) {
+  const el = scFindAtcButton(page);
+  if (el && !el.disabled && scIsVisible(el)) {
+    return { action: 'proceed_atc', messages: [] };
+  }
+  // scWaitFor polled until deadline — disabled/invisible never satisfied
+  return scSimulateAtcTimeout(page.pathname);
+}
+
 function scDecideProductPageMissingAtc(page) {
   const atc = scFindAtcButton(page);
   if (!atc) {
@@ -554,6 +567,33 @@ function runSc6ErrorPathHardeningTests() {
   bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
   assert.ok(inQueueUrls.has(staleUrl), 'SC-6: SAMS_NAV_FAILED must not clear unrelated inQueueUrls');
   assert.ok(!navigationLock.has(normUrl), 'SC-6: SAMS_NAV_FAILED still releases Sam poll lock');
+
+  // SC-6: scWaitFor disabled ATC timeout — mirrors source wait loop, not immediate fail.
+  const disabledWaitUrl = 'https://www.samsclub.com/p/sc6-disabled-wait/888';
+  const disabledWaitNorm = normalizeProductUrl(disabledWaitUrl);
+  navigationLock.clear();
+  inQueueUrls.clear();
+  navigationLock.add(disabledWaitNorm);
+  const disabledWaitPage = makePage({
+    pathname: '/p/sc6-disabled-wait/888',
+    elements: [
+      {
+        selectors: ['button[data-testid="add-to-cart"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+  const disabledWaitResult = scSimulateWaitForDisabledAtc(disabledWaitPage);
+  assert.equal(disabledWaitResult.action, 'atc_timeout', 'SC-6: disabled ATC wait ends in timeout');
+  const disabledWaitMsg = disabledWaitResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(disabledWaitMsg, 'SC-6: disabled ATC wait timeout sends SAMS_NAV_FAILED');
+  bgApplyNavFailed(navigationLock, inQueueUrls, disabledWaitMsg);
+  assert.ok(
+    !navigationLock.has(disabledWaitNorm),
+    'SC-6: disabled wait timeout releases navigationLock'
+  );
+  assert.equal(inQueueUrls.size, 0, 'SC-6: disabled wait timeout must not arm sacred lock');
 }
 
 function main() {
