@@ -1035,6 +1035,24 @@ async function wmPollLoginImap2FA(loginSettings) {
   }
 }
 
+/**
+ * Product URL for sacred-lock messages — matches monitor list used by wmHandleQueueRoom.
+ * On non-product pages (e.g. /qp) uses the first monitored Walmart /ip/ URL.
+ */
+function wmResolveSacredLockProductUrl(data) {
+  const allProducts = data.monitor?.products || [];
+  const walmartProducts = allProducts.filter(p => /walmart\.com\/ip\//i.test(p.url));
+  if (!walmartProducts.length) return null;
+  const page = wmGetPageType();
+  if (page === 'product') {
+    const matched = walmartProducts.find(p => {
+      try { return new URL(p.url).pathname === location.pathname; } catch { return false; }
+    });
+    return matched?.url || null;
+  }
+  return walmartProducts[0]?.url || null;
+}
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
 let wmRuntimeEnabled = true;
@@ -1093,10 +1111,18 @@ async function _wmInit() {
   if (wmIsPxPage()) {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
+    // PX on /qp must still arm sacred lock — wmHandleQueueRoom never runs when PX fires first.
+    const pxLockUrl = location.pathname.startsWith('/qp')
+      ? wmResolveSacredLockProductUrl(data)
+      : null;
+    if (pxLockUrl) {
+      try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: pxLockUrl }); } catch (_) {}
+    }
     setTimeout(() => {
       if (wmIsPxPage()) {
         console.log('[WMT] PX page still showing after 2min — releasing nav lock');
-        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
+        const failUrl = pxLockUrl || location.href;
+        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: failUrl }); } catch (_) {}
       }
     }, 2 * 60 * 1000);
     return;

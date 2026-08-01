@@ -125,21 +125,31 @@ function wmIsPxPage(page) {
   );
 }
 
-/** Mirrors wmInit PX branch — wait for redirect; no retry or sacred lock. */
-function wmPxInitDecision(page) {
+/** Mirrors wmInit PX branch — wait for redirect; arms sacred lock on /qp when monitored. */
+function wmPxInitDecision(page, monitorData = null) {
   if (!wmIsPxPage(page)) return { action: 'not_px', messages: [] };
-  return { action: 'px_wait', messages: [] };
+  const messages = [];
+  if (page.pathname.startsWith('/qp') && monitorData?.products?.[0]?.url) {
+    messages.push({ type: 'WALMART_IN_QUEUE', url: monitorData.products[0].url });
+  }
+  return { action: 'px_wait', messages };
 }
 
 /**
  * Mirrors wmInit PX setTimeout (2min) — NAV_FAILED only if still on PX page.
+ * On /qp with a monitored productUrl, failUrl uses productUrl (not /qp href).
  * @param {ReturnType<typeof makePage>} page
  * @param {number} elapsedMs
+ * @param {string|null} lockUrl
  */
-function wmPxTimeoutMessages(page, elapsedMs = 120000) {
+function wmPxTimeoutMessages(page, elapsedMs = 120000, lockUrl = null) {
   if (elapsedMs < 120000) return [];
   if (!wmIsPxPage(page)) return [];
-  return [{ type: 'WALMART_NAV_FAILED', url: `https://www.walmart.com${page.pathname}` }];
+  const failUrl =
+    page.pathname.startsWith('/qp') && lockUrl
+      ? lockUrl
+      : `https://www.walmart.com${page.pathname}`;
+  return [{ type: 'WALMART_NAV_FAILED', url: failUrl }];
 }
 
 /** Mirrors wmHasQueueIndicators() — walmart-content.js */
@@ -857,6 +867,39 @@ function runWm6QueueErrorPathTests() {
     bgPollWouldSkipNavigation(queuePxNorm, inQueueUrls, navigationLock),
     'WM-6: poll still blocked after PX timeout while sacred lock active'
   );
+
+  // WM-6: PX on /qp waiting room — arm sacred lock before wait; timeout uses productUrl.
+  const qpProductUrl = 'https://www.walmart.com/ip/wm6-qp-px-sacred/108';
+  const qpProductNorm = normalizeProductUrl(qpProductUrl);
+  const qpPxPage = makePage({
+    pathname: '/qp/waiting-room',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  const monitorData = { products: [{ url: qpProductUrl }] };
+  inQueueUrls.clear();
+  navigationLock.clear();
+  const qpPxDecision = wmPxInitDecision(qpPxPage, monitorData);
+  assert.equal(qpPxDecision.action, 'px_wait', 'WM-6: /qp PX enters px_wait');
+  const qpLockMsg = qpPxDecision.messages.find((m) => m.type === 'WALMART_IN_QUEUE');
+  assert.ok(qpLockMsg, 'WM-6: /qp PX arms sacred lock via monitored productUrl');
+  assert.ok(!qpLockMsg.url.includes('/qp'), 'WM-6: /qp PX lock uses productUrl not /qp href');
+  bgApplyWalmartInQueue(inQueueUrls, qpLockMsg);
+  navigationLock.add(qpProductNorm);
+  assert.ok(inQueueUrls.has(qpProductNorm), 'WM-6: /qp PX populates inQueueUrls');
+  const qpPxTimeoutMsgs = wmPxTimeoutMessages(qpPxPage, 120000, qpProductUrl);
+  assert.equal(qpPxTimeoutMsgs.length, 1, 'WM-6: /qp PX timeout fires after 2min');
+  assert.equal(qpPxTimeoutMsgs[0].url, qpProductUrl, 'WM-6: /qp PX timeout NAV_FAILED uses productUrl');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, qpPxTimeoutMsgs[0]);
+  assert.ok(inQueueUrls.has(qpProductNorm), 'WM-6: /qp PX timeout must not clear sacred lock');
+  assert.ok(!navigationLock.has(qpProductNorm), 'WM-6: /qp PX timeout releases navigationLock');
+  assert.ok(
+    bgPollWouldSkipNavigation(qpProductNorm, inQueueUrls, navigationLock),
+    'WM-6: poll still blocked after /qp PX timeout while sacred lock active'
+  );
+
+  // WM-6: /qp PX without monitored productUrl — no sacred lock armed.
+  const qpPxNoMonitor = wmPxInitDecision(qpPxPage, null);
+  assert.equal(qpPxNoMonitor.messages.length, 0, 'WM-6: /qp PX without monitor sends no lock');
 
   // PX cleared before timeout — no NAV_FAILED (redirect succeeded).
   const clearedPxPage = makePage({
