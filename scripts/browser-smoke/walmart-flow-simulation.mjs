@@ -136,15 +136,20 @@ function wmIsPxPage(page) {
 }
 
 /**
- * Mirrors wmInit PX guard — early return, 2min timeout → WALMART_NAV_FAILED if still PX.
- * Returns scheduled messages (timeout path simulated synchronously for WM-6).
+ * Mirrors wmInit PX guard — early return, timeout → WALMART_NAV_FAILED if still PX.
+ * On /qp or checkout queue, arms WALMART_IN_QUEUE with productUrl (WM-4/WM-6).
  */
-function wmSimulatePxInitGuard(page, productUrl, { simulateTimeout = false } = {}) {
+function wmSimulatePxInitGuard(page, productUrl, { simulateTimeout = false, pageType } = {}) {
   const messages = [];
   if (!wmIsPxPage(page)) return { earlyReturn: false, messages };
   messages.push({ phase: 'px_wait' });
+  const pxPage = pageType ?? wmGetPageType(page);
+  if ((pxPage === 'queue-room' || pxPage === 'queue') && productUrl) {
+    messages.push({ type: 'WALMART_IN_QUEUE', url: productUrl });
+  }
+  const navFailUrl = productUrl || `https://www.walmart.com${page.pathname}`;
   if (simulateTimeout && wmIsPxPage(page)) {
-    messages.push({ type: 'WALMART_NAV_FAILED', url: productUrl });
+    messages.push({ type: 'WALMART_NAV_FAILED', url: navFailUrl });
   }
   return { earlyReturn: true, messages };
 }
@@ -719,6 +724,10 @@ function runWm6ErrorPathTests() {
   assert.ok(WM_SRC.includes('function wmAtcWaitTimeoutMs'), 'WM-6: wmAtcWaitTimeoutMs must exist in walmart-content.js');
   assert.ok(WM_SRC.includes('function wmPxTimeoutMs'), 'WM-6: wmPxTimeoutMs must exist in walmart-content.js');
   assert.ok(
+    WM_SRC.includes("page === 'queue-room' || page === 'queue'") && WM_SRC.includes('WALMART_IN_QUEUE'),
+    'WM-6: /qp or checkout-queue PX must arm WALMART_IN_QUEUE with productUrl'
+  );
+  assert.ok(
     WM_SRC.includes('2 * 60 * 1000'),
     'WM-6: prod PX timeout must remain 2 minutes in walmart-content.js'
   );
@@ -788,6 +797,30 @@ function runWm6ErrorPathTests() {
   }
   assert.ok(!inQ.has(norm), 'WM-6: PX NAV_FAILED must not arm inQueueUrls');
   assert.ok(!navL.has(norm), 'WM-6: PX NAV_FAILED clears navigationLock');
+
+  // WM-6: /qp PX must arm sacred lock with productUrl, not /qp href (WM-4).
+  const qpPxPage = makePage({
+    pathname: '/qp/waiting-room-px',
+    bodyText: "Hang tight! We're loading your experience.",
+  });
+  assert.equal(wmGetPageType(qpPxPage), 'queue-room', 'WM-6: /qp PX → queue-room page type');
+  const qpPxGuard = wmSimulatePxInitGuard(qpPxPage, productUrl, { simulateTimeout: true });
+  assert.ok(
+    qpPxGuard.messages.some((m) => m.type === 'WALMART_IN_QUEUE' && m.url === productUrl),
+    'WM-6: /qp PX must arm WALMART_IN_QUEUE with productUrl'
+  );
+  const qpPxTimeout = qpPxGuard.messages.find((m) => m.type === 'WALMART_NAV_FAILED');
+  assert.equal(qpPxTimeout?.url, productUrl, 'WM-6: /qp PX timeout NAV_FAILED uses productUrl not /qp href');
+  const qpInQ = new Set();
+  const qpNav = new Set();
+  for (const m of qpPxGuard.messages.filter((x) => x.type)) {
+    bgApplyWalmartMessage(qpInQ, qpNav, m);
+  }
+  assert.ok(qpInQ.has(norm), 'WM-6: /qp PX sacred lock populates inQueueUrls on product key');
+  assert.ok(
+    !qpInQ.has(normalizeProductUrl('https://www.walmart.com/qp/waiting-room-px')),
+    'WM-6: /qp PX must not lock /qp URL as sacred key'
+  );
 
   const atcFailPage = makePage({
     pathname: '/ip/wm6-atc-fail/333',
