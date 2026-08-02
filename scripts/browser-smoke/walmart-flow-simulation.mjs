@@ -118,6 +118,8 @@ function wmIsPxPage(page) {
 function wmSimulatePxInitGuard(page, productUrl, { simulateTimeout = false } = {}) {
   const messages = [];
   if (!wmIsPxPage(page)) return { earlyReturn: false, messages };
+  // Queue indicators take priority — do not PX-guard when queue is present (WM-6).
+  if (wmHasQueueIndicators(page)) return { earlyReturn: false, messages };
   messages.push({ phase: 'px_wait' });
   if (simulateTimeout && wmIsPxPage(page)) {
     messages.push({ type: 'WALMART_NAV_FAILED', url: productUrl });
@@ -713,6 +715,29 @@ function runWm6ErrorPathTests() {
     elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
   });
   assert.equal(wmIsPxPage(pxCaptchaPage), true, 'WM-6: #px-captcha element detected');
+
+  const checkoutPxQueuePage = makePage({
+    pathname: '/checkout/checkout-queue-px',
+    bodyText:
+      "Hang tight! We're loading your experience. Estimated wait time while we prepare your checkout.",
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  assert.equal(wmIsPxPage(checkoutPxQueuePage), true, 'WM-6: checkout PX+queue detected as PX');
+  assert.equal(
+    wmHasQueueIndicators(checkoutPxQueuePage),
+    true,
+    'WM-6: checkout PX+queue has queue indicators'
+  );
+  const pxQueueGuard = wmSimulatePxInitGuard(checkoutPxQueuePage, productUrl);
+  assert.equal(
+    pxQueueGuard.earlyReturn,
+    false,
+    'WM-6: checkout PX+queue must not early-return from PX guard'
+  );
+  assert.ok(
+    !pxQueueGuard.messages.some((m) => m.type === 'WALMART_NAV_FAILED'),
+    'WM-6: checkout PX+queue must not schedule PX timeout NAV_FAILED'
+  );
 
   const inQ = new Set();
   const navL = new Set([norm]);

@@ -63,6 +63,15 @@ export const FIXTURE_E2E_ROUTES = [
     sacredLockProductPath: '/ip/mock-wm6-checkout/789',
   },
   {
+    host: 'www.walmart.com',
+    path: '/checkout/checkout-queue-px',
+    file: MOCK_URLS.walmartCheckoutQueuePx,
+    initLog: '[WMT] init',
+    journey: 'WM-6',
+    invariants: ['sacred-lock-checkout', 'wm5-sacred-survives-nav-failed'],
+    sacredLockProductPath: '/ip/mock-wm6-checkout-px/790',
+  },
+  {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,

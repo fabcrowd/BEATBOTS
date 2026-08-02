@@ -266,6 +266,7 @@ export const MOCK_URLS = {
   walmartProductQueue: 'fixtures/walmart-product-queue.html',
   walmartQpRoom: 'fixtures/walmart-qp-room.html',
   walmartCheckoutQueue: 'fixtures/walmart-checkout-queue.html',
+  walmartCheckoutQueuePx: 'fixtures/walmart-checkout-queue-px.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
 };
 

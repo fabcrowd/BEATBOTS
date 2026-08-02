@@ -1092,7 +1092,8 @@ async function _wmInit() {
   // PerimeterX "hang tight" challenge — Walmart's bot detection landing page.
   // It auto-redirects after a few seconds. Do NOT retry or navigate — just wait.
   // The SPA watcher will call wmInit() again when the redirect fires.
-  if (wmIsPxPage()) {
+  // Queue indicators take priority on /checkout — PX overlay must not block sacred lock (WM-6).
+  if (wmIsPxPage() && !wmHasQueueIndicators()) {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
     setTimeout(() => {

@@ -187,6 +187,28 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     });
     assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
   }
+
+  if (invariants.includes('wm5-sacred-survives-nav-failed')) {
+    const lockUrl = route.sacredLockProductPath
+      ? `http://${route.host}:${port}${route.sacredLockProductPath}`
+      : pageUrl;
+    const normLockUrl = normalizeProductUrl(lockUrl);
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: pageUrl });
+      const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const afterInQueue = after?.inQueueUrls || [];
+      const afterNavLock = after?.navigationLock || [];
+      assert.ok(
+        afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: sacred lock must survive ${navFailTypes[i]} cycle ${i + 1} on ${normLockUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+      );
+      assert.ok(
+        !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 WM-5: ${navFailTypes[i]} cycle ${i + 1} must clear navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
+      );
+    }
+  }
 }
 
 function routeWaitMs(route) {
