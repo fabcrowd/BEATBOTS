@@ -209,11 +209,45 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       );
     }
   }
+
+  if (invariants.includes('wm5-pre-timeout-live-poll-cycle')) {
+    const productUrl = `http://${route.host}:${port}${route.sacredLockProductPath}`;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const urlBeforePoll = page.url();
+
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: productUrl, qty: 1, name: 'Fixture WM-5 poll' }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const afterPoll = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = afterPoll?.inQueueUrls || [];
+    const afterNavLock = afterPoll?.navigationLock || [];
+    assert.ok(
+      afterInQueue.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: sacred lock must persist across live poll cycles pre-timeout on ${normProductUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: live poll must not re-arm navigationLock while sacred lock holds on ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+    assert.equal(
+      page.url(),
+      urlBeforePoll,
+      `FIX-3 WM-5: live poll must not re-navigate checkout queue tab pre-timeout`
+    );
+  }
 }
 
 function routeWaitMs(route) {
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;
+  if (route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')) return 8000;
   return 6000;
 }
 
