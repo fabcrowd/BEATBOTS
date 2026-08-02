@@ -71,7 +71,7 @@ const FIXTURE_MARKERS = {
       'data-tch-fixture="walmart-checkout-queue-px"',
       'data-tch-path="/checkout"',
       'estimated wait time',
-      '#px-captcha',
+      'id="px-captcha"',
       'hang tight',
     ],
   },
