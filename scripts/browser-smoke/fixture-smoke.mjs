@@ -65,6 +65,15 @@ const FIXTURE_MARKERS = {
       'estimated wait time',
     ],
   },
+  walmartQpRoomPx: {
+    fixtureId: 'walmart-qp-room-px',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-qp-room-px"',
+      'data-tch-path="/qp/waiting-room-px"',
+      'hang tight',
+    ],
+  },
   walmartCheckoutQueue: {
     fixtureId: 'walmart-checkout-queue',
     journeys: ['WM-6'],

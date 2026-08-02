@@ -136,17 +136,30 @@ function wmIsPxPage(page) {
 }
 
 /**
- * Mirrors wmInit PX guard — early return, 2min timeout → WALMART_NAV_FAILED if still PX.
- * Returns scheduled messages (timeout path simulated synchronously for WM-6).
+ * Mirrors wmInit PX guard — early return on non-queue pages, 2min timeout → WALMART_NAV_FAILED.
+ * Queue-room and checkout-queue pages skip PX guard so sacred lock can arm on productUrl.
  */
-function wmSimulatePxInitGuard(page, productUrl, { simulateTimeout = false } = {}) {
-  const messages = [];
-  if (!wmIsPxPage(page)) return { earlyReturn: false, messages };
-  messages.push({ phase: 'px_wait' });
-  if (simulateTimeout && wmIsPxPage(page)) {
-    messages.push({ type: 'WALMART_NAV_FAILED', url: productUrl });
+function wmSimulateInitPxGuard(page, settings = {}, { simulateTimeout = false } = {}) {
+  const pageType = wmGetPageType(page);
+  if (pageType === 'queue-room' || pageType === 'queue') {
+    return { earlyReturn: false, pageType, handler: wmInitDispatch(pageType), messages: [] };
   }
-  return { earlyReturn: true, messages };
+  if (!wmIsPxPage(page)) {
+    return { earlyReturn: false, pageType, handler: wmInitDispatch(pageType), messages: [] };
+  }
+  const messages = [{ phase: 'px_wait' }];
+  if (simulateTimeout && wmIsPxPage(page)) {
+    messages.push({
+      type: 'WALMART_NAV_FAILED',
+      url: settings?.productUrl || page.href || '',
+    });
+  }
+  return { earlyReturn: true, pageType, handler: null, messages };
+}
+
+/** @deprecated use wmSimulateInitPxGuard */
+function wmSimulatePxInitGuard(page, productUrl, opts = {}) {
+  return wmSimulateInitPxGuard(page, { productUrl }, opts);
 }
 
 /** Mirrors wmHasQueueIndicators() — walmart-content.js */
@@ -719,6 +732,10 @@ function runWm6ErrorPathTests() {
   assert.ok(WM_SRC.includes('function wmAtcWaitTimeoutMs'), 'WM-6: wmAtcWaitTimeoutMs must exist in walmart-content.js');
   assert.ok(WM_SRC.includes('function wmPxTimeoutMs'), 'WM-6: wmPxTimeoutMs must exist in walmart-content.js');
   assert.ok(
+    /page !== 'queue-room' && page !== 'queue' && wmIsPxPage\(\)/.test(WM_SRC),
+    'WM-6: PX guard must skip queue-room and checkout-queue pages'
+  );
+  assert.ok(
     WM_SRC.includes('2 * 60 * 1000'),
     'WM-6: prod PX timeout must remain 2 minutes in walmart-content.js'
   );
@@ -763,7 +780,7 @@ function runWm6ErrorPathTests() {
     'WM-6: PX page must not arm sacred queue wait'
   );
 
-  const pxGuard = wmSimulatePxInitGuard(pxPage, productUrl, { simulateTimeout: true });
+  const pxGuard = wmSimulateInitPxGuard(pxPage, { productUrl }, { simulateTimeout: true });
   assert.equal(pxGuard.earlyReturn, true, 'WM-6: PX guard early-returns from wmInit');
   assert.ok(
     !pxGuard.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
@@ -788,6 +805,35 @@ function runWm6ErrorPathTests() {
   }
   assert.ok(!inQ.has(norm), 'WM-6: PX NAV_FAILED must not arm inQueueUrls');
   assert.ok(!navL.has(norm), 'WM-6: PX NAV_FAILED clears navigationLock');
+
+  // WM-6: /qp with PX overlay must reach queue-room handler (sacred lock on productUrl).
+  const qpPxPage = makePage({
+    pathname: '/qp/waiting-room-px',
+    bodyText: "Hang tight! We're loading your experience.",
+  });
+  assert.equal(wmGetPageType(qpPxPage), 'queue-room', 'WM-6: /qp pathname is queue-room even with PX text');
+  const qpPxGuard = wmSimulateInitPxGuard(qpPxPage, { productUrl });
+  assert.equal(qpPxGuard.earlyReturn, false, 'WM-6: /qp PX must not early-return from wmInit');
+  assert.equal(qpPxGuard.handler, 'wmHandleQueueRoom', 'WM-6: /qp PX dispatches queue-room handler');
+  const qpLock = wmSimulateQueueRoomLock({ productUrl });
+  assert.ok(qpLock.armed, 'WM-6: /qp PX must arm sacred lock via productUrl');
+  const qpInQ = new Set();
+  const qpNav = new Set();
+  for (const m of qpLock.messages) {
+    bgApplyWalmartMessage(qpInQ, qpNav, m);
+  }
+  assert.ok(qpInQ.has(norm), 'WM-6: /qp PX sacred lock populates inQueueUrls on product key');
+
+  // WM-6: checkout queue with PX overlay must reach queue handler.
+  const checkoutQueuePx = makePage({
+    pathname: '/checkout',
+    bodyText: "Hang tight! We're loading your experience. You are in line.",
+    elements: [{ selectors: ['[class*="QueuePage"]'], tag: 'div' }],
+  });
+  assert.equal(wmGetPageType(checkoutQueuePx), 'queue', 'WM-6: checkout + queue indicators is queue page');
+  const checkoutPxGuard = wmSimulateInitPxGuard(checkoutQueuePx, { productUrl });
+  assert.equal(checkoutPxGuard.earlyReturn, false, 'WM-6: checkout-queue PX must not early-return');
+  assert.equal(checkoutPxGuard.handler, 'wmHandleQueue', 'WM-6: checkout-queue PX dispatches queue handler');
 
   const atcFailPage = makePage({
     pathname: '/ip/wm6-atc-fail/333',

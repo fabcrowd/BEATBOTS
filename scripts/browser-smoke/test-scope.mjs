@@ -277,6 +277,7 @@ export const MOCK_URLS = {
   walmartProductQueue: 'fixtures/walmart-product-queue.html',
   walmartProductQueueTimeout: 'fixtures/walmart-product-queue-timeout.html',
   walmartQpRoom: 'fixtures/walmart-qp-room.html',
+  walmartQpRoomPx: 'fixtures/walmart-qp-room-px.html',
   walmartCheckoutQueue: 'fixtures/walmart-checkout-queue.html',
   walmartProductPx: 'fixtures/walmart-product-px.html',
   walmartProductPxCaptcha: 'fixtures/walmart-product-px-captcha.html',

@@ -1229,22 +1229,6 @@ async function _wmInit() {
     }
   }
 
-  // PerimeterX "hang tight" challenge — Walmart's bot detection landing page.
-  // It auto-redirects after a few seconds. Do NOT retry or navigate — just wait.
-  // The SPA watcher will call wmInit() again when the redirect fires.
-  if (wmIsPxPage()) {
-    wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
-    console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
-    const pxTimeoutMs = wmPxTimeoutMs();
-    setTimeout(() => {
-      if (wmIsPxPage()) {
-        console.log('[WMT] PX page still showing — releasing nav lock');
-        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
-      }
-    }, pxTimeoutMs);
-    return;
-  }
-
   const page = wmGetPageType();
   console.log('[WMT] init:', page, 'enabled:', data.enabled, 'monitor:', !!data.monitor?.active);
 
@@ -1287,6 +1271,23 @@ async function _wmInit() {
     checkoutSound:         data.checkoutSound !== false,
     productUrl:            matchedProduct?.url || null,
   };
+
+  // PerimeterX "hang tight" challenge — auto-redirects after a few seconds.
+  // Queue pages (/qp, checkout queue) must reach queue handlers first so sacred
+  // lock arms on productUrl, not on the transient PX overlay.
+  if (page !== 'queue-room' && page !== 'queue' && wmIsPxPage()) {
+    wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
+    console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
+    const pxTimeoutMs = wmPxTimeoutMs();
+    const pxFailUrl = settings.productUrl || location.href;
+    setTimeout(() => {
+      if (wmIsPxPage()) {
+        console.log('[WMT] PX page still showing — releasing nav lock');
+        wmSignalNavFailed(pxFailUrl);
+      }
+    }, pxTimeoutMs);
+    return;
+  }
 
   if (page === 'product') {
     // Extract OID from __NEXT_DATA__ and report to background — enables backend-link
