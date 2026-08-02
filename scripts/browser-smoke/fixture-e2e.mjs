@@ -223,6 +223,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
 
+    // START_MONITOR calls stopMonitor() which clears inQueueUrls — re-arm sacred lock.
+    await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: productUrl });
+    // Clear any navigationLock the poll may have raced in before sacred lock was re-armed.
+    await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: productUrl });
+
     await new Promise((r) => setTimeout(r, 3000));
 
     const afterPoll = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
