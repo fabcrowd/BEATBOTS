@@ -83,6 +83,16 @@ const FIXTURE_MARKERS = {
       'estimated wait time',
     ],
   },
+  walmartCheckoutQueuePx: {
+    fixtureId: 'walmart-checkout-queue-px',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-queue-px"',
+      'data-tch-path="/checkout/checkout-queue-px"',
+      'hang tight',
+      'estimated wait time',
+    ],
+  },
   walmartProductPx: {
     fixtureId: 'walmart-product-px',
     journeys: ['WM-6'],
