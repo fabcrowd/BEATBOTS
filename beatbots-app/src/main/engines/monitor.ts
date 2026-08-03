@@ -161,10 +161,10 @@ export class MonitorEngine extends EventEmitter {
   private passesFilters(result: StockResult): boolean {
     if (!this.config) return true
 
-    // High stock filter
+    // High stock filter — qty 0/null often means "unknown" while status is sellable.
     if (this.config.highStockOnly) {
-      const qty = result.availableQty ?? 0
-      if (qty < this.config.highStockThreshold) return false
+      const qty = result.availableQty
+      if (qty != null && qty > 0 && qty < this.config.highStockThreshold) return false
     }
 
     // Max price filter

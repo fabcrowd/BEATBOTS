@@ -1134,6 +1134,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    case 'WALMART_QUEUE_RELEASE': {
+      const normReleaseUrl = normalizeProductUrl(message.url || '');
+      if (normReleaseUrl) {
+        inQueueUrls.delete(normReleaseUrl);
+        navigationLock.delete(normReleaseUrl);
+        console.log('[TCH bg] WALMART_QUEUE_RELEASE:', normReleaseUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
     case 'WM_OFFER_ID_READY': {
       // Content script extracted OID from __NEXT_DATA__ on a Walmart product page.
       // Store it on the matching monitored product so wmDirectAtc() can use it.

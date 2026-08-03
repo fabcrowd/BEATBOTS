@@ -463,8 +463,8 @@ await test('Monitor — parseStockStatus handles all fulfillment shapes', () => 
 await test('Monitor — high stock & max price filters', () => {
   function passesFilters(result, config) {
     if (config.highStockOnly) {
-      const qty = result.availableQty ?? 0;
-      if (qty < config.highStockThreshold) return false;
+      const qty = result.availableQty;
+      if (qty != null && qty > 0 && qty < config.highStockThreshold) return false;
     }
     if (config.maxPrice != null && result.price != null) {
       if (result.price > config.maxPrice) return false;
@@ -478,7 +478,7 @@ await test('Monitor — high stock & max price filters', () => {
   const stockFilter = { highStockOnly: true, highStockThreshold: 10, maxPrice: null };
   assert.equal(passesFilters({ inStock: true, availableQty: 5 }, stockFilter), false, 'qty 5 < threshold 10');
   assert.equal(passesFilters({ inStock: true, availableQty: 15 }, stockFilter), true, 'qty 15 >= threshold 10');
-  assert.equal(passesFilters({ inStock: true }, stockFilter), false, 'missing qty fails high stock');
+  assert.equal(passesFilters({ inStock: true }, stockFilter), true, 'missing qty passes high stock (unknown API qty)');
 
   const priceFilter = { highStockOnly: false, highStockThreshold: 10, maxPrice: 29.99 };
   assert.equal(passesFilters({ inStock: true, price: 25.00 }, priceFilter), true);

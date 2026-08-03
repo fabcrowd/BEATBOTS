@@ -232,6 +232,7 @@ function wmShowToast(message, type = 'info') {
 async function wmWaitFor(selectorFn, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (!wmRuntimeEnabled) return null;
     const result = selectorFn();
     if (result) return result;
     await wmSleep(100);
@@ -459,6 +460,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
   try {
   while (Date.now() - started < maxWaitMs) {
+    if (!wmRuntimeEnabled) return;
     if (!queuePassedSignal) await wmSleep(1000);
 
     // Price guard — use DOM-only (liveOnly=true): __NEXT_DATA__ is frozen at
@@ -545,6 +547,7 @@ async function wmHandleQueueRoom(settings) {
   const started = Date.now();
 
   while (Date.now() - started < maxWaitMs) {
+    if (!wmRuntimeEnabled) return;
     await wmSleep(5000);
     // When the waiting room clears, Walmart redirects away from /qp automatically.
     // The SPA watcher fires wmInit() on URL change — no extra action needed here.
@@ -680,6 +683,7 @@ async function wmHandleQueue(settings) {
   const started = Date.now();
 
   while (Date.now() - started < maxWaitMs) {
+    if (!wmRuntimeEnabled) return;
     await wmSleep(2000);
     if (!wmIsQueuePage()) {
       console.log('[WMT] Queue cleared');
@@ -849,6 +853,7 @@ async function wmHandlePayment(settings) {
 }
 
 async function wmHandleReview(settings) {
+  if (!wmRuntimeEnabled) return;
   console.log('[WMT] Review reached');
   try {
     if (!sessionStorage.getItem('wm:checkoutTelemetrySent')) {
@@ -909,6 +914,7 @@ async function wmHandleCheckout(settings) {
   const started = Date.now();
 
   while (Date.now() - started < 10 * 60 * 1000) {
+    if (!wmRuntimeEnabled) return;
     if (wmIsQueuePage()) {
       await wmHandleQueue(settings);
       return;
@@ -1001,6 +1007,7 @@ async function wmTryImap2FA(loginSettings) {
 async function wmPollLoginImap2FA(loginSettings) {
   const deadline = Date.now() + 150000;
   while (Date.now() < deadline && /\/account\/login/i.test(location.pathname)) {
+    if (!wmRuntimeEnabled) return;
     if (await wmTryImap2FA(loginSettings)) return;
     await wmSleep(2500);
   }
@@ -1010,6 +1017,12 @@ async function wmPollLoginImap2FA(loginSettings) {
 
 let wmRuntimeEnabled = true;
 let wmInitInFlight = false;
+
+function wmReleaseAutomationLocks() {
+  try {
+    chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_RELEASE', url: location.href });
+  } catch (_) {}
+}
 
 async function wmInit() {
   // Concurrency guard: SPA watcher + message listener can both call wmInit at the
@@ -1172,6 +1185,7 @@ chrome.runtime.onMessage.addListener((message) => {
     wmRuntimeEnabled = !!message.enabled;
     if (!wmRuntimeEnabled) {
       document.getElementById('wmt-toast')?.remove();
+      wmReleaseAutomationLocks();
       return;
     }
     wmInit();
