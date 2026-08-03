@@ -682,9 +682,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 
   if (invariants.includes('nav-failed-releases-lock')) {
-    const releasingLog = route.host.includes('samsclub')
-      ? logs.some((l) => l.includes('releasing nav lock'))
-      : logs.some((l) => l.includes('releasing navigation lock'));
+    const releasingLog = logs.some((l) => l.includes('releasing navigation lock'));
     assert.ok(
       releasingLog,
       `FIX-3 ${route.journey}: expected NAV_FAILED release log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
