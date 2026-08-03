@@ -826,13 +826,16 @@ async function runBackgroundPoll() {
         ],
       });
 
-      // Never navigate a tab that is already in cart/checkout/queue.
-      // That would kick the user out of their queue position.
+      // WM-5: never navigate away from cart/checkout when sacred lock is active —
+      // that would destroy queue position. WM-6 error paths (no sacred lock) may
+      // re-navigate to product after NAV_FAILED so poll can re-arm navigationLock.
       if (tabId) {
         try {
           const currentTab = await chrome.tabs.get(tabId);
-          if (isInCheckoutFlow(currentTab?.url)) {
-            console.log(`[TCH bg] Tab ${tabId} already in checkout flow (${currentTab.url}) — not navigating`);
+          if (isInCheckoutFlow(currentTab?.url) && inQueueUrls.has(normUrl)) {
+            console.log(
+              `[TCH bg] Tab ${tabId} in checkout flow with sacred lock (${currentTab.url}) — not navigating`
+            );
             break;
           }
         } catch { /* tab closed — fall through to create new one */ }
