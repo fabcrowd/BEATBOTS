@@ -164,6 +164,24 @@ const FIXTURE_MARKERS = {
       'data-tch-cart-checkout-wait-ms="750"',
     ],
   },
+  samsclubCheckoutReview: {
+    fixtureId: 'samsclub-checkout-review',
+    journeys: ['SC-4', 'TGT-4'],
+    markers: [
+      'data-tch-fixture="samsclub-checkout-review"',
+      'data-tch-path="/checkout"',
+      'data-automation-id="place-order-btn"',
+    ],
+  },
+  samsclubCheckoutSpaTimeout: {
+    fixtureId: 'samsclub-checkout-spa-timeout',
+    journeys: ['SC-4', 'SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-checkout-spa-timeout"',
+      'data-tch-path="/checkout/spa-stall"',
+      'data-tch-checkout-timeout-ms="750"',
+    ],
+  },
   walmartCartNoCheckout: {
     fixtureId: 'walmart-cart-no-checkout',
     journeys: ['WM-6'],

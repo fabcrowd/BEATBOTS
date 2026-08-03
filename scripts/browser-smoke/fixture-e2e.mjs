@@ -594,6 +594,49 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('sc4-manual-review')) {
+    assert.ok(
+      logs.some((l) => l.includes('[SC] review reached')),
+      `FIX-3 SC-4: expected review reached on ${pageUrl}, got: ${logs.slice(0, 8).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('autoPlaceOrder: clicking Place Order')),
+      `FIX-3 SC-4: must not auto-click Place Order when autoPlaceOrder is off`
+    );
+    const clicked = await page.evaluate(() => {
+      const btn = document.querySelector('[data-automation-id="place-order-btn"]');
+      return btn?.dataset?.tchFixtureClicked === '1';
+    });
+    assert.equal(clicked, false, 'FIX-3 SC-4: Place Order button must remain unclicked');
+  }
+
+  if (invariants.includes('sc4-checkout-spa-timeout')) {
+    assert.ok(
+      logs.some((l) => l.includes('scHandleCheckout timed out')),
+      `FIX-3 SC-4: checkout SPA timeout must log timed out on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('releasing navigation lock')),
+      `FIX-3 SC-4: checkout SPA timeout must log NAV_FAILED release on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const productUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 SC-4: checkout SPA timeout must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 SC-4: checkout SPA timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
   if (invariants.includes('sc2-cart-checkout-missing')) {
     assert.ok(
       logs.some((l) => l.includes('Checkout button not found')),
@@ -1530,6 +1573,56 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('sc4-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture SC-4 ${route.journey}`, qty: 5 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      afterReload?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 SC-4: checkout reload during live poll must not arm inQueueUrls on ${pageUrl}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[SC] review reached')).length >= 2,
+      `FIX-3 SC-4: checkout reload must re-detect review on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('autoPlaceOrder: clicking Place Order')),
+      `FIX-3 SC-4: checkout reload during live poll must not auto-click Place Order on ${pageUrl}`
+    );
+    const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
+      } else {
+        await sendBgFireAndForget(popup, { type: liveSignalTypes[i], url: monitorUrl });
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 SC-4: live poll cycle ${i + 1} must not arm inQueueUrls on checkout ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   // WM-5: after QUEUE_TIMEOUT, background poll must re-arm navigationLock (no sacred lock).
   if (invariants.includes('wm5-poll-recovery-rearm')) {
     const recoveryPath =
@@ -1714,6 +1807,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         logs.filter((l) => l.includes('handleProductPage — FCFS ATC')).length >= 2,
         `FIX-3 SC-6: restock reload must re-run FCFS product handler on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
       );
+    } else if (route.journey === 'SC-4') {
+      assert.ok(
+        logs.filter((l) => l.includes('[SC] review reached')).length >= 2,
+        `FIX-3 SC-4: checkout reload must re-detect review on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+      );
     } else {
       // SC-5: first ATC may navigate to cart; reload re-inits there without sacred lock.
       assert.ok(
@@ -1825,6 +1923,7 @@ function routeWaitMs(route) {
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.checkoutTimeoutMs > 0) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('wm6-cart-checkout-missing')) return 9500;
+  if (route.invariants?.includes('sc4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('sc2-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;

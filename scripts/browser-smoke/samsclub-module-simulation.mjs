@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SC-1 / SC-3 / SC-5 / SC-6: Sam's Club retailer module — hosts, manifest, FCFS product ATC.
+ * SC-1 / SC-3 / SC-4 / SC-5 / SC-6: Sam's Club retailer module — hosts, manifest, FCFS product ATC.
  * Offline simulation — no browser required.
  *
  * SC-5: FCFS race — no sacred lock / inQueueUrls (contrast WM-4/WM-5).
@@ -721,6 +721,86 @@ function runSc6ErrorPathHardeningTests() {
   assert.equal(inQueueUrls.size, 0, 'SC-6: disabled wait timeout must not arm sacred lock');
 }
 
+/** Mirrors scCheckoutHasReview — SC-4 review step detection. */
+function scCheckoutHasReviewSim(page) {
+  const placeOrder = page.querySelector('[data-automation-id="place-order-btn"]');
+  if (placeOrder && scIsVisible(placeOrder)) return true;
+  return !!scFindByText(page, 'place order');
+}
+
+/** SC-4: checkout SPA review step — TGT-4 manual stop at review. */
+function scHandleReviewSim(page, settings = {}) {
+  const actions = [];
+  if (!settings.autoPlaceOrder) {
+    actions.push('review_manual_stop');
+    return { path: 'review_manual', actions };
+  }
+  const btn = page.querySelector('[data-automation-id="place-order-btn"]') || scFindByText(page, 'place order');
+  if (btn && scIsVisible(btn)) {
+    actions.push('click_place_order');
+    btn.click();
+    return { path: 'review_auto', actions };
+  }
+  return { path: 'review_missing_btn', actions };
+}
+
+function testSc4Source() {
+  assert.match(SC_SRC, /scHandleCheckout/, 'SC-4: scHandleCheckout defined');
+  assert.match(SC_SRC, /scHandleReview/, 'SC-4: scHandleReview defined');
+  assert.match(SC_SRC, /page === 'checkout'/, 'SC-4: checkout page dispatched in init');
+  assert.match(SC_SRC, /\[SC\] review reached/, 'SC-4: review reached log');
+  assert.match(SC_SRC, /scCheckoutTotalTimeoutMs/, 'SC-4: checkout timeout helper');
+  assert.ok(!SC_SRC.includes('WALMART_IN_QUEUE'), 'SC-4: must not emit WALMART_IN_QUEUE');
+  assert.ok(!SC_SRC.includes('wmHandleQueue'), 'SC-4: must not inherit Walmart queue handlers');
+}
+
+function testSc4ManualReviewStop() {
+  const page = makePage({
+    pathname: '/checkout',
+    elements: [
+      {
+        selectors: ['[data-automation-id="place-order-btn"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+  const result = scHandleReviewSim(page, { autoPlaceOrder: false });
+  assert.equal(result.path, 'review_manual', 'SC-4: manual stop at review');
+  assert.ok(result.actions.includes('review_manual_stop'), 'SC-4: does not click Place Order');
+  assert.equal(page.elements[0].clicked, false, 'SC-4: Place Order not clicked');
+}
+
+function testSc4CheckoutReviewPath() {
+  const page = makePage({
+    pathname: '/checkout',
+    elements: [
+      {
+        selectors: ['[data-automation-id="place-order-btn"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+  assert.ok(scCheckoutHasReviewSim(page), 'SC-4: review step detected');
+  const result = scHandleReviewSim(page, { autoPlaceOrder: false });
+  assert.equal(result.path, 'review_manual', 'SC-4: checkout review happy path');
+}
+
+function testSc4CheckoutTimeoutNavFailed() {
+  const messages = [];
+  const productUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const normUrl = normalizeProductUrl(productUrl);
+  const navigationLock = new Set([normUrl]);
+  const inQueueUrls = new Set();
+
+  messages.push({ type: 'SAMS_NAV_FAILED', url: productUrl });
+  bgApplyNavFailed(navigationLock, inQueueUrls, messages[0]);
+  assert.equal(inQueueUrls.size, 0, 'SC-4: checkout timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'SC-4: checkout timeout releases navigationLock');
+  assert.match(SC_SRC, /scHandleCheckout timed out/, 'SC-4: timeout log in source');
+}
+
 function main() {
   testSc1Hosts();
   testSc1Manifest();
@@ -738,8 +818,12 @@ function main() {
   runSc5FcfsNoSacredLockTests();
   testSc6Source();
   runSc6ErrorPathHardeningTests();
+  testSc4Source();
+  testSc4ManualReviewStop();
+  testSc4CheckoutReviewPath();
+  testSc4CheckoutTimeoutNavFailed();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, product-page ATC, no sacred lock, error-path hardening"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, no sacred lock, error-path hardening"
   );
 }
 

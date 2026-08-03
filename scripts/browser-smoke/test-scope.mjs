@@ -152,6 +152,16 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['samsclub-module-simulation.mjs', 'fixture-smoke.mjs', 'fixture-e2e.mjs'],
   },
+  'SC-4': {
+    id: 'SC-4',
+    retailer: 'samsclub',
+    summary: "Sam's Club FCFS checkout SPA — shipping/payment/review; default stop at review (TGT-4)",
+    impl: [
+      'target-checkout-helper/samsclub-content.js (scHandleCheckout, scHandleReview)',
+    ],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs', 'fixture-smoke.mjs', 'fixture-e2e.mjs'],
+  },
   'SC-3': {
     id: 'SC-3',
     retailer: 'samsclub',
@@ -259,7 +269,7 @@ export const EXTENSION_SUITE = {
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
-  'samsclub-module-simulation.mjs': ['SC-1', 'SC-2', 'SC-3', 'SC-5', 'SC-6'],
+  'samsclub-module-simulation.mjs': ['SC-1', 'SC-2', 'SC-3', 'SC-4', 'SC-5', 'SC-6'],
   'fixture-smoke.mjs': ['FIX-1'],
   'fixture-e2e.mjs': ['FIX-2', 'FIX-3', 'WM-7'],
 };
@@ -295,6 +305,8 @@ export const MOCK_URLS = {
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
   samsclubCart: 'fixtures/samsclub-cart.html',
   samsclubCartNoCheckout: 'fixtures/samsclub-cart-no-checkout.html',
+  samsclubCheckoutReview: 'fixtures/samsclub-checkout-review.html',
+  samsclubCheckoutSpaTimeout: 'fixtures/samsclub-checkout-spa-timeout.html',
   samsclubProductFcfsRestock: 'fixtures/samsclub-product-fcfs-restock.html',
   samsclubProductFcfsInvisibleAtc: 'fixtures/samsclub-product-fcfs-invisible-atc.html',
   walmartCartNoCheckout: 'fixtures/walmart-cart-no-checkout.html',
