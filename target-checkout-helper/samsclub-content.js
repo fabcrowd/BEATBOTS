@@ -97,7 +97,7 @@ function scSignalAtcSuccess(productUrl) {
 function scSignalNavFailed(productUrl) {
   const url = productUrl || location.href;
   try {
-    chrome.runtime.sendMessage({ type: 'NAV_FAILED', url });
+    chrome.runtime.sendMessage({ type: 'SAMS_NAV_FAILED', url });
   } catch (_) {}
 }
 
