@@ -1,26 +1,31 @@
-// samsclub-content.js — Sam's Club Checkout Helper
+// samsclub-content.js — Sam's Club Checkout Helper (SC-1 / SC-3)
 // Injected into *.samsclub.com pages. FCFS retailer — no Walmart queue lock (SC-5).
+
+// ─── SELECTORS ───────────────────────────────────────────────────────────────
 
 const SC_SEL = {
   atc:
-    'button[data-testid="add-to-cart"], button[data-automation-id="add-to-cart-btn"], button[aria-label*="Add to cart" i]',
-  viewCart: 'a[href="/cart"], button[data-testid="go-to-cart"], a[href*="/cart"]',
+    '[data-automation-id="add-to-cart-btn"], button[data-automation-id="atc-button"], button[class*="AddToCartButton"], button[class*="add-to-cart"]',
+  viewCart: 'a[href="/cart"], button[data-automation-id="go-to-cart-btn"]',
+  checkout: '[data-automation-id="checkout-btn"], a[href^="/checkout"]',
 };
 
+// ─── SETTINGS CACHE ──────────────────────────────────────────────────────────
+
 let scSettingsCache = null;
+let scRuntimeEnabled = false;
 let scInitInFlight = false;
 
 async function scGetSettings() {
   if (!scSettingsCache) {
-    scSettingsCache = await chrome.storage.local
-      .get([
-        'enabled',
-        'monitor',
-        'shipping',
-        'payment',
-        'useSavedPayment',
-      ])
-      .catch(() => ({}));
+    scSettingsCache = await chrome.storage.local.get([
+      'enabled',
+      'monitor',
+      'autoPlaceOrder',
+      'shipping',
+      'payment',
+      'useSavedPayment',
+    ]).catch(() => ({}));
   }
   return scSettingsCache;
 }
@@ -29,40 +34,46 @@ function scInvalidateCache() {
   scSettingsCache = null;
 }
 
-function scGetPageType() {
-  const path = location.pathname;
-  if (/\/p\//.test(path) || /\/ip\//.test(path) || /\/prod\//.test(path)) return 'product';
-  if (path.includes('/cart')) return 'cart';
-  if (path.includes('/checkout')) return 'checkout';
-  return 'other';
-}
+// ─── UTILITIES ───────────────────────────────────────────────────────────────
 
 const scSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function scIsVisible(el) {
-  if (!el) return false;
-  try {
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return false;
-  } catch (_) {}
-  return true;
-}
-
 function scFindByText(text) {
   const lower = text.toLowerCase();
-  const nodes = document.querySelectorAll('button, a[role="button"]');
-  for (const el of nodes) {
-    if (el.textContent.trim().toLowerCase().includes(lower)) return el;
-  }
-  return null;
+  return (
+    Array.from(document.querySelectorAll('a, button')).find((el) =>
+      el.textContent.trim().toLowerCase().includes(lower)
+    ) || null
+  );
+}
+
+function scIsVisible(el) {
+  if (!el) return false;
+  const style = window.getComputedStyle(el);
+  return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
 }
 
 function scFindAtcButton() {
-  for (const sel of SC_SEL.atc.split(', ')) {
-    const el = document.querySelector(sel);
-    if (el) return el;
-  }
+  const el = document.querySelector(SC_SEL.atc);
+  if (el) return el;
   return scFindByText('add to cart');
+}
+
+/** SC-6: FCFS ATC wait cap — optional data-tch-atc-wait-ms for fixture e2e. */
+function scAtcWaitTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-atc-wait-ms');
+  if (override != null && override !== '') {
+    const n = Number(override);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 8000;
+}
+
+/** Faster poll when ATC-wait override is set so fixture e2e can finish quickly. */
+function scAtcWaitPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-atc-wait-ms')) return 200;
+  return 200;
 }
 
 async function scWaitFor(fn, timeoutMs = 8000, intervalMs = 200) {
@@ -75,7 +86,6 @@ async function scWaitFor(fn, timeoutMs = 8000, intervalMs = 200) {
   return null;
 }
 
-/** SC-5: FCFS success — ATC_SUCCESS only, never sacred lock / queue messages. */
 function scSignalAtcSuccess(productUrl) {
   const url = productUrl || location.href;
   try {
@@ -83,33 +93,54 @@ function scSignalAtcSuccess(productUrl) {
   } catch (_) {}
 }
 
-/** Release background navigation lock when FCFS ATC cannot proceed (no sacred lock). */
-function scSignalNavFailed(url) {
+/** SC-6: release background poll lock on FCFS restock wait — no Walmart queue semantics. */
+function scSignalNavFailed(productUrl) {
+  const url = productUrl || location.href;
   try {
-    chrome.runtime.sendMessage({ type: 'SAMS_NAV_FAILED', url: url || location.href });
+    chrome.runtime.sendMessage({ type: 'NAV_FAILED', url });
   } catch (_) {}
 }
 
+function scShowToast(msg, level = 'info') {
+  try {
+    chrome.runtime.sendMessage({ type: 'SHOW_TOAST', message: msg, level });
+  } catch (_) {}
+  console.log('[SC]', msg);
+}
+
+function scGetPageType() {
+  const path = location.pathname;
+  if (/\/p\//.test(path) || /\/ip\//.test(path) || /\/prod\//.test(path)) return 'product';
+  if (path.includes('/cart')) return 'cart';
+  if (path.includes('/checkout')) return 'checkout';
+  return 'other';
+}
+
+// ─── SC-3: FCFS PRODUCT ATC (no queue semantics) ─────────────────────────────
+
 /**
- * SC-3: FCFS product-page ATC — wait for enabled button, click, signal success, go to cart.
- * No Walmart queue wait or sacred lock semantics.
+ * SC-3: FCFS product-page ATC — wait for enabled button, click, go to cart.
+ * Disabled ATC is a stock wait, not a queue hold (SC-5: no Walmart-style queue lock).
  */
 async function scHandleProductPage(settings) {
+  console.log('[SC] handleProductPage — FCFS ATC');
   const atcBtn = await scWaitFor(() => {
     const el = scFindAtcButton();
     if (el && !el.disabled && scIsVisible(el)) return el;
     return null;
-  }, 8000);
+  }, scAtcWaitTimeoutMs(), scAtcWaitPollMs());
 
   if (!atcBtn) {
-    console.log('[SC] ATC not available — releasing navigation lock (FCFS, no queue wait)');
-    scSignalNavFailed(location.href);
+    scShowToast('ATC not available — waiting for restock', 'persistent');
+    console.log('[SC] ATC button not found or disabled — FCFS restock wait, releasing nav lock');
+    scSignalNavFailed(settings.productUrl || location.href);
     return;
   }
 
-  console.log('[SC] Clicking ATC (FCFS)');
+  scShowToast('Adding to cart…', 'persistent');
+  console.log('[SC] Clicking ATC button');
   atcBtn.click();
-  scSignalAtcSuccess(settings?.productUrl || location.href);
+  scSignalAtcSuccess(settings.productUrl || location.href);
   await scSleep(1500);
 
   const cartLink =
@@ -119,74 +150,81 @@ async function scHandleProductPage(settings) {
   if (cartLink && scIsVisible(cartLink)) {
     cartLink.click();
   } else {
-    console.log('[SC] No cart link found after ATC — navigating directly to /cart');
+    console.log('[SC] No cart link after ATC — navigating to /cart');
     window.location.href = 'https://www.samsclub.com/cart';
   }
 }
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
 
 async function scInit() {
   if (scInitInFlight) return;
   scInitInFlight = true;
   try {
-    if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer) {
-      if (TCH_HOSTS.detectRetailer(location.href) !== 'samsclub') return;
-    }
-
-    const data = await scGetSettings();
-    const page = scGetPageType();
-    console.log(
-      '[TCH] init:',
-      page,
-      'enabled:',
-      !!data.enabled,
-      'monitor:',
-      !!data.monitor?.active,
-      'retailer: samsclub'
-    );
-
-    if (!data.enabled) return;
-
-    const allProducts = data.monitor?.products || [];
-    const samsProducts = allProducts.filter((p) => {
-      try {
-        return TCH_HOSTS.detectRetailer(p.url) === 'samsclub';
-      } catch {
-        return /samsclub\.com/i.test(p.url);
-      }
-    });
-    const matchedProduct =
-      page === 'product'
-        ? samsProducts.find((p) => {
-            try {
-              return new URL(p.url).pathname === location.pathname;
-            } catch {
-              return false;
-            }
-          })
-        : samsProducts[0] || null;
-
-    const hasData = !!(data.shipping?.firstName || data.payment?.cardNumber || data.useSavedPayment);
-    const hasMonitor = !!(data.monitor?.active && samsProducts.length > 0);
-    if (!hasData && !hasMonitor) {
-      console.log('[SC] No settings configured — skipping automation');
-      return;
-    }
-
-    const settings = {
-      productUrl: matchedProduct?.url || null,
-    };
-
-    if (page === 'product') {
-      await scHandleProductPage(settings);
-    }
+    await _scInit();
   } finally {
     scInitInFlight = false;
+  }
+}
+
+async function _scInit() {
+  if (typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer) {
+    if (TCH_HOSTS.detectRetailer(location.href) !== 'samsclub') return;
+  }
+
+  const data = await scGetSettings();
+  scRuntimeEnabled = !!data.enabled;
+  const page = scGetPageType();
+  console.log(
+    '[TCH] init:',
+    page,
+    'enabled:',
+    data.enabled,
+    'monitor:',
+    !!data.monitor?.active,
+    'retailer: samsclub'
+  );
+
+  if (!scRuntimeEnabled) return;
+
+  const allProducts = data.monitor?.products || [];
+  const scProducts = allProducts.filter((p) => /samsclub\.com/i.test(p.url));
+  const matchedProduct =
+    page === 'product'
+      ? scProducts.find((p) => {
+          try {
+            return new URL(p.url).pathname === location.pathname;
+          } catch {
+            return false;
+          }
+        })
+      : scProducts[0] || null;
+
+  const hasData = !!(data.shipping?.firstName || data.payment?.cardNumber || data.useSavedPayment);
+  const hasMonitor = !!(data.monitor?.active && scProducts.length > 0);
+  if (!hasData && !hasMonitor) {
+    console.log('[SC] No settings configured — skipping automation');
+    return;
+  }
+
+  const settings = {
+    shipping: data.shipping || {},
+    payment: data.payment || {},
+    useSavedPayment: !!data.useSavedPayment,
+    autoPlaceOrder: !!data.autoPlaceOrder,
+    productUrl: matchedProduct?.url || null,
+  };
+
+  if (page === 'product') {
+    await scHandleProductPage(settings);
   }
 }
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'SETTINGS_UPDATED') {
     scInvalidateCache();
+    scRuntimeEnabled = !!message.enabled;
+    if (!scRuntimeEnabled) return;
     scInit();
   }
   if (message.type === 'MONITOR_UPDATED') {
