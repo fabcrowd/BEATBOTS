@@ -132,7 +132,7 @@ async function scHandleProductPage(settings) {
 
   if (!atcBtn) {
     scShowToast('ATC not available — waiting for restock', 'persistent');
-    console.log('[SC] ATC button not found or disabled — FCFS restock wait, releasing nav lock');
+    console.log('[SC] ATC button not found or disabled — FCFS restock wait, releasing navigation lock');
     scSignalNavFailed(settings.productUrl || location.href);
     return;
   }
