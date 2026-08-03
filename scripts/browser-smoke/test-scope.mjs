@@ -144,6 +144,14 @@ export const JOURNEYS = {
     coverage: 'strong',
     tests: ['samsclub-module-simulation.mjs', 'extension-functional.mjs'],
   },
+  'SC-2': {
+    id: 'SC-2',
+    retailer: 'samsclub',
+    summary: "Sam's Club FCFS cart → checkout (no queue semantics)",
+    impl: ['target-checkout-helper/samsclub-content.js (scHandleCartPage)'],
+    coverage: 'strong',
+    tests: ['samsclub-module-simulation.mjs', 'fixture-smoke.mjs', 'fixture-e2e.mjs'],
+  },
   'SC-3': {
     id: 'SC-3',
     retailer: 'samsclub',
@@ -251,7 +259,7 @@ export const EXTENSION_SUITE = {
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
-  'samsclub-module-simulation.mjs': ['SC-1', 'SC-3', 'SC-5', 'SC-6'],
+  'samsclub-module-simulation.mjs': ['SC-1', 'SC-2', 'SC-3', 'SC-5', 'SC-6'],
   'fixture-smoke.mjs': ['FIX-1'],
   'fixture-e2e.mjs': ['FIX-2', 'FIX-3', 'WM-7'],
 };
@@ -285,6 +293,8 @@ export const MOCK_URLS = {
   walmartProductNoAtc: 'fixtures/walmart-product-no-atc.html',
   walmartProductOid: 'fixtures/walmart-product-oid.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
+  samsclubCart: 'fixtures/samsclub-cart.html',
+  samsclubCartNoCheckout: 'fixtures/samsclub-cart-no-checkout.html',
   samsclubProductFcfsRestock: 'fixtures/samsclub-product-fcfs-restock.html',
   samsclubProductFcfsInvisibleAtc: 'fixtures/samsclub-product-fcfs-invisible-atc.html',
   walmartCartNoCheckout: 'fixtures/walmart-cart-no-checkout.html',

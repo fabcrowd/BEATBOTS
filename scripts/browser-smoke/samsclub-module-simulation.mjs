@@ -26,6 +26,7 @@ const SC_SEL = {
   atc:
     'button[data-testid="add-to-cart"], button[data-automation-id="add-to-cart-btn"], button[aria-label*="Add to cart" i]',
   viewCart: 'a[href="/cart"], button[data-testid="go-to-cart"], a[href*="/cart"]',
+  checkout: '[data-automation-id="checkout-btn"], a[href^="/checkout"]',
 };
 
 /** Evaluate hosts.js in a vm sandbox (mirrors content-script global). */
@@ -69,6 +70,7 @@ function makePage({ pathname, elements = [] }) {
     },
     querySelectorAll(sel) {
       if (sel === 'button, a[role="button"]') return all;
+      if (sel === 'button') return all.filter((e) => e.tag === 'button');
       const hits = [];
       for (const [s, el] of bySelector) {
         if (s === sel) {
@@ -151,6 +153,129 @@ function scHandleProductPageSim(page, settings = {}) {
     actions,
     messages: [{ type: 'ATC_SUCCESS', url: settings.productUrl || `https://www.samsclub.com${page.pathname}` }],
   };
+}
+
+/** Mirrors scGetPageType — SC-2 cart page detection. */
+function scGetPageTypeSim(pathname) {
+  if (/\/p\//.test(pathname) || /\/ip\//.test(pathname) || /\/prod\//.test(pathname)) return 'product';
+  if (pathname.includes('/cart')) return 'cart';
+  if (pathname.includes('/checkout')) return 'checkout';
+  return 'other';
+}
+
+/** Mirrors scHandleCartPage happy path — SC-2 FCFS cart → checkout. */
+function scHandleCartPageSim(page, settings = {}) {
+  const actions = [];
+  const primary = page.querySelector(SC_SEL.checkout.split(', ')[0]);
+  let checkoutBtn = primary && scIsVisible(primary) ? primary : null;
+  if (!checkoutBtn) {
+    checkoutBtn =
+      page.querySelectorAll('button').find((el) => {
+        const text = el.text.trim().toLowerCase();
+        return (text === 'checkout' || text === 'proceed to checkout') && scIsVisible(el);
+      }) || null;
+  }
+  if (!checkoutBtn) {
+    actions.push('checkout_missing');
+    return {
+      path: 'checkout_not_found',
+      actions,
+      messages: [
+        {
+          type: 'SAMS_NAV_FAILED',
+          url: settings.productUrl || `https://www.samsclub.com${page.pathname}`,
+        },
+      ],
+    };
+  }
+  actions.push('click_checkout');
+  checkoutBtn.click();
+  return { path: 'cart_to_checkout', actions, messages: [] };
+}
+
+function testSc2CartPageType() {
+  assert.equal(scGetPageTypeSim('/cart'), 'cart', 'SC-2: /cart → cart');
+  assert.equal(scGetPageTypeSim('/cart/no-checkout'), 'cart', 'SC-2: /cart/no-checkout → cart');
+}
+
+function testSc2CartHappyPath() {
+  const page = makePage({
+    pathname: '/cart',
+    elements: [
+      {
+        selectors: ['[data-automation-id="checkout-btn"]'],
+        text: 'Checkout',
+        tag: 'button',
+      },
+    ],
+  });
+  const result = scHandleCartPageSim(page, {
+    productUrl: 'https://www.samsclub.com/p/sc2-cart/100',
+  });
+  assert.equal(result.path, 'cart_to_checkout', 'SC-2: cart happy path');
+  assert.deepEqual(result.actions, ['click_checkout']);
+  assert.ok(page.elements[0].clicked, 'SC-2: checkout button clicked');
+}
+
+function testSc2CartCheckoutMissing() {
+  const page = makePage({ pathname: '/cart/no-checkout', elements: [] });
+  const result = scHandleCartPageSim(page, {
+    productUrl: 'https://www.samsclub.com/p/sc2-cart-missing/101',
+  });
+  assert.equal(result.path, 'checkout_not_found', 'SC-2: missing checkout');
+  assert.deepEqual(result.actions, ['checkout_missing']);
+  const navFail = result.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(navFail, 'SC-2: missing checkout sends SAMS_NAV_FAILED');
+  assert.equal(
+    navFail.url,
+    'https://www.samsclub.com/p/sc2-cart-missing/101',
+    'SC-2: NAV_FAILED uses productUrl not cart URL'
+  );
+}
+
+function testSc2ProductToCartChain() {
+  const productPage = makePage({
+    pathname: '/p/sc2-chain/102',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: false,
+      },
+      {
+        selectors: ['a[href="/cart"]', 'button[data-automation-id="go-to-cart-btn"]'],
+        text: 'View cart',
+        tag: 'a',
+        href: '/cart',
+      },
+    ],
+  });
+  const productResult = scHandleProductPageSim(productPage, {
+    productUrl: 'https://www.samsclub.com/p/sc2-chain/102',
+  });
+  assert.equal(productResult.path, 'product_to_cart');
+  assert.equal(productPage.navigatedTo, '/cart');
+
+  const cartPage = makePage({
+    pathname: '/cart',
+    elements: [
+      {
+        selectors: ['[data-automation-id="checkout-btn"]'],
+        text: 'Checkout',
+        tag: 'button',
+      },
+    ],
+  });
+  const cartResult = scHandleCartPageSim(cartPage, {
+    productUrl: 'https://www.samsclub.com/p/sc2-chain/102',
+  });
+  assert.equal(cartResult.path, 'cart_to_checkout', 'SC-2: product → cart → checkout chain');
+}
+
+function testSc2Source() {
+  assert.match(SC_SRC, /scHandleCartPage/, 'SC-2: scHandleCartPage defined');
+  assert.match(SC_SRC, /page === 'cart'/, 'SC-2: cart page dispatched in init');
+  assert.match(SC_SRC, /scCartCheckoutWaitMs/, 'SC-2: cart checkout wait helper');
 }
 
 function testSc1Hosts() {
@@ -600,6 +725,11 @@ function main() {
   testSc1Hosts();
   testSc1Manifest();
   testSc1StubSource();
+  testSc2Source();
+  testSc2CartPageType();
+  testSc2CartHappyPath();
+  testSc2CartCheckoutMissing();
+  testSc2ProductToCartChain();
   testSc3Source();
   testSc3DisabledAtcNotQueue();
   testSc3ProductPageHappyPath();
@@ -609,7 +739,7 @@ function main() {
   testSc6Source();
   runSc6ErrorPathHardeningTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-3 + SC-5 + SC-6): hosts, manifest, FCFS product-page ATC, no sacred lock, error-path hardening"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, product-page ATC, no sacred lock, error-path hardening"
   );
 }
 

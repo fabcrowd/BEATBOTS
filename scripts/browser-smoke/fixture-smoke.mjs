@@ -146,6 +146,24 @@ const FIXTURE_MARKERS = {
       'display:none',
     ],
   },
+  samsclubCart: {
+    fixtureId: 'samsclub-cart',
+    journeys: ['SC-2'],
+    markers: [
+      'data-tch-fixture="samsclub-cart"',
+      'data-tch-path="/cart"',
+      'data-automation-id="checkout-btn"',
+    ],
+  },
+  samsclubCartNoCheckout: {
+    fixtureId: 'samsclub-cart-no-checkout',
+    journeys: ['SC-2', 'SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-cart-no-checkout"',
+      'data-tch-path="/cart/no-checkout"',
+      'data-tch-cart-checkout-wait-ms="750"',
+    ],
+  },
   walmartCartNoCheckout: {
     fixtureId: 'walmart-cart-no-checkout',
     journeys: ['WM-6'],

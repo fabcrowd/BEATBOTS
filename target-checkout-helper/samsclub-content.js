@@ -76,6 +76,23 @@ function scAtcWaitPollMs() {
   return 200;
 }
 
+/** SC-2 / SC-6: cart checkout-button wait cap — optional data-tch-cart-checkout-wait-ms. */
+function scCartCheckoutWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-cart-checkout-wait-ms');
+  if (override != null && override !== '') {
+    const n = Number(override);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 8000;
+}
+
+/** Faster poll when cart-checkout-wait override is set so fixture e2e can finish quickly. */
+function scCartCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-cart-checkout-wait-ms')) return 200;
+  return 200;
+}
+
 async function scWaitFor(fn, timeoutMs = 8000, intervalMs = 200) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -155,6 +172,33 @@ async function scHandleProductPage(settings) {
   }
 }
 
+/**
+ * SC-2: FCFS cart → checkout — no Walmart queue semantics (SC-5).
+ */
+async function scHandleCartPage(settings) {
+  console.log('[SC] handleCartPage — FCFS cart → checkout');
+  scShowToast('In cart — proceeding to checkout…', 'persistent');
+  const checkoutBtn = await scWaitFor(() => {
+    const primary = document.querySelector(SC_SEL.checkout);
+    if (primary && scIsVisible(primary)) return primary;
+    return (
+      Array.from(document.querySelectorAll('button')).find((el) => {
+        const text = el.textContent.trim().toLowerCase();
+        return (text === 'checkout' || text === 'proceed to checkout') && scIsVisible(el);
+      }) || null
+    );
+  }, scCartCheckoutWaitMs(), scCartCheckoutPollMs());
+
+  if (!checkoutBtn) {
+    scShowToast('Checkout button not found — take over manually', 'error');
+    console.warn('[SC] Checkout button not found on cart page — releasing navigation lock');
+    scSignalNavFailed(settings.productUrl || location.href);
+    return;
+  }
+  console.log('[SC] Clicking checkout button');
+  checkoutBtn.click();
+}
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
 async function scInit() {
@@ -217,6 +261,8 @@ async function _scInit() {
 
   if (page === 'product') {
     await scHandleProductPage(settings);
+  } else if (page === 'cart') {
+    await scHandleCartPage(settings);
   }
 }
 
