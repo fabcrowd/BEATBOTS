@@ -270,22 +270,23 @@ function scFindContinueBtn() {
 }
 
 function scCheckoutHasShipping() {
-  return !!(
-    document.querySelector(SC_SEL.firstName) ||
-    document.querySelector(SC_SEL.address1) ||
-    document.querySelector(SC_SEL.zip)
-  );
+  const el =
+    scFindFirst(...SC_SEL.firstName.split(', ')) ||
+    scFindFirst(...SC_SEL.address1.split(', ')) ||
+    scFindFirst(...SC_SEL.zip.split(', '));
+  return !!(el && scIsVisible(el));
 }
 
 function scCheckoutHasPayment() {
-  return !!(
-    document.querySelector(SC_SEL.cardNumber) ||
-    document.querySelector(SC_SEL.cvv)
-  );
+  const el =
+    scFindFirst(...SC_SEL.cardNumber.split(', ')) ||
+    scFindFirst(...SC_SEL.cvv.split(', '));
+  return !!(el && scIsVisible(el));
 }
 
 function scCheckoutHasReview() {
-  return !!(document.querySelector(SC_SEL.placeOrder) || scFindByText('place order'));
+  const btn = document.querySelector(SC_SEL.placeOrder) || scFindByText('place order');
+  return !!(btn && scIsVisible(btn));
 }
 
 function scPlayBeep() {
