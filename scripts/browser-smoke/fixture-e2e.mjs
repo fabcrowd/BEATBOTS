@@ -1930,7 +1930,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         logs.filter((l) => l.includes('[SC] review reached')).length >= 2,
         `FIX-3 SC-4: checkout reload must re-detect review on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
       );
-    } else if (route.journey === 'SC-3') {
+    } else if (route.journey === 'SC-3' && invariants.includes('sc3-disabled-atc')) {
       assert.ok(
         logs.filter((l) => l.includes('FCFS restock wait')).length >= 2,
         `FIX-3 SC-3: disabled ATC reload must re-enter FCFS restock wait on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
