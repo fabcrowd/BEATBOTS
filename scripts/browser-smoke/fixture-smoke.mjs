@@ -173,6 +173,17 @@ const FIXTURE_MARKERS = {
       'data-automation-id="place-order-btn"',
     ],
   },
+  samsclubCheckoutSpa: {
+    fixtureId: 'samsclub-checkout-spa',
+    journeys: ['SC-4'],
+    markers: [
+      'data-tch-fixture="samsclub-checkout-spa"',
+      'data-tch-path="/checkout/spa"',
+      'name="firstName"',
+      'name="cardNumber"',
+      'data-automation-id="place-order-btn"',
+    ],
+  },
   samsclubCheckoutSpaTimeout: {
     fixtureId: 'samsclub-checkout-spa-timeout',
     journeys: ['SC-4', 'SC-6'],

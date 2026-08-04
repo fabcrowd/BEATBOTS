@@ -306,6 +306,7 @@ export const MOCK_URLS = {
   samsclubCart: 'fixtures/samsclub-cart.html',
   samsclubCartNoCheckout: 'fixtures/samsclub-cart-no-checkout.html',
   samsclubCheckoutReview: 'fixtures/samsclub-checkout-review.html',
+  samsclubCheckoutSpa: 'fixtures/samsclub-checkout-spa.html',
   samsclubCheckoutSpaTimeout: 'fixtures/samsclub-checkout-spa-timeout.html',
   samsclubProductFcfsRestock: 'fixtures/samsclub-product-fcfs-restock.html',
   samsclubProductFcfsInvisibleAtc: 'fixtures/samsclub-product-fcfs-invisible-atc.html',

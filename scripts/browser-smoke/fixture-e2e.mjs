@@ -99,6 +99,13 @@ const FIXTURE_STORAGE_BASE = {
     city: 'City',
     state: 'CA',
     zip: '90210',
+    phone: '5555555555',
+  },
+  payment: {
+    cardNumber: '4111111111111111',
+    expMonth: '12',
+    expYear: '30',
+    cvv: '123',
   },
 };
 
@@ -591,6 +598,27 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.ok(
       logs.some((l) => l.includes('Clicking checkout button')),
       `FIX-3 SC-2: expected cart checkout click log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+  }
+
+  if (invariants.includes('sc4-shipping-payment-review')) {
+    assert.ok(
+      logs.some((l) => l.includes('Filling shipping form') || l.includes('Clicking Continue on shipping')),
+      `FIX-3 SC-4: expected shipping step on ${pageUrl}, got: ${logs.slice(0, 12).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('Filling payment form') || l.includes('Clicking Continue on payment')),
+      `FIX-3 SC-4: expected payment step on ${pageUrl}, got: ${logs.slice(0, 12).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('[SC] review reached')),
+      `FIX-3 SC-4: expected review after SPA steps on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      after?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 SC-4: checkout SPA must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(after?.inQueueUrls || [])}`
     );
   }
 
@@ -1924,6 +1952,7 @@ function routeWaitMs(route) {
   if (route.checkoutTimeoutMs > 0) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('wm6-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('sc4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
+  if (route.invariants?.includes('sc4-shipping-payment-review')) return 10000;
   if (route.invariants?.includes('sc2-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;
