@@ -164,6 +164,16 @@ const FIXTURE_MARKERS = {
       'data-tch-cart-checkout-wait-ms="750"',
     ],
   },
+  samsclubProductCartMissing: {
+    fixtureId: 'samsclub-product-cart-missing',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-cart-missing"',
+      'data-tch-path="/p/mock-fcfs-cart-missing/792"',
+      'data-automation-id="add-to-cart-btn"',
+      'href="/cart/no-checkout"',
+    ],
+  },
   samsclubCheckoutReview: {
     fixtureId: 'samsclub-checkout-review',
     journeys: ['SC-4', 'TGT-4'],
