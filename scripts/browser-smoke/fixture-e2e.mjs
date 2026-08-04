@@ -1930,6 +1930,15 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         logs.filter((l) => l.includes('[SC] review reached')).length >= 2,
         `FIX-3 SC-4: checkout reload must re-detect review on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
       );
+    } else if (route.journey === 'SC-3') {
+      assert.ok(
+        logs.filter((l) => l.includes('FCFS restock wait')).length >= 2,
+        `FIX-3 SC-3: disabled ATC reload must re-enter FCFS restock wait on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+      );
+      assert.ok(
+        !logs.some((l) => l.includes('Clicking ATC button')),
+        `FIX-3 SC-3: disabled ATC live poll must not click on ${pageUrl}`
+      );
     } else {
       // SC-5: first ATC may navigate to cart; reload re-inits there without sacred lock.
       assert.ok(

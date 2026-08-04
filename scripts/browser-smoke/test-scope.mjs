@@ -165,7 +165,7 @@ export const JOURNEYS = {
   'SC-3': {
     id: 'SC-3',
     retailer: 'samsclub',
-    summary: "Sam's Club FCFS product-page ATC without queue semantics",
+    summary: "Sam's Club FCFS product-page ATC without queue semantics (disabled ATC → restock wait, no sacred lock)",
     impl: ['target-checkout-helper/samsclub-content.js (scHandleProductPage)'],
     coverage: 'strong',
     tests: ['samsclub-module-simulation.mjs', 'fixture-smoke.mjs', 'fixture-e2e.mjs'],
