@@ -920,6 +920,26 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  // SC-3: disabled ATC is FCFS restock wait — SAMS_NAV_FAILED, not Walmart queue.
+  if (invariants.includes('sc3-disabled-atc')) {
+    assert.ok(
+      logs.some((l) => l.includes('FCFS restock wait')),
+      `FIX-3 SC-3: disabled ATC must log FCFS restock wait on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('ATC button not found or disabled')),
+      `FIX-3 SC-3: disabled ATC must time out to NAV_FAILED on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Clicking ATC button')),
+      `FIX-3 SC-3: disabled ATC must not click on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('WALMART_IN_QUEUE')),
+      `FIX-3 SC-3: disabled ATC must not enter Walmart queue semantics on ${pageUrl}`
+    );
+  }
+
   // SC-5: repeated ATC_SUCCESS cycles must never arm sacred lock (FCFS race).
   if (invariants.includes('sc5-repeated-atc-success')) {
     if (!invariants.includes('sc6-repeated-nav-failed')) {
@@ -1791,9 +1811,10 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
-  // SC-6 / WM-4 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
+  // SC-6 / SC-3 / WM-4 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
   if (
     invariants.includes('sc6-poll-recovery-rearm') ||
+    invariants.includes('sc3-poll-recovery-rearm') ||
     invariants.includes('wm4-poll-recovery-rearm') ||
     invariants.includes('wm6-poll-recovery-rearm')
   ) {
@@ -1801,7 +1822,9 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       ? 'WM-4'
       : invariants.includes('wm6-poll-recovery-rearm')
         ? 'WM-6'
-        : 'SC-6';
+        : invariants.includes('sc3-poll-recovery-rearm')
+          ? 'SC-3'
+          : 'SC-6';
     const monitorUrl = route.pollRecoveryProductPath
       ? `http://${route.host}:${port}${route.pollRecoveryProductPath}`
       : route.monitorProductPath

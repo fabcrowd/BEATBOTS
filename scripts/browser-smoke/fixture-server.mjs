@@ -494,6 +494,22 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.samsclub.com',
+    path: '/p/mock-fcfs-disabled/792',
+    file: MOCK_URLS.samsclubProductFcfsDisabled,
+    initLog: '[TCH] init',
+    journey: 'SC-3',
+    invariants: [
+      'no-sacred-lock',
+      'nav-failed-releases-lock',
+      'sc3-disabled-atc',
+      'sc3-poll-recovery-rearm',
+    ],
+    monitorProductPath: '/p/mock-fcfs-disabled/792',
+    monitorQty: 5,
+    atcWaitMs: 750,
+  },
+  {
+    host: 'www.samsclub.com',
     path: '/p/mock-fcfs/789',
     file: MOCK_URLS.samsclubProductFcfs,
     initLog: '[TCH] init',

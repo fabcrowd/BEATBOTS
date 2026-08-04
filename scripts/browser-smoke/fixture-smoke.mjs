@@ -126,6 +126,16 @@ const FIXTURE_MARKERS = {
       'data-automation-id="add-to-cart-btn"',
     ],
   },
+  samsclubProductFcfsDisabled: {
+    fixtureId: 'samsclub-product-fcfs-disabled',
+    journeys: ['SC-3'],
+    markers: [
+      'data-tch-fixture="samsclub-product-fcfs-disabled"',
+      'data-tch-atc-wait-ms="750"',
+      'data-automation-id="add-to-cart-btn"',
+      'disabled',
+    ],
+  },
   samsclubProductFcfsRestock: {
     fixtureId: 'samsclub-product-fcfs-restock',
     journeys: ['SC-6'],

@@ -168,7 +168,7 @@ export const JOURNEYS = {
     summary: "Sam's Club FCFS product-page ATC without queue semantics",
     impl: ['target-checkout-helper/samsclub-content.js (scHandleProductPage)'],
     coverage: 'strong',
-    tests: ['samsclub-module-simulation.mjs'],
+    tests: ['samsclub-module-simulation.mjs', 'fixture-smoke.mjs', 'fixture-e2e.mjs'],
   },
   'SC-5': {
     id: 'SC-5',
@@ -303,6 +303,7 @@ export const MOCK_URLS = {
   walmartProductNoAtc: 'fixtures/walmart-product-no-atc.html',
   walmartProductOid: 'fixtures/walmart-product-oid.html',
   samsclubProductFcfs: 'fixtures/samsclub-product-fcfs.html',
+  samsclubProductFcfsDisabled: 'fixtures/samsclub-product-fcfs-disabled.html',
   samsclubCart: 'fixtures/samsclub-cart.html',
   samsclubCartNoCheckout: 'fixtures/samsclub-cart-no-checkout.html',
   samsclubProductCartMissing: 'fixtures/samsclub-product-cart-missing.html',
