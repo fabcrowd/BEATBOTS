@@ -1811,8 +1811,9 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
-  // SC-6 / SC-3 / WM-4 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
+  // SC-4 / SC-6 / SC-3 / WM-4 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
   if (
+    invariants.includes('sc4-poll-recovery-rearm') ||
     invariants.includes('sc6-poll-recovery-rearm') ||
     invariants.includes('sc3-poll-recovery-rearm') ||
     invariants.includes('wm4-poll-recovery-rearm') ||
@@ -1822,9 +1823,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       ? 'WM-4'
       : invariants.includes('wm6-poll-recovery-rearm')
         ? 'WM-6'
-        : invariants.includes('sc3-poll-recovery-rearm')
-          ? 'SC-3'
-          : 'SC-6';
+        : invariants.includes('sc4-poll-recovery-rearm')
+          ? 'SC-4'
+          : invariants.includes('sc3-poll-recovery-rearm')
+            ? 'SC-3'
+            : 'SC-6';
     const monitorUrl = route.pollRecoveryProductPath
       ? `http://${route.host}:${port}${route.pollRecoveryProductPath}`
       : route.monitorProductPath

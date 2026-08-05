@@ -479,9 +479,10 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'nav-failed-releases-lock',
       'sc4-checkout-spa-timeout',
-      'sc6-poll-recovery-rearm',
+      'sc4-poll-recovery-rearm',
     ],
     monitorProductPath: '/p/mock-checkout-spa-stall/793',
+    pollRecoveryProductPath: '/p/mock-fcfs-invisible-atc/791',
     checkoutTimeoutMs: 750,
   },
   {
