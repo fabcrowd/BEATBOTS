@@ -199,6 +199,32 @@ function wmDecideProductPageEntry(page, settings = {}) {
   return { action: 'proceed_atc', messages: [] };
 }
 
+/**
+ * Mirrors walmart-content.js post-ATC-wait branch (~767-776): after the 8s ATC wait
+ * times out, re-check whether queue indicators appeared during the wait.
+ */
+function wmDecideAfterAtcWait(page, settings = {}) {
+  const atc = wmFindAtcLikeButton(page);
+  if (atc && !atc.disabled && wmIsVisible(atc)) {
+    return { action: 'proceed_atc', messages: [] };
+  }
+  if (wmShouldEnterSacredQueueWait(page)) {
+    return {
+      action: 'sacred_queue_wait',
+      messages: [
+        {
+          type: 'WALMART_IN_QUEUE',
+          url: `https://www.walmart.com${page.pathname}`,
+        },
+      ],
+    };
+  }
+  return {
+    action: 'atc_unavailable',
+    messages: [{ type: 'WALMART_NAV_FAILED' }],
+  };
+}
+
 /** Mirrors wmGetPageType() — walmart-content.js */
 function wmGetPageType(page) {
   const path = page.pathname;
@@ -788,6 +814,58 @@ function runWm4SacredLockTests() {
   inQueueUrls.clear();
   bgApplyWalmartInQueue(inQueueUrls, navFailMsg);
   assert.equal(inQueueUrls.size, 0, 'WM-4: NAV_FAILED does not populate inQueueUrls');
+
+  // WM-4: queue may load during the 8s ATC wait — post-wait re-check arms sacred lock.
+  const delayedQueuePage = makePage({
+    pathname: '/ip/delayed-queue-wm4/222',
+    bodyText: "You're in line — estimated wait time 5 minutes",
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const delayedQueueDecision = wmDecideAfterAtcWait(delayedQueuePage);
+  assert.equal(
+    delayedQueueDecision.action,
+    'sacred_queue_wait',
+    'WM-4: queue appearing during ATC wait arms sacred lock'
+  );
+  assert.ok(
+    delayedQueueDecision.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-4: post-wait queue re-check sends WALMART_IN_QUEUE'
+  );
+  inQueueUrls.clear();
+  for (const msg of delayedQueueDecision.messages) bgApplyWalmartInQueue(inQueueUrls, msg);
+  assert.equal(inQueueUrls.size, 1, 'WM-4: post-wait sacred lock populates inQueueUrls');
+
+  const stillNoAtcPage = makePage({
+    pathname: '/ip/still-predrop-wm4/333',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  const stillNoAtcDecision = wmDecideAfterAtcWait(stillNoAtcPage);
+  assert.equal(
+    stillNoAtcDecision.action,
+    'atc_unavailable',
+    'WM-4: post-wait still no queue → NAV_FAILED not sacred lock'
+  );
+  assert.ok(
+    stillNoAtcDecision.messages.some((m) => m.type === 'WALMART_NAV_FAILED'),
+    'WM-4: post-wait no queue sends WALMART_NAV_FAILED'
+  );
+  inQueueUrls.clear();
+  for (const msg of stillNoAtcDecision.messages) bgApplyWalmartInQueue(inQueueUrls, msg);
+  assert.equal(inQueueUrls.size, 0, 'WM-4: post-wait NAV_FAILED must not arm inQueueUrls');
 }
 
 function runWm6QueueErrorPathTests() {
