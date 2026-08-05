@@ -19,6 +19,8 @@ const TARGET_API_BASE = 'https://api.target.com'
 // we need to supply one. This is the publicly-visible web API key from Target's JS bundle.
 // It rotates occasionally; the Shape harvester / monitor engine capture the live one.
 const DEFAULT_API_KEY = 'ff457966e64d5e877fdbad070f276d18ecec4a01'
+/** Match createGuestSession — hung login must not block tasks indefinitely. */
+export const LOGIN_REQUEST_TIMEOUT_MS = 10_000
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,6 +272,7 @@ export class SessionManager extends EventEmitter {
       method: 'POST',
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(LOGIN_REQUEST_TIMEOUT_MS),
     })
   }
 
