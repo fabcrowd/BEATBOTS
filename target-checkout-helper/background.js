@@ -1521,6 +1521,12 @@ function broadcastToTarget(message) {
 /** Monitor state is not part of SETTINGS_UPDATED; ping tabs so content.js drops stale cache. */
 function notifyTargetTabsMonitorChanged() {
   broadcastToTarget({ type: 'MONITOR_UPDATED' });
+  // Walmart / Sam's monitor tabs are not on target.com — re-init FCFS handlers after START_MONITOR.
+  chrome.storage.local.get('monitor', ({ monitor }) => {
+    for (const tabId of monitor?.tabIds || []) {
+      chrome.tabs.sendMessage(tabId, { type: 'MONITOR_UPDATED' }).catch(() => {});
+    }
+  });
 }
 
 // ─── MONITOR ORCHESTRATION ──────────────────────────────────────────────────
@@ -1582,9 +1588,6 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
       monitor.tabIds.push(tabId);
       monitor.urlToTabId[norm] = tabId;
       urlToTabId[norm] = tabId;
-      // Arm lock with the monitor tab — content script may finish before the first
-      // poll cycle navigates; NAV_FAILED must be able to release this lock.
-      navigationLock.add(norm);
     }
   }
 

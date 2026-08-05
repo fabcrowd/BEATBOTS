@@ -1768,6 +1768,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
 
+    let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;
     for (let i = 0; i < 24; i++) {
@@ -1781,12 +1782,17 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         `FIX-3 WM-5: poll recovery after QUEUE_TIMEOUT must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
       );
       const hasLock = cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl);
-      if (!hasLock) sawLockCleared = true;
-      if (hasLock && sawLockCleared) {
+      if (hasLock) sawLockArmed = true;
+      if (sawLockArmed && !hasLock) sawLockCleared = true;
+      if (sawLockCleared && hasLock) {
         sawLockRearmed = true;
         break;
       }
     }
+    assert.ok(
+      sawLockArmed,
+      `FIX-3 WM-5: background poll must arm navigationLock before recovery on ${normMonitorUrl}`
+    );
     assert.ok(
       sawLockCleared,
       `FIX-3 WM-5: poll must clear navigationLock via NAV_FAILED before re-arm on ${normMonitorUrl}`
@@ -1851,6 +1857,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
 
+    let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;
     for (let i = 0; i < 24; i++) {
@@ -1864,12 +1871,17 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         `FIX-3 ${pollRecoveryLabel}: poll recovery must never arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
       );
       const hasLock = cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl);
-      if (!hasLock) sawLockCleared = true;
-      if (hasLock && sawLockCleared) {
+      if (hasLock) sawLockArmed = true;
+      if (sawLockArmed && !hasLock) sawLockCleared = true;
+      if (sawLockCleared && hasLock) {
         sawLockRearmed = true;
         break;
       }
     }
+    assert.ok(
+      sawLockArmed,
+      `FIX-3 ${pollRecoveryLabel}: background poll must arm navigationLock before recovery on ${normMonitorUrl}`
+    );
     assert.ok(
       sawLockCleared,
       `FIX-3 ${pollRecoveryLabel}: NAV_FAILED must clear navigationLock for poll retry on ${normMonitorUrl}`
