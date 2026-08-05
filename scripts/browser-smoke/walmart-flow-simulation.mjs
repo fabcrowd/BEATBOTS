@@ -651,6 +651,16 @@ function bgApplyWalmartNavFailed(navigationLock, inQueueUrls, message) {
   return normFailUrl;
 }
 
+/** Mirrors background.js WALMART_QUEUE_TIMEOUT handler — releases sacred lock and navigationLock. */
+function bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, message) {
+  const normTimeoutUrl = normalizeProductUrl(message.url || '');
+  if (normTimeoutUrl) {
+    inQueueUrls.delete(normTimeoutUrl);
+    navigationLock.delete(normTimeoutUrl);
+  }
+  return normTimeoutUrl;
+}
+
 /** Mirrors background.js handleATCSuccess lock release — clears sacred lock for endless re-entry. */
 function bgApplyAtcSuccess(navigationLock, inQueueUrls, message) {
   const normUrl = normalizeProductUrl(message.url || '');
@@ -1126,6 +1136,74 @@ function runWm5SacredLockNavTests() {
   assert.ok(
     bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
     'WM-5: poll still blocked after repeated NAV_FAILED during queue'
+  );
+
+  // WM-5: QUEUE_TIMEOUT clears sacred lock AND navigationLock — poll may recover.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  assert.ok(inQueueUrls.has(normUrl), 'WM-5: sacred lock armed before QUEUE_TIMEOUT');
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll blocked before QUEUE_TIMEOUT'
+  );
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: productUrl,
+  });
+  assert.ok(!inQueueUrls.has(normUrl), 'WM-5: QUEUE_TIMEOUT clears inQueueUrls');
+  assert.ok(!navigationLock.has(normUrl), 'WM-5: QUEUE_TIMEOUT clears navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll may navigate after QUEUE_TIMEOUT'
+  );
+
+  // WM-5: QUEUE_TIMEOUT is distinct from NAV_FAILED — NAV_FAILED preserves sacred lock.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: productUrl,
+  });
+  assert.ok(
+    inQueueUrls.has(normUrl),
+    'WM-5: NAV_FAILED does not clear sacred lock (contrast QUEUE_TIMEOUT)'
+  );
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll still blocked after NAV_FAILED while sacred lock active'
+  );
+
+  // WM-5: poll recovery after QUEUE_TIMEOUT — navigationLock re-arms, no sacred lock.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: productUrl,
+  });
+  navigationLock.add(normUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-5: poll recovery must not re-arm sacred lock');
+  assert.ok(
+    navigationLock.has(normUrl),
+    'WM-5: poll recovery re-arms navigationLock after QUEUE_TIMEOUT'
+  );
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: productUrl,
+  });
+  assert.ok(
+    !navigationLock.has(normUrl),
+    'WM-5: NAV_FAILED during poll recovery releases lock for retry'
+  );
+  assert.equal(
+    inQueueUrls.size,
+    0,
+    'WM-5: poll recovery NAV_FAILED must not arm sacred lock'
   );
 }
 
