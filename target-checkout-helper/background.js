@@ -17,6 +17,27 @@ function normalizeProductUrl(url) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** Wait for monitor tab load so content scripts run before poll navigates or MONITOR_UPDATED. */
+function waitForTabComplete(tabId, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve();
+    };
+    const onUpdated = (id, info) => {
+      if (id === tabId && info.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.get(tabId).then((tab) => {
+      if (tab?.status === 'complete') finish();
+    }).catch(() => finish());
+    setTimeout(finish, timeoutMs);
+  });
+}
+
 const DISCORD_COLOR = { success: 0x2ecc71, error: 0xe74c3c, info: 0x3498db, warn: 0xf39c12 };
 
 /** POST JSON to Discord webhook URL from settings (fire-and-forget). */
@@ -1592,6 +1613,10 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   }
 
   await chrome.storage.local.set({ monitor });
+
+  if (monitor.tabIds.length) {
+    await Promise.all(monitor.tabIds.map((tabId) => waitForTabComplete(tabId)));
+  }
 
   // Start background TCIN polling immediately if we already have the API key.
   // Otherwise it will start as soon as CACHE_API_KEY is received.
