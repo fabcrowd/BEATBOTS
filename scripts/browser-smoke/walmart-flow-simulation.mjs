@@ -663,11 +663,33 @@ function bgApplyWalmartInQueue(inQueueUrls, message) {
   return normQueueUrl;
 }
 
+/** Mirrors background.js isInCheckoutFlow — tab already in cart/checkout/thank-you. */
+function isInCheckoutFlow(url) {
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
 /** Mirrors background.js poll loop skip checks (inQueueUrls / navigationLock). */
 function bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
   if (inQueueUrls.has(normUrl)) return true;
   if (navigationLock.has(normUrl)) return true;
   return false;
+}
+
+/**
+ * Mirrors background.js restock navigate guard (poll loop + checkout-flow check).
+ * Returns false when poll must not navigate the monitor tab to the product URL.
+ */
+function bgWouldNavigateRestock(normUrl, tabUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return false;
+  if (navigationLock.has(normUrl)) return false;
+  if (isInCheckoutFlow(tabUrl) && inQueueUrls.has(normUrl)) return false;
+  return true;
 }
 
 /** Mirrors background.js WALMART_NAV_FAILED handler — releases navigationLock only. */
@@ -1282,6 +1304,63 @@ function runWm5SacredLockNavTests() {
     inQueueUrls.size,
     0,
     'WM-5: poll recovery NAV_FAILED must not arm sacred lock'
+  );
+
+  // WM-5: isInCheckoutFlow + sacred lock — checkout tab must not be sent back to product.
+  assert.ok(
+    isInCheckoutFlow('https://www.walmart.com/checkout'),
+    'WM-5: walmart /checkout is checkout flow'
+  );
+  assert.ok(
+    isInCheckoutFlow('https://www.walmart.com/cart'),
+    'WM-5: cart path is checkout flow'
+  );
+  assert.ok(
+    !isInCheckoutFlow('https://www.walmart.com/qp'),
+    'WM-5: /qp uses sacred lock, not checkout-flow guard'
+  );
+  assert.ok(
+    !isInCheckoutFlow('https://www.walmart.com/ip/wm5-sacred-lock/555'),
+    'WM-5: product page is not checkout flow'
+  );
+
+  inQueueUrls.clear();
+  navigationLock.clear();
+  const checkoutTabUrl = 'https://www.walmart.com/checkout?step=review';
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: productUrl,
+  });
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: sacred lock blocks poll skip even when navigationLock cleared by NAV_FAILED'
+  );
+  assert.ok(
+    !bgWouldNavigateRestock(normUrl, checkoutTabUrl, inQueueUrls, navigationLock),
+    'WM-5: restock must not navigate checkout tab while sacred lock holds product URL'
+  );
+
+  // Without sacred lock, checkout tab may be navigated on restock (poll retry path).
+  inQueueUrls.clear();
+  navigationLock.clear();
+  assert.ok(
+    bgWouldNavigateRestock(normUrl, checkoutTabUrl, inQueueUrls, navigationLock),
+    'WM-5: restock may navigate checkout tab when no locks held'
+  );
+
+  // Sacred lock on product URL while tab still on product page — poll skip, no restock nav.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  const productTabUrl = 'https://www.walmart.com/ip/wm5-sacred-lock/555';
+  assert.ok(
+    !isInCheckoutFlow(productTabUrl),
+    'WM-5: product tab URL is not checkout flow'
+  );
+  assert.ok(
+    !bgWouldNavigateRestock(normUrl, productTabUrl, inQueueUrls, navigationLock),
+    'WM-5: restock must not navigate product tab while sacred lock holds'
   );
 }
 
