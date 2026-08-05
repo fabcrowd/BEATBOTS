@@ -1857,6 +1857,8 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
 
+    await new Promise((r) => setTimeout(r, 1500));
+
     let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;

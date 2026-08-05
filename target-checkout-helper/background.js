@@ -17,27 +17,6 @@ function normalizeProductUrl(url) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-/** Wait for monitor tab load so content scripts run before poll navigates or MONITOR_UPDATED. */
-function waitForTabComplete(tabId, timeoutMs = 8000) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      resolve();
-    };
-    const onUpdated = (id, info) => {
-      if (id === tabId && info.status === 'complete') finish();
-    };
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.get(tabId).then((tab) => {
-      if (tab?.status === 'complete') finish();
-    }).catch(() => finish());
-    setTimeout(finish, timeoutMs);
-  });
-}
-
 const DISCORD_COLOR = { success: 0x2ecc71, error: 0xe74c3c, info: 0x3498db, warn: 0xf39c12 };
 
 /** POST JSON to Discord webhook URL from settings (fire-and-forget). */
@@ -1544,8 +1523,18 @@ function notifyTargetTabsMonitorChanged() {
   broadcastToTarget({ type: 'MONITOR_UPDATED' });
   // Walmart / Sam's monitor tabs are not on target.com — re-init FCFS handlers after START_MONITOR.
   chrome.storage.local.get('monitor', ({ monitor }) => {
-    for (const tabId of monitor?.tabIds || []) {
+    const tabIds = monitor?.tabIds || [];
+    for (const tabId of tabIds) {
       chrome.tabs.sendMessage(tabId, { type: 'MONITOR_UPDATED' }).catch(() => {});
+    }
+    // Re-ping after new monitor tabs finish loading — avoids poll-recovery flake when
+    // MONITOR_UPDATED fires before the content script listener is registered.
+    if (tabIds.length) {
+      setTimeout(() => {
+        for (const tabId of tabIds) {
+          chrome.tabs.sendMessage(tabId, { type: 'MONITOR_UPDATED' }).catch(() => {});
+        }
+      }, 1500);
     }
   });
 }
@@ -1572,7 +1561,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   for (const p of products) counts[normalizeProductUrl(p.url)] = 0;
 
   const monitor = {
-    active: false,
+    active: true,
     products,
     refreshInterval: refreshInterval || 1,
     counts,
@@ -1612,13 +1601,6 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
     }
   }
 
-  await chrome.storage.local.set({ monitor });
-
-  if (monitor.tabIds.length) {
-    await Promise.all(monitor.tabIds.map((tabId) => waitForTabComplete(tabId)));
-  }
-
-  monitor.active = true;
   await chrome.storage.local.set({ monitor });
 
   // Start background TCIN polling immediately if we already have the API key.
