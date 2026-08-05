@@ -16,6 +16,7 @@
  *   R10  PX cookie preservation during session recovery
  *   R11  Walmart Queue-it detection + price extraction
  *   R12  Address jig integration — jigIndex=-1 disable, sequential jig uniqueness
+ *   R13  Session manager login timeout — doLoginRequest must not hang forever
  *
  * Run:  node scripts/browser-smoke/untested-areas-test.mjs
  */
@@ -625,6 +626,33 @@ await test('Address jig — sequential uniqueness + negative index disables', ()
   assert.ok(!JIG_CHARS.includes('I'), 'No I (confused with 1)');
   assert.ok(!JIG_CHARS.includes('O'), 'No O (confused with 0)');
   assert.ok(!JIG_CHARS.includes('Q'), 'No Q (confused with O)');
+});
+
+// ─── R13: Session manager login timeout ─────────────────────────────────────
+
+await test('Session manager — login fetch has AbortSignal timeout (no infinite hang)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const src = fs.readFileSync(
+    path.join(root, 'beatbots-app/src/main/engines/session-manager.ts'),
+    'utf8',
+  );
+  assert.match(src, /export const LOGIN_REQUEST_TIMEOUT_MS = \d+/, 'LOGIN_REQUEST_TIMEOUT_MS exported');
+  assert.match(
+    src,
+    /doLoginRequest[\s\S]*?AbortSignal\.timeout\(LOGIN_REQUEST_TIMEOUT_MS\)/,
+    'doLoginRequest uses AbortSignal.timeout',
+  );
+  const guestMatch = src.match(/createGuestSession[\s\S]*?AbortSignal\.timeout\(([\d_]+)\)/);
+  const loginMatch = src.match(/LOGIN_REQUEST_TIMEOUT_MS = ([\d_]+)/);
+  assert.ok(guestMatch && loginMatch, 'guest + login timeout constants present');
+  assert.equal(
+    loginMatch[1].replace(/_/g, ''),
+    guestMatch[1].replace(/_/g, ''),
+    'login timeout matches guest session timeout',
+  );
 });
 
 // ─── Report ──────────────────────────────────────────────────────────────────
