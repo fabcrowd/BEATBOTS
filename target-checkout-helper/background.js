@@ -1572,7 +1572,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   for (const p of products) counts[normalizeProductUrl(p.url)] = 0;
 
   const monitor = {
-    active: true,
+    active: false,
     products,
     refreshInterval: refreshInterval || 1,
     counts,
@@ -1617,6 +1617,9 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   if (monitor.tabIds.length) {
     await Promise.all(monitor.tabIds.map((tabId) => waitForTabComplete(tabId)));
   }
+
+  monitor.active = true;
+  await chrome.storage.local.set({ monitor });
 
   // Start background TCIN polling immediately if we already have the API key.
   // Otherwise it will start as soon as CACHE_API_KEY is received.
