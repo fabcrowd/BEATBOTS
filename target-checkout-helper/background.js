@@ -1582,6 +1582,9 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
       monitor.tabIds.push(tabId);
       monitor.urlToTabId[norm] = tabId;
       urlToTabId[norm] = tabId;
+      // Arm lock with the monitor tab — content script may finish before the first
+      // poll cycle navigates; NAV_FAILED must be able to release this lock.
+      navigationLock.add(norm);
     }
   }
 
