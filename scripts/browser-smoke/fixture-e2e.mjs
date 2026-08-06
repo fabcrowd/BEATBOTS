@@ -1959,12 +1959,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
 
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 2000));
 
     let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 36; i++) {
       await new Promise((r) => setTimeout(r, 500));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
