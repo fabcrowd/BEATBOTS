@@ -573,8 +573,10 @@ async function wmWaitInProductQueue(settings, oid) {
   wmShowToast('In queue — waiting for your turn…', 'persistent');
   console.log('[WMT] Product-page queue detected — passive wait, DO NOT navigate');
 
-  // Lock the tab in background poll so it doesn't re-navigate while we wait.
-  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: location.href }); } catch (_) {}
+  // Lock MUST use settings.productUrl when monitored — poll keys inQueueUrls by normalized
+  // product URL. Fall back to location.href on unmonitored product-page queue.
+  const lockUrl = settings?.productUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
 
   const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
@@ -643,7 +645,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Product-page queue wait timed out');
-  wmSignalQueueTimeout(location.href);
+  wmSignalQueueTimeout(lockUrl);
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
   }

@@ -890,17 +890,43 @@ function testSc4CheckoutReviewPath() {
 }
 
 function testSc4CheckoutTimeoutNavFailed() {
-  const messages = [];
   const productUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
   const normUrl = normalizeProductUrl(productUrl);
   const navigationLock = new Set([normUrl]);
   const inQueueUrls = new Set();
 
-  messages.push({ type: 'SAMS_NAV_FAILED', url: productUrl });
-  bgApplyNavFailed(navigationLock, inQueueUrls, messages[0]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
   assert.equal(inQueueUrls.size, 0, 'SC-4: checkout timeout must not arm sacred lock');
   assert.ok(!navigationLock.has(normUrl), 'SC-4: checkout timeout releases navigationLock');
   assert.match(SC_SRC, /scHandleCheckout timed out/, 'SC-4: timeout log in source');
+  assert.match(
+    SC_SRC,
+    /Checkout step timeout — take over manually/,
+    'SC-4: checkout timeout shows user-facing toast'
+  );
+}
+
+function testSc4CheckoutTimeoutPollRecovery() {
+  const productUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
+  const normUrl = normalizeProductUrl(productUrl);
+  const navigationLock = new Set();
+  const inQueueUrls = new Set();
+
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(!navigationLock.has(normUrl), 'SC-4: checkout SPA timeout releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, 'SC-4: checkout SPA timeout must not arm sacred lock');
+
+  navigationLock.add(normUrl);
+  assert.ok(
+    navigationLock.has(normUrl),
+    'SC-4: poll recovery re-arms navigationLock after checkout timeout NAV_FAILED'
+  );
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(
+    !navigationLock.has(normUrl),
+    'SC-4: repeated NAV_FAILED during poll recovery releases lock for retry'
+  );
 }
 
 function main() {
@@ -925,6 +951,7 @@ function main() {
   testSc4ManualReviewStop();
   testSc4CheckoutReviewPath();
   testSc4CheckoutTimeoutNavFailed();
+  testSc4CheckoutTimeoutPollRecovery();
   console.log(
     "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, no sacred lock, error-path hardening"
   );

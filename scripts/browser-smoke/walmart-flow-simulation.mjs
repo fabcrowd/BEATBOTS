@@ -774,6 +774,37 @@ function runWm4SacredLockTests() {
   assert.equal(normProduct, normalizeProductUrl(productUrl), 'WM-4: normalized product URL');
   assert.ok(inQueueUrls.has(normProduct), 'WM-4: confirmed queue adds inQueueUrls');
 
+  // Product-page queue prefers settings.productUrl for poll matching (WM-4/WM-5).
+  inQueueUrls.clear();
+  const productQueueMonitored = 'https://www.walmart.com/ip/wm4-product-queue/457';
+  const pageHref = 'https://www.walmart.com/ip/wm4-product-queue/457?selected=true';
+  const productQueueLockUrl = productQueueMonitored; // mirrors wmWaitInProductQueue lockUrl
+  const normMonitored = bgApplyWalmartInQueue(inQueueUrls, {
+    type: 'WALMART_IN_QUEUE',
+    url: productQueueLockUrl,
+  });
+  assert.equal(
+    normMonitored,
+    normalizeProductUrl(productQueueMonitored),
+    'WM-4: product-page queue lock uses settings.productUrl for poll keys'
+  );
+  assert.ok(inQueueUrls.has(normMonitored), 'WM-4: product-page queue arms inQueueUrls via productUrl');
+  const navigationLock = new Set([normMonitored]);
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: productQueueLockUrl,
+  });
+  assert.ok(!inQueueUrls.has(normMonitored), 'WM-5: product-page queue timeout clears sacred lock via productUrl');
+  assert.ok(
+    !navigationLock.has(normMonitored),
+    'WM-5: product-page queue timeout releases navigationLock via productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(pageHref),
+    normalizeProductUrl('https://www.walmart.com/qp'),
+    'WM-4: product-page href with query still normalizes to product path'
+  );
+
   // /qp waiting room locks settings.productUrl — not /qp path (poll keys by product URL)
   inQueueUrls.clear();
   const monitoredProduct = 'https://www.walmart.com/ip/wm4-qp-test/789/';

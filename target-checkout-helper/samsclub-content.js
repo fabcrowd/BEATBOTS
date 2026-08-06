@@ -482,6 +482,7 @@ async function scHandleCheckout(settings) {
     await scSleep(pollMs);
   }
 
+  scShowToast('Checkout step timeout — take over manually', 'error');
   console.warn('[SC] scHandleCheckout timed out — releasing navigation lock');
   scSignalNavFailed(settings.productUrl || location.href);
 }
