@@ -34,6 +34,19 @@ export const FIXTURE_E2E_ROUTES = [
     monitorProductPath: '/p/mock-product',
   },
   {
+    host: 'www.target.com',
+    path: '/checkout/signin-gate',
+    file: MOCK_URLS.targetCheckoutSignin,
+    initLog: '[TCH] init',
+    journey: 'TGT-4',
+    invariants: [
+      'tgt-checkout-signin',
+      'tgt-signin-live-poll-cycle',
+      'mon2-live-poll-cycle',
+    ],
+    monitorProductPath: '/p/mock-product',
+  },
+  {
     host: 'www.walmart.com',
     path: '/ip/mock-predrop/123',
     file: MOCK_URLS.walmartProductPreDrop,

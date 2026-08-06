@@ -28,6 +28,11 @@ const FIXTURE_MARKERS = {
     journeys: ['TGT-4'],
     markers: ['data-tch-fixture="target-checkout-review"', 'data-test="placeOrderButton"'],
   },
+  targetCheckoutSignin: {
+    fixtureId: 'target-checkout-signin',
+    journeys: ['TGT-4'],
+    markers: ['data-tch-fixture="target-checkout-signin"', 'data-test="authModal"'],
+  },
   walmartProductPreDrop: {
     fixtureId: 'walmart-product-predrop',
     journeys: ['WM-2'],

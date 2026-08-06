@@ -598,6 +598,35 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.equal(clicked, false, 'FIX-3 TGT-4: Place Order button must remain unclicked');
   }
 
+  if (invariants.includes('tgt-checkout-signin')) {
+    assert.ok(
+      logs.some((l) => l.includes('checkout pending: signin')),
+      `FIX-3 TGT-4: expected signin pending on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('waiting for shipping/payment (no reload)')),
+      `FIX-3 TGT-4: signin gate must wait without reload on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('[TCH] review reached')),
+      `FIX-3 TGT-4: signin gate must not reach review on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('retry attempt')),
+      `FIX-3 TGT-4: signin gate must not schedule checkout retry on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('autoPlaceOrder: clicking Place Order')),
+      `FIX-3 TGT-4: signin gate must not auto-click Place Order on ${pageUrl}`
+    );
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      after?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 TGT-4: signin gate must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(after?.inQueueUrls || [])}`
+    );
+  }
+
   if (invariants.includes('sc2-cart-checkout')) {
     assert.ok(
       logs.some((l) => l.includes('Clicking checkout button')),
@@ -1692,6 +1721,75 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('tgt-signin-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    // Live background poll: checkout sign-in reload must stay on pending step (no review, no sacred lock).
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture TGT-4 signin ${route.journey}`, qty: 5 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 TGT-4: signin reload during live poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('checkout pending: signin')).length >= 2,
+      `FIX-3 TGT-4: signin reload must re-detect signin gate on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('[TCH] review reached')),
+      `FIX-3 TGT-4: signin reload during live poll must not reach review on ${pageUrl}`
+    );
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
+      } else {
+        await sendBg(popup, { type: liveSignalTypes[i], url: pageUrl });
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 TGT-4: signin live poll cycle ${i + 1} must not arm inQueueUrls on ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycle?.navigationLock?.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 TGT-4: signin live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    assert.equal(
+      afterPollWait?.inQueueUrls?.length || 0,
+      0,
+      `FIX-3 TGT-4: signin live poll must not arm inQueueUrls on ${pageUrl}, got inQueueUrls=${JSON.stringify(afterPollWait?.inQueueUrls || [])}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('retry attempt')),
+      `FIX-3 TGT-4: signin live poll must not schedule checkout retry on ${pageUrl}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('sc4-live-poll-cycle')) {
     const monitorUrl = route.monitorProductPath
       ? `http://${route.host}:${port}${route.monitorProductPath}`
@@ -2077,6 +2175,7 @@ function routeWaitMs(route) {
   if (route.invariants?.includes('sc2-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('no-sacred-lock') && route.host.includes('samsclub')) return 2000;
   if (route.invariants?.includes('tgt4-manual-review')) return 5000;
+  if (route.invariants?.includes('tgt-checkout-signin')) return 5000;
   return 6000;
 }
 
