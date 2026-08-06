@@ -443,6 +443,24 @@ function bgApplyAtcSuccess(navigationLock, inQueueUrls, message) {
   return normUrl;
 }
 
+/** Mirrors background.js isInCheckoutFlow — tab already in cart/checkout/thank-you. */
+function isInCheckoutFlow(url) {
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+/** Mirrors background.js poll restock navigate guard (WM-5 sacred lock + checkout flow). */
+function bgWouldNavigateRestock(normUrl, tabUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return false;
+  if (navigationLock.has(normUrl)) return false;
+  if (isInCheckoutFlow(tabUrl) && inQueueUrls.has(normUrl)) return false;
+  return true;
+}
+
 /** Mirrors scSignalAtcSuccess — SC-5: ATC_SUCCESS only. */
 function scFcfsSuccessMessages(productUrl) {
   return [{ type: 'ATC_SUCCESS', url: productUrl }];
@@ -719,6 +737,90 @@ function runSc6ErrorPathHardeningTests() {
     'SC-6: disabled wait timeout releases navigationLock'
   );
   assert.equal(inQueueUrls.size, 0, 'SC-6: disabled wait timeout must not arm sacred lock');
+
+  // SC-6: poll recovery rearm — NAV_FAILED clears lock, poll re-arms, no sacred lock.
+  inQueueUrls.clear();
+  navigationLock.clear();
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(!navigationLock.has(normUrl), 'SC-6: poll recovery NAV_FAILED releases lock');
+  navigationLock.add(normUrl);
+  assert.ok(
+    navigationLock.has(normUrl),
+    'SC-6: poll recovery re-arms navigationLock after restock navigate'
+  );
+  assert.equal(inQueueUrls.size, 0, 'SC-6: poll recovery must not arm sacred lock');
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(
+    !navigationLock.has(normUrl),
+    'SC-6: NAV_FAILED during poll recovery releases lock for retry'
+  );
+
+  // SC-6: isInCheckoutFlow + no sacred lock — FCFS may navigate cart/checkout on restock (contrast WM-5).
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout';
+  const cartTabUrl = 'https://www.samsclub.com/cart';
+  assert.ok(isInCheckoutFlow(checkoutTabUrl), 'SC-6: samsclub /checkout is checkout flow');
+  assert.ok(isInCheckoutFlow(cartTabUrl), 'SC-6: cart path is checkout flow');
+  inQueueUrls.clear();
+  navigationLock.clear();
+  assert.ok(
+    bgWouldNavigateRestock(normUrl, checkoutTabUrl, inQueueUrls, navigationLock),
+    'SC-6: FCFS restock may navigate checkout tab when no sacred lock (contrast WM-5)'
+  );
+  assert.ok(
+    bgWouldNavigateRestock(normUrl, cartTabUrl, inQueueUrls, navigationLock),
+    'SC-6: FCFS restock may navigate cart tab when no sacred lock'
+  );
+  navigationLock.add(normUrl);
+  assert.ok(
+    !bgWouldNavigateRestock(normUrl, checkoutTabUrl, inQueueUrls, navigationLock),
+    'SC-6: navigationLock blocks restock until NAV_FAILED'
+  );
+}
+
+/** SC-6: product → cart (no checkout) → SAMS_NAV_FAILED — full error-path chain. */
+function testSc6ProductToCartCheckoutMissingChain() {
+  const productUrl = 'https://www.samsclub.com/p/sc6-cart-missing/792';
+  const normUrl = normalizeProductUrl(productUrl);
+
+  const productPage = makePage({
+    pathname: '/p/sc6-cart-missing/792',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: false,
+      },
+      {
+        selectors: ['a[href="/cart/no-checkout"]', 'button[data-automation-id="go-to-cart-btn"]'],
+        text: 'View cart',
+        tag: 'a',
+        href: '/cart/no-checkout',
+      },
+    ],
+  });
+  const productResult = scHandleProductPageSim(productPage, { productUrl });
+  assert.equal(productResult.path, 'product_to_cart', 'SC-6: product ATC → cart');
+  assert.equal(productPage.navigatedTo, '/cart');
+
+  const cartPage = makePage({ pathname: '/cart/no-checkout', elements: [] });
+  const cartResult = scHandleCartPageSim(cartPage, { productUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'SC-6: cart missing checkout');
+  assert.deepEqual(cartResult.actions, ['checkout_missing']);
+
+  const navFail = cartResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(navFail, 'SC-6: cart checkout-missing sends SAMS_NAV_FAILED');
+  assert.equal(navFail.url, productUrl, 'SC-6: NAV_FAILED uses productUrl not cart URL');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cart checkout-missing must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'SC-6: cart checkout-missing releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-6: poll may retry after cart checkout-missing NAV_FAILED'
+  );
 }
 
 /** Mirrors scCheckoutHasReview — SC-4 review step detection. */
@@ -818,6 +920,7 @@ function main() {
   runSc5FcfsNoSacredLockTests();
   testSc6Source();
   runSc6ErrorPathHardeningTests();
+  testSc6ProductToCartCheckoutMissingChain();
   testSc4Source();
   testSc4ManualReviewStop();
   testSc4CheckoutReviewPath();
