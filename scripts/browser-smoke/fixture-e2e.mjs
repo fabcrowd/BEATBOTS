@@ -540,8 +540,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 WM-6: checkout SPA timeout must log timed out on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
     );
     assert.ok(
-      logs.some((l) => l.includes('releasing navigation lock')),
-      `FIX-3 WM-6: checkout SPA timeout must log NAV_FAILED release on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+      logs.some(
+        (l) =>
+          l.includes('releasing navigation lock') ||
+          l.includes('releasing sacred lock for poll recovery')
+      ),
+      `FIX-3 WM-6: checkout SPA timeout must log lock release on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
     );
     const productUrl = route.monitorProductPath
       ? `http://${route.host}:${port}${route.monitorProductPath}`
