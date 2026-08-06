@@ -1115,8 +1115,13 @@ async function wmHandleCheckout(settings) {
   }
 
   wmShowToast('Checkout step timeout — take over manually', 'error');
-  console.warn('[WMT] wmHandleCheckout timed out — releasing navigation lock');
-  wmSignalNavFailed(settings?.productUrl || location.href);
+  if (settings?.productUrl) {
+    console.warn('[WMT] wmHandleCheckout timed out — releasing sacred lock for poll recovery');
+    wmSignalQueueTimeout(settings.productUrl);
+  } else {
+    console.warn('[WMT] wmHandleCheckout timed out — releasing navigation lock');
+    wmSignalNavFailed(location.href);
+  }
 }
 
 // ─── WALMART LOGIN / 2FA (IMAP via native host) ────────────────────────────────

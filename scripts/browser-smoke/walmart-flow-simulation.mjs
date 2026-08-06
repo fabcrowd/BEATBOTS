@@ -1362,6 +1362,34 @@ function runWm5SacredLockNavTests() {
     !bgWouldNavigateRestock(normUrl, productTabUrl, inQueueUrls, navigationLock),
     'WM-5: restock must not navigate product tab while sacred lock holds'
   );
+
+  // WM-5: checkout SPA timeout after queue — must release sacred lock (NAV_FAILED alone leaves poll stuck).
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  assert.ok(inQueueUrls.has(normUrl), 'WM-5: post-queue checkout still holds sacred lock before timeout');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: productUrl,
+  });
+  assert.ok(
+    inQueueUrls.has(normUrl),
+    'WM-5: NAV_FAILED alone does not clear sacred lock (checkout timeout must use QUEUE_TIMEOUT)'
+  );
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: stuck sacred lock blocks poll after NAV_FAILED-only checkout timeout'
+  );
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: productUrl,
+  });
+  assert.ok(!inQueueUrls.has(normUrl), 'WM-5: checkout timeout QUEUE_TIMEOUT clears sacred lock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-5: poll may retry after checkout timeout releases sacred lock'
+  );
 }
 
 async function main() {
