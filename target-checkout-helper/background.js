@@ -693,7 +693,8 @@ async function runBackgroundPoll() {
 
     // Has the drop time arrived? Uses accurateNow() to compensate for local clock drift.
     const dropMs = monitor.dropExpectedAt ? new Date(monitor.dropExpectedAt).getTime() : 0;
-    const dropArmed = !dropMs || accurateNow() >= dropMs;
+    // Skip monitoring must wait for a configured drop time (popup: "won't fire until your drop time").
+    const dropArmed = dropMs > 0 && accurateNow() >= dropMs;
 
     // Per-product skip monitoring for Target: treat product as in-stock when drop is armed.
     for (const tp of targetProducts) {

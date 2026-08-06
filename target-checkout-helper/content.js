@@ -2287,6 +2287,7 @@ async function handleMonitoredATC(monitor, product) {
       } else {
         console.log('[TCH] monitor: clicking Buy It Now (saved payment mode)');
         markCheckoutStart('saved');
+        await maybeApplyHarvestedSession(settings);
         await debuggerClick(buyNowBtn);
         showToast('Monitor: Buy It Now → checkout…');
         setNavigationMark('product_to_checkout');
