@@ -56,8 +56,10 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'nav-failed-releases-lock',
       'tgt4-checkout-spa-timeout',
+      'tgt-poll-recovery-rearm',
     ],
     monitorProductPath: '/p/mock-checkout-spa-stall/794',
+    pollRecoveryProductPath: '/p/-/A-77777777',
     checkoutTimeoutMs: 750,
   },
   {
