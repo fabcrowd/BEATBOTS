@@ -725,6 +725,33 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
+  if (invariants.includes('tgt-cart-checkout-missing')) {
+    assert.ok(
+      logs.some((l) => l.includes('Checkout button not found')),
+      `FIX-3 TGT-4: expected cart checkout-missing log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('releasing navigation lock')),
+      `FIX-3 TGT-4: expected NAV_FAILED release log on cart ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    const productUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 TGT-4: cart checkout-missing must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 TGT-4: cart checkout-missing must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
   if (invariants.includes('sc2-cart-checkout-missing')) {
     assert.ok(
       logs.some((l) => l.includes('Checkout button not found')),
@@ -840,6 +867,72 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       assert.ok(
         !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
         `FIX-3 WM-6: cart navigationLock alone must not imply sacred lock on ${normMonitorUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  if (invariants.includes('tgt-cart-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+
+    // Live background poll: cart checkout-missing NAV_FAILED must never arm sacred lock.
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture TGT-4 cart ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 9500));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 TGT-4: cart reload during live poll must not arm inQueueUrls on ${normMonitorUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('Checkout button not found')).length >= 2,
+      `FIX-3 TGT-4: cart reload must re-trigger checkout-missing on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const navFailTypes = ['NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: monitorUrl });
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 TGT-4: cart live poll cycle ${i + 1} must not arm inQueueUrls on ${normMonitorUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 TGT-4: cart live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${navFailTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 TGT-4: cart live poll must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+        `FIX-3 TGT-4: cart navigationLock alone must not imply sacred lock on ${normMonitorUrl}`
       );
     }
     await sendBg(popup, { type: 'STOP_MONITOR' });
@@ -1949,6 +2042,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   // SC-4 / SC-6 / SC-3 / WM-4 / WM-6: after error-path NAV_FAILED, background poll must re-arm navigationLock (no sacred lock).
   if (
     invariants.includes('sc4-poll-recovery-rearm') ||
+    invariants.includes('tgt-poll-recovery-rearm') ||
     invariants.includes('sc6-poll-recovery-rearm') ||
     invariants.includes('sc3-poll-recovery-rearm') ||
     invariants.includes('wm4-poll-recovery-rearm') ||
@@ -1958,11 +2052,13 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       ? 'WM-4'
       : invariants.includes('wm6-poll-recovery-rearm')
         ? 'WM-6'
-        : invariants.includes('sc4-poll-recovery-rearm')
-          ? 'SC-4'
-          : invariants.includes('sc3-poll-recovery-rearm')
-            ? 'SC-3'
-            : 'SC-6';
+        : invariants.includes('tgt-poll-recovery-rearm')
+          ? 'TGT-4'
+          : invariants.includes('sc4-poll-recovery-rearm')
+            ? 'SC-4'
+            : invariants.includes('sc3-poll-recovery-rearm')
+              ? 'SC-3'
+              : 'SC-6';
     const monitorUrl = route.pollRecoveryProductPath
       ? `http://${route.host}:${port}${route.pollRecoveryProductPath}`
       : route.monitorProductPath
@@ -2196,6 +2292,8 @@ function routeWaitMs(route) {
   if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.checkoutTimeoutMs > 0) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('wm6-cart-checkout-missing')) return 9500;
+  if (route.invariants?.includes('tgt-cart-checkout-missing')) return 9500;
+  if (route.invariants?.includes('tgt-cart-live-poll-cycle')) return 9500;
   if (route.invariants?.includes('sc6-cart-live-poll-cycle')) return 9500;
   if (route.invariants?.includes('sc4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('tgt4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;

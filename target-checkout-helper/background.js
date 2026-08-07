@@ -663,7 +663,13 @@ async function runBackgroundPoll() {
       (p) => typeof TCH_HOSTS !== 'undefined' && TCH_HOSTS.detectRetailer(p.url) === 'samsclub'
     );
 
-    const hasTargetWork  = targetProducts.length > 0 && !!cachedApiKey;
+    const hasTargetSkipWork =
+      targetProducts.length > 0 &&
+      !!monitor.skipMonitoring &&
+      dropArmed &&
+      targetProducts.some((tp) => extractTcin(tp.url));
+    const hasTargetWork =
+      (targetProducts.length > 0 && !!cachedApiKey) || hasTargetSkipWork;
     const hasWalmartWork = walmartProducts.length > 0;
     const hasSamsclubWork = samsclubProducts.length > 0 && !!monitor.skipMonitoring && dropArmed;
     if (!hasTargetWork && !hasWalmartWork && !hasSamsclubWork) {
@@ -699,7 +705,7 @@ async function runBackgroundPoll() {
 
     // Per-product skip monitoring for Target: treat product as in-stock when drop is armed.
     for (const tp of targetProducts) {
-      if (!tp.skipMonitoring || !dropArmed) continue;
+      if ((!tp.skipMonitoring && !monitor.skipMonitoring) || !dropArmed) continue;
       const tcin = extractTcin(tp.url);
       if (tcin) stockMap.set(tcin, { stock: true, qty: 999 });
     }

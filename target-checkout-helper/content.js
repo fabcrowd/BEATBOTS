@@ -1129,6 +1129,23 @@ function signalNavFailed(url) {
   try { chrome.runtime.sendMessage({ type: 'NAV_FAILED', url: failUrl }); } catch (_) {}
 }
 
+/** WM-6 / SC-2 parity: cart checkout-button wait cap — optional data-tch-cart-checkout-wait-ms for fixture e2e. */
+function cartCheckoutWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-cart-checkout-wait-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 8000;
+}
+
+/** Faster poll when cart-checkout-wait override is set so fixture e2e can finish quickly. */
+function cartCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-cart-checkout-wait-ms')) return 200;
+  return 100;
+}
+
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
 async function handleProductPage(settings) {
@@ -1291,20 +1308,34 @@ async function handleProductPage(settings) {
 
 async function handleCartPage(settings) {
   console.log('[TCH] handleCartPage');
+  showToast('In cart — proceeding to checkout…', 'persistent');
   const stopCartCheckout = startTiming('cart_wait_for_checkout_button');
-  try {
-    const btn = await waitForAny([
-      { sel: SEL.cartCheckout }, { text: 'check out' }, { text: 'sign in to check out' },
-    ], 6000);
-    stopCartCheckout('clicked');
-    setNavigationMark('cart_to_checkout');
-    await debuggerClick(btn);
-  } catch {
-    stopCartCheckout('fallback_redirect');
-    setNavigationMark('cart_to_checkout');
-    await maybeApplyHarvestedSession(settings);
-    window.location.href = 'https://www.target.com/checkout';
+  const started = Date.now();
+  const maxWaitMs = cartCheckoutWaitMs();
+  const pollMs = cartCheckoutPollMs();
+  let btn = null;
+
+  while (Date.now() - started < maxWaitMs) {
+    btn =
+      document.querySelector(SEL.cartCheckout) ||
+      findByText('check out') ||
+      findByText('sign in to check out');
+    if (btn && !btn.disabled) break;
+    btn = null;
+    await sleep(pollMs);
   }
+
+  if (!btn) {
+    stopCartCheckout('missing');
+    showToast('Checkout button not found — take over manually', 'error');
+    console.warn('[TCH] Checkout button not found on cart page — releasing navigation lock');
+    signalNavFailed(settings.productUrl || getRememberedProductUrl() || location.href);
+    return;
+  }
+
+  stopCartCheckout('clicked');
+  setNavigationMark('cart_to_checkout');
+  await debuggerClick(btn);
 }
 
 let checkoutFlowStart = null;

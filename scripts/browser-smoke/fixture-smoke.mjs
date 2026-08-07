@@ -42,6 +42,15 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/checkout/spa-stall"',
     ],
   },
+  targetCartNoCheckout: {
+    fixtureId: 'target-cart-no-checkout',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-cart-no-checkout"',
+      'data-tch-cart-checkout-wait-ms="750"',
+      'data-tch-path="/cart/no-checkout"',
+    ],
+  },
   walmartProductPreDrop: {
     fixtureId: 'walmart-product-predrop',
     journeys: ['WM-2'],
