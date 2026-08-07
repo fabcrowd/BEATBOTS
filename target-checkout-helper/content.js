@@ -2125,6 +2125,32 @@ async function handleMonitoredATC(monitor, product) {
 
   // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
   const settings = await getSettings();
+  const fixtureAtcWait = document.documentElement.getAttribute('data-tch-atc-wait-ms');
+  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(
+    document.body?.textContent || ''
+  );
+
+  if (fixtureAtcWait) {
+    const started = Date.now();
+    const maxWait = productAtcWaitMs();
+    const pollMs = productAtcPollMs();
+    let fixtureBtn = null;
+    while (Date.now() - started < maxWait) {
+      const btn = findFirstEnabledAtcButton()
+        || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC);
+      if (btn && !btn.disabled) {
+        fixtureBtn = btn;
+        break;
+      }
+      await sleep(pollMs);
+    }
+    if (!fixtureBtn || fixtureBtn.disabled || pageOOS) {
+      console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+      signalNavFailed(normUrl);
+      return;
+    }
+  }
+
   if (settings.useSavedPayment) {
     const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
     if (buyNowBtn && !buyNowBtn.disabled) {
@@ -2155,10 +2181,6 @@ async function handleMonitoredATC(monitor, product) {
       ], 2000);
     } catch { addBtn = null; }
   }
-
-  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(
-    document.body?.textContent || ''
-  );
 
   if (addBtn && addBtn.disabled && !pageOOS) {
     try {
@@ -2236,24 +2258,8 @@ async function handleMonitoredATC(monitor, product) {
     }
   }
 
-  const fixtureAtcWait = document.documentElement.getAttribute('data-tch-atc-wait-ms');
-  if (fixtureAtcWait) {
-    const started = Date.now();
-    const maxWait = productAtcWaitMs();
-    const pollMs = productAtcPollMs();
-    while (Date.now() - started < maxWait) {
-      const btn = findFirstEnabledAtcButton()
-        || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC);
-      if (btn && !btn.disabled) {
-        addBtn = btn;
-        break;
-      }
-      await sleep(pollMs);
-    }
-  }
-
   if (!addBtn || addBtn.disabled || pageOOS) {
-    if (fixtureAtcWait || monitor.skipMonitoring) {
+    if (monitor.skipMonitoring) {
       console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
       signalNavFailed(normUrl);
       return;

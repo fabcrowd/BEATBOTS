@@ -2305,6 +2305,7 @@ function routeWaitMs(route) {
   if (route.queueTimeoutMs > 0) return route.queueTimeoutMs + 900;
   if (route.priceGuardTimeoutMs > 0) return route.priceGuardTimeoutMs + 900;
   if (route.pxTimeoutMs > 0) return route.pxTimeoutMs + 900;
+  if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.atcWaitMs > 0) return route.atcWaitMs + 900;
   if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
