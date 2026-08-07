@@ -2309,7 +2309,6 @@ function routeWaitMs(route) {
   if (route.atcWaitMs > 0) return route.atcWaitMs + 900;
   if (route.invariants?.includes('wm7-offer-id-ready')) return 2500;
   if (route.invariants?.includes('px-timeout-nav-failed')) return 3500;
-  if (route.invariants?.includes('nav-failed-releases-lock')) return 9500;
   if (route.checkoutTimeoutMs > 0) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('wm6-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('tgt-cart-checkout-missing')) return 9500;
