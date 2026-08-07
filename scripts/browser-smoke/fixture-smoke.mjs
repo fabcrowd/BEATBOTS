@@ -33,6 +33,15 @@ const FIXTURE_MARKERS = {
     journeys: ['TGT-4'],
     markers: ['data-tch-fixture="target-checkout-signin"', 'data-test="authModal"'],
   },
+  targetCheckoutSpaTimeout: {
+    fixtureId: 'target-checkout-spa-timeout',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-checkout-spa-timeout"',
+      'data-tch-checkout-timeout-ms="750"',
+      'data-tch-path="/checkout/spa-stall"',
+    ],
+  },
   walmartProductPreDrop: {
     fixtureId: 'walmart-product-predrop',
     journeys: ['WM-2'],

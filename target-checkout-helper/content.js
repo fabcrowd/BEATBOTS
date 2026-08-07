@@ -1107,6 +1107,28 @@ function getCheckoutStep(useSavedPayment = false) {
   return 'unknown';
 }
 
+/** TGT-4 / SC-4 parity: checkout SPA stall cap — optional data-tch-checkout-timeout-ms for fixture e2e. */
+function checkoutTotalTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-checkout-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 10 * 60 * 1000;
+}
+
+/** Faster poll when checkout-timeout override is set so fixture e2e can finish quickly. */
+function checkoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-checkout-timeout-ms')) return 200;
+  return 500;
+}
+
+function signalNavFailed(url) {
+  const failUrl = url || location.href;
+  try { chrome.runtime.sendMessage({ type: 'NAV_FAILED', url: failUrl }); } catch (_) {}
+}
+
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
 async function handleProductPage(settings) {
@@ -1321,9 +1343,31 @@ async function handleCheckoutPage(settings) {
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
   if (step === 'saved')       return handleSavedStep(settings);
-  if (step === 'signin' || step === 'unknown') {
-    return handleCheckoutPendingStep(settings, step);
+  if (step === 'signin') return handleCheckoutPendingStep(settings, step);
+  if (step === 'unknown') return handleCheckoutStallStep(settings);
+}
+
+/** Checkout SPA loading shell with no recognizable step yet — poll then timeout like WM/SC. */
+async function handleCheckoutStallStep(settings) {
+  console.log('[TCH] checkout stall: waiting for shipping/payment/review');
+  showToast('Waiting for checkout forms…', 'persistent');
+  const started = Date.now();
+  const maxWaitMs = checkoutTotalTimeoutMs();
+  const pollMs = checkoutPollMs();
+
+  while (Date.now() - started < maxWaitMs) {
+    const step = getCheckoutStep(settings.useSavedPayment);
+    if (step === 'shipping') return handleShippingStep(settings);
+    if (step === 'payment') return handlePaymentStep(settings);
+    if (step === 'review') return handleReviewStep(settings);
+    if (step === 'saved') return handleSavedStep(settings);
+    if (step === 'signin') return handleCheckoutPendingStep(settings, step);
+    await sleep(pollMs);
   }
+
+  showToast('Checkout step timeout — take over manually', 'error');
+  console.warn('[TCH] handleCheckoutStall timed out — releasing navigation lock');
+  signalNavFailed(settings.productUrl || getRememberedProductUrl() || location.href);
 }
 
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
@@ -2253,6 +2297,18 @@ async function init() {
 
   preferPickupMode = !!data.preferPickup;
 
+  const targetProducts = (data.monitor?.products || []).filter((p) => /target\.com/i.test(p.url));
+  const matchedProduct =
+    page === 'product'
+      ? targetProducts.find((p) => {
+          try {
+            return new URL(p.url).pathname === location.pathname;
+          } catch {
+            return false;
+          }
+        })
+      : targetProducts[0] || null;
+
   const settings = {
     shipping: data.shipping || {},
     payment: data.payment || {},
@@ -2271,6 +2327,7 @@ async function init() {
     checkoutSound: data.checkoutSound !== false,
     addExtraProduct: !!data.addExtraProduct,
     extraProductTcin: data.extraProductTcin || '',
+    productUrl: matchedProduct?.url || null,
   };
 
   // Extra product intercept: if we navigated here specifically to ATC the extra item, do that now.
