@@ -294,6 +294,7 @@ export const MOCK_URLS = {
   targetCheckoutSignin: 'fixtures/target-checkout-signin.html',
   targetCheckoutSpaTimeout: 'fixtures/target-checkout-spa-timeout.html',
   targetCartNoCheckout: 'fixtures/target-cart-no-checkout.html',
+  targetProductNoAtc: 'fixtures/target-product-no-atc.html',
   walmartProductPreDrop: 'fixtures/walmart-product-predrop.html',
   walmartProductQueue: 'fixtures/walmart-product-queue.html',
   walmartProductQueueTimeout: 'fixtures/walmart-product-queue-timeout.html',

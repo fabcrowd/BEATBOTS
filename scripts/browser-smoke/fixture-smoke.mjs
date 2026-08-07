@@ -51,6 +51,15 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/cart/no-checkout"',
     ],
   },
+  targetProductNoAtc: {
+    fixtureId: 'target-product-no-atc',
+    journeys: ['TGT-1'],
+    markers: [
+      'data-tch-fixture="target-product-no-atc"',
+      'data-tch-atc-wait-ms="750"',
+      'data-tch-path="/p/-/A-66666666"',
+    ],
+  },
   walmartProductPreDrop: {
     fixtureId: 'walmart-product-predrop',
     journeys: ['WM-2'],

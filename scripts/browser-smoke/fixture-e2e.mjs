@@ -134,6 +134,9 @@ async function applyRouteStorage(popup, route, port) {
         },
       ],
     };
+    if (route.atcWaitMs > 0) {
+      data.monitor.skipMonitoring = true;
+    }
   }
 
   if (route.walmartMaxPrice > 0) {
@@ -1058,6 +1061,22 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.ok(
       !logs.some((l) => l.includes('Product-page queue detected')),
       `FIX-3 WM-6: missing ATC element must not enter product-page queue wait on ${pageUrl}`
+    );
+  }
+
+  // TGT-1: product page with no ATC element must emit NAV_FAILED (not sacred lock).
+  if (invariants.includes('tgt-missing-atc-element')) {
+    assert.ok(
+      logs.some((l) => l.includes('ATC button not found or disabled')),
+      `FIX-3 TGT-1: missing ATC element must time out to NAV_FAILED on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('[TCH] clicking ATC')),
+      `FIX-3 TGT-1: missing ATC element must not click on ${pageUrl}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('passive polling for')),
+      `FIX-3 TGT-1: missing ATC element must not enter passive stock poll on ${pageUrl}`
     );
   }
 

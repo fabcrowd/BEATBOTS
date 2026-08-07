@@ -1146,6 +1146,23 @@ function cartCheckoutPollMs() {
   return 100;
 }
 
+/** TGT-1 / WM-6 parity: product-page ATC wait cap — optional data-tch-atc-wait-ms for fixture e2e. */
+function productAtcWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-atc-wait-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 8000;
+}
+
+/** Faster poll when ATC-wait override is set so fixture e2e can finish quickly. */
+function productAtcPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-atc-wait-ms')) return 200;
+  return 100;
+}
+
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
 async function handleProductPage(settings) {
@@ -1212,6 +1229,11 @@ async function handleProductPage(settings) {
     stopFindAtc('found');
   } catch {
     showToast('ATC button not found', 'error');
+    if (settings.productUrl) {
+      console.warn('[TCH] ATC button not found — releasing navigation lock');
+      signalNavFailed(settings.productUrl);
+      return;
+    }
     await scheduleCheckoutRetry(settings, 'ATC button not found');
     return;
   }
@@ -1249,6 +1271,11 @@ async function handleProductPage(settings) {
         stopEnableAtc('enabled');
       } catch {
         showToast('Add to cart still unavailable — check stock, variant, or store pickup on Target', 'error');
+        if (settings.productUrl) {
+          console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+          signalNavFailed(settings.productUrl);
+          return;
+        }
         await scheduleCheckoutRetry(settings, 'ATC button stayed disabled');
         return;
       }
@@ -2205,6 +2232,30 @@ async function handleMonitoredATC(monitor, product) {
 
       showToast(`Monitor: Added! (${currentCount + 1}/${product.qty})`, 'success');
       console.log(`[TCH] monitor ATC: cart confirmed=${cartConfirmed}`);
+      return;
+    }
+  }
+
+  const fixtureAtcWait = document.documentElement.getAttribute('data-tch-atc-wait-ms');
+  if (fixtureAtcWait) {
+    const started = Date.now();
+    const maxWait = productAtcWaitMs();
+    const pollMs = productAtcPollMs();
+    while (Date.now() - started < maxWait) {
+      const btn = findFirstEnabledAtcButton()
+        || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC);
+      if (btn && !btn.disabled) {
+        addBtn = btn;
+        break;
+      }
+      await sleep(pollMs);
+    }
+  }
+
+  if (!addBtn || addBtn.disabled || pageOOS) {
+    if (fixtureAtcWait || monitor.skipMonitoring) {
+      console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+      signalNavFailed(normUrl);
       return;
     }
   }

@@ -104,6 +104,23 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [],
   },
   {
+    host: 'www.target.com',
+    path: '/p/-/A-66666666',
+    file: MOCK_URLS.targetProductNoAtc,
+    initLog: '[TCH] init',
+    journey: 'TGT-1',
+    invariants: [
+      'no-sacred-lock',
+      'nav-failed-releases-lock',
+      'tgt-missing-atc-element',
+      'tgt-live-poll-cycle',
+      'tgt-poll-recovery-rearm',
+    ],
+    monitorProductPath: '/p/-/A-66666666',
+    pollRecoveryProductPath: '/p/-/A-66666666',
+    atcWaitMs: 750,
+  },
+  {
     host: 'www.walmart.com',
     path: '/ip/mock-predrop/123',
     file: MOCK_URLS.walmartProductPreDrop,
