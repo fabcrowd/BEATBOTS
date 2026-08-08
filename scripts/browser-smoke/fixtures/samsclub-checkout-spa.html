@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" data-tch-fixture="samsclub-checkout-spa" data-tch-path="/checkout/spa">
+<head>
+  <meta charset="utf-8">
+  <title>TCH fixture — Sam's Club checkout SPA (shipping → payment → review)</title>
+  <style>
+    .tch-step { display: none; }
+    .tch-step.active { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Mock Sam's Club checkout SPA (SC-4)</h1>
+
+  <section id="step-shipping" class="tch-step active">
+    <h2>Shipping</h2>
+    <label>First name <input name="firstName" autocomplete="given-name" /></label>
+    <label>Last name <input name="lastName" autocomplete="family-name" /></label>
+    <label>Address <input name="addressLineOne" autocomplete="address-line1" /></label>
+    <label>City <input name="city" autocomplete="address-level2" /></label>
+    <label>State <select name="state"><option value="CA">CA</option></select></label>
+    <label>ZIP <input name="postalCode" autocomplete="postal-code" /></label>
+    <label>Phone <input name="phone" autocomplete="tel" /></label>
+    <button type="button" data-automation-id="continue-btn">Continue</button>
+  </section>
+
+  <section id="step-payment" class="tch-step">
+    <h2>Payment</h2>
+    <label>Card <input name="cardNumber" autocomplete="cc-number" /></label>
+    <label>Expiry <input name="expirationDate" placeholder="MM/YY" /></label>
+    <label>CVV <input name="cvv" autocomplete="cc-csc" /></label>
+    <button type="button" data-automation-id="continue-btn">Continue</button>
+  </section>
+
+  <section id="step-review" class="tch-step">
+    <h2>Review</h2>
+    <button data-automation-id="place-order-btn" type="button">Place order</button>
+  </section>
+
+  <script>
+    (function () {
+      const steps = ['step-shipping', 'step-payment', 'step-review'];
+      let idx = 0;
+
+      function showStep(i) {
+        steps.forEach((id, j) => {
+          document.getElementById(id).classList.toggle('active', j === i);
+        });
+      }
+
+      document.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-automation-id="continue-btn"]');
+        if (!btn) return;
+        if (idx < steps.length - 1) {
+          idx += 1;
+          showStep(idx);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
