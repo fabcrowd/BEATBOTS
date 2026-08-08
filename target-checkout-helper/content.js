@@ -2362,7 +2362,7 @@ async function init() {
     startHarvestRecurringTick();
   }
 
-  if (data.monitor?.active && page === 'product') {
+  if (page === 'product') {
     const normUrl    = normalizeProductUrl(location.href);
     const currentTcin = extractTcinFromUrl(location.href);
     // Match by normalised URL first, then by TCIN as fallback (handles URL slug redirects).
@@ -2370,7 +2370,13 @@ async function init() {
       normalizeProductUrl(p.url) === normUrl
       || (currentTcin && extractTcinFromUrl(p.url) === currentTcin)
     );
-    if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
+    const fixtureMonitored =
+      document.documentElement.hasAttribute('data-tch-fixture') && product;
+    if (product && (data.monitor?.active || fixtureMonitored)) {
+      await handleMonitoredATC(data.monitor, product);
+      stopInit('monitor_mode');
+      return;
+    }
   }
 
   if (!data.enabled) {

@@ -123,12 +123,12 @@ async function applyRouteStorage(popup, route, port) {
   const productPath = route.monitorProductPath || route.sacredLockProductPath;
   if (productPath) {
     const productUrl = `http://${route.host}:${port}${productPath}`;
-    // Sam's Club: active:false prevents bgPollWatchdog from arming navigationLock
-    // during routeWaitMs (race before NAV_FAILED assertions). Target keeps active:true
-    // so handleMonitoredATC runs (handleProductPage skips fixture ATC). Live-poll
-    // invariants call START_MONITOR explicitly.
+    // active:false prevents bgPollWatchdog from arming navigationLock during
+    // routeWaitMs (poll matches the open fixture tab and sets navigationLock).
+    // Target fixture pages still enter handleMonitoredATC via data-tch-fixture.
+    // Live-poll invariants call START_MONITOR explicitly.
     data.monitor = {
-      active: !route.host.includes('samsclub'),
+      active: false,
       products: [
         {
           url: productUrl,
