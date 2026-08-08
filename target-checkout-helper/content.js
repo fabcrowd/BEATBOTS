@@ -1230,7 +1230,7 @@ async function handleProductPage(settings) {
   } catch {
     showToast('ATC button not found', 'error');
     if (settings.productUrl) {
-      console.warn('[TCH] ATC button not found — releasing navigation lock');
+      console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
       signalNavFailed(settings.productUrl);
       return;
     }
