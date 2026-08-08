@@ -434,10 +434,28 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.walmart.com',
+    path: '/checkout/spa-stall-sacred',
+    file: MOCK_URLS.walmartCheckoutSpaSacred,
+    initLog: '[WMT] init',
+    journey: 'WM-5',
+    invariants: ['wm5-checkout-spa-timeout-clears-sacred-lock'],
+    monitorProductPath: '/ip/mock-checkout-spa-sacred/996',
+    checkoutTimeoutMs: 750,
+  },
+  {
+    host: 'www.walmart.com',
     path: '/ip/mock-checkout-spa/992',
     file: MOCK_URLS.walmartProductNoAtc,
     initLog: '[WMT] init',
     journey: 'WM-6',
+    invariants: [],
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/ip/mock-checkout-spa-sacred/996',
+    file: MOCK_URLS.walmartProductNoAtc,
+    initLog: '[WMT] init',
+    journey: 'WM-5',
     invariants: [],
   },
   {

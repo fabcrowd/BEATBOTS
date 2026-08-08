@@ -299,6 +299,15 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/checkout/spa-stall"',
     ],
   },
+  walmartCheckoutSpaSacred: {
+    fixtureId: 'walmart-checkout-spa-sacred',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-spa-sacred"',
+      'data-tch-checkout-timeout-ms="750"',
+      'data-tch-path="/checkout/spa-stall-sacred"',
+    ],
+  },
   walmartProductNoAtc: {
     fixtureId: 'walmart-product-no-atc',
     journeys: ['WM-6'],

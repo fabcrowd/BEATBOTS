@@ -164,6 +164,14 @@ async function applyRouteStorage(popup, route, port) {
     });
   }
 
+  if (
+    route.invariants?.includes('wm5-checkout-spa-timeout-clears-sacred-lock') &&
+    productPath
+  ) {
+    const productUrl = `http://${route.host}:${port}${productPath}`;
+    await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  }
+
   return pageUrl;
 }
 
@@ -569,6 +577,33 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     assert.ok(
       !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
       `FIX-3 WM-6: checkout SPA timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
+    );
+  }
+
+  if (invariants.includes('wm5-checkout-spa-timeout-clears-sacred-lock')) {
+    assert.ok(
+      logs.some((l) => l.includes('wmHandleCheckout timed out')),
+      `FIX-3 WM-5: checkout SPA timeout must log timed out on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      logs.some((l) => l.includes('releasing sacred lock for poll recovery')),
+      `FIX-3 WM-5: checkout SPA timeout with sacred lock must log sacred lock release on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const productUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normProductUrl = normalizeProductUrl(productUrl);
+    const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const afterInQueue = after?.inQueueUrls || [];
+    const afterNavLock = after?.navigationLock || [];
+    assert.equal(
+      afterInQueue.length,
+      0,
+      `FIX-3 WM-5: checkout SPA timeout must clear inQueueUrls on ${pageUrl}, got ${JSON.stringify(afterInQueue)}`
+    );
+    assert.ok(
+      !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
+      `FIX-3 WM-5: checkout SPA timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
     );
   }
 
