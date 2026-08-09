@@ -1107,10 +1107,71 @@ function getCheckoutStep(useSavedPayment = false) {
   return 'unknown';
 }
 
+/** TGT-4 / SC-4 parity: checkout SPA stall cap — optional data-tch-checkout-timeout-ms for fixture e2e. */
+function checkoutTotalTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-checkout-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 10 * 60 * 1000;
+}
+
+/** Faster poll when checkout-timeout override is set so fixture e2e can finish quickly. */
+function checkoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-checkout-timeout-ms')) return 200;
+  return 500;
+}
+
+function signalNavFailed(url) {
+  const failUrl = url || location.href;
+  try { chrome.runtime.sendMessage({ type: 'NAV_FAILED', url: failUrl }); } catch (_) {}
+}
+
+/** WM-6 / SC-2 parity: cart checkout-button wait cap — optional data-tch-cart-checkout-wait-ms for fixture e2e. */
+function cartCheckoutWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-cart-checkout-wait-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 8000;
+}
+
+/** Faster poll when cart-checkout-wait override is set so fixture e2e can finish quickly. */
+function cartCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-cart-checkout-wait-ms')) return 200;
+  return 100;
+}
+
+/** TGT-1 / WM-6 parity: product-page ATC wait cap — optional data-tch-atc-wait-ms for fixture e2e. */
+function productAtcWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-atc-wait-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 8000;
+}
+
+/** Faster poll when ATC-wait override is set so fixture e2e can finish quickly. */
+function productAtcPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-atc-wait-ms')) return 200;
+  return 100;
+}
+
 // ─── STEP HANDLERS ───────────────────────────────────────────────────────────
 
 async function handleProductPage(settings) {
   console.log('[TCH] handleProductPage');
+  // Offline fixture e2e: skip live ATC/nav — tests drive monitor signals explicitly.
+  if (document.documentElement.hasAttribute('data-tch-fixture')) {
+    console.log('[TCH] handleProductPage — fixture mode, skipping live ATC');
+    return;
+  }
   prefetchCheckout();
   try {
     const { monitor: monDrop } = await chrome.storage.local.get('monitor');
@@ -1168,6 +1229,11 @@ async function handleProductPage(settings) {
     stopFindAtc('found');
   } catch {
     showToast('ATC button not found', 'error');
+    if (settings.productUrl) {
+      console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+      signalNavFailed(settings.productUrl);
+      return;
+    }
     await scheduleCheckoutRetry(settings, 'ATC button not found');
     return;
   }
@@ -1205,6 +1271,11 @@ async function handleProductPage(settings) {
         stopEnableAtc('enabled');
       } catch {
         showToast('Add to cart still unavailable — check stock, variant, or store pickup on Target', 'error');
+        if (settings.productUrl) {
+          console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+          signalNavFailed(settings.productUrl);
+          return;
+        }
         await scheduleCheckoutRetry(settings, 'ATC button stayed disabled');
         return;
       }
@@ -1264,20 +1335,34 @@ async function handleProductPage(settings) {
 
 async function handleCartPage(settings) {
   console.log('[TCH] handleCartPage');
+  showToast('In cart — proceeding to checkout…', 'persistent');
   const stopCartCheckout = startTiming('cart_wait_for_checkout_button');
-  try {
-    const btn = await waitForAny([
-      { sel: SEL.cartCheckout }, { text: 'check out' }, { text: 'sign in to check out' },
-    ], 6000);
-    stopCartCheckout('clicked');
-    setNavigationMark('cart_to_checkout');
-    await debuggerClick(btn);
-  } catch {
-    stopCartCheckout('fallback_redirect');
-    setNavigationMark('cart_to_checkout');
-    await maybeApplyHarvestedSession(settings);
-    window.location.href = 'https://www.target.com/checkout';
+  const started = Date.now();
+  const maxWaitMs = cartCheckoutWaitMs();
+  const pollMs = cartCheckoutPollMs();
+  let btn = null;
+
+  while (Date.now() - started < maxWaitMs) {
+    btn =
+      document.querySelector(SEL.cartCheckout) ||
+      findByText('check out') ||
+      findByText('sign in to check out');
+    if (btn && !btn.disabled) break;
+    btn = null;
+    await sleep(pollMs);
   }
+
+  if (!btn) {
+    stopCartCheckout('missing');
+    showToast('Checkout button not found — take over manually', 'error');
+    console.warn('[TCH] Checkout button not found on cart page — releasing navigation lock');
+    signalNavFailed(settings.productUrl || getRememberedProductUrl() || location.href);
+    return;
+  }
+
+  stopCartCheckout('clicked');
+  setNavigationMark('cart_to_checkout');
+  await debuggerClick(btn);
 }
 
 let checkoutFlowStart = null;
@@ -1316,9 +1401,31 @@ async function handleCheckoutPage(settings) {
   if (step === 'payment')     return handlePaymentStep(settings);
   if (step === 'review')      return handleReviewStep(settings);
   if (step === 'saved')       return handleSavedStep(settings);
-  if (step === 'signin' || step === 'unknown') {
-    return handleCheckoutPendingStep(settings, step);
+  if (step === 'signin') return handleCheckoutPendingStep(settings, step);
+  if (step === 'unknown') return handleCheckoutStallStep(settings);
+}
+
+/** Checkout SPA loading shell with no recognizable step yet — poll then timeout like WM/SC. */
+async function handleCheckoutStallStep(settings) {
+  console.log('[TCH] checkout stall: waiting for shipping/payment/review');
+  showToast('Waiting for checkout forms…', 'persistent');
+  const started = Date.now();
+  const maxWaitMs = checkoutTotalTimeoutMs();
+  const pollMs = checkoutPollMs();
+
+  while (Date.now() - started < maxWaitMs) {
+    const step = getCheckoutStep(settings.useSavedPayment);
+    if (step === 'shipping') return handleShippingStep(settings);
+    if (step === 'payment') return handlePaymentStep(settings);
+    if (step === 'review') return handleReviewStep(settings);
+    if (step === 'saved') return handleSavedStep(settings);
+    if (step === 'signin') return handleCheckoutPendingStep(settings, step);
+    await sleep(pollMs);
   }
+
+  showToast('Checkout step timeout — take over manually', 'error');
+  console.warn('[TCH] handleCheckoutStall timed out — releasing navigation lock');
+  signalNavFailed(settings.productUrl || getRememberedProductUrl() || location.href);
 }
 
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
@@ -2018,6 +2125,32 @@ async function handleMonitoredATC(monitor, product) {
 
   // When useSavedPayment, try Buy It Now first — bypasses cart entirely.
   const settings = await getSettings();
+  const fixtureAtcWait = document.documentElement.getAttribute('data-tch-atc-wait-ms');
+  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(
+    document.body?.textContent || ''
+  );
+
+  if (fixtureAtcWait) {
+    const started = Date.now();
+    const maxWait = productAtcWaitMs();
+    const pollMs = productAtcPollMs();
+    let fixtureBtn = null;
+    while (Date.now() - started < maxWait) {
+      const btn = findFirstEnabledAtcButton()
+        || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC);
+      if (btn && !btn.disabled) {
+        fixtureBtn = btn;
+        break;
+      }
+      await sleep(pollMs);
+    }
+    if (!fixtureBtn || fixtureBtn.disabled || pageOOS) {
+      console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+      signalNavFailed(normUrl);
+      return;
+    }
+  }
+
   if (settings.useSavedPayment) {
     const buyNowBtn = findFirst(SEL.buyNow) || findByText('buy it now');
     if (buyNowBtn && !buyNowBtn.disabled) {
@@ -2048,10 +2181,6 @@ async function handleMonitoredATC(monitor, product) {
       ], 2000);
     } catch { addBtn = null; }
   }
-
-  const pageOOS = /sold out|out of stock|currently unavailable|item not available/i.test(
-    document.body?.textContent || ''
-  );
 
   if (addBtn && addBtn.disabled && !pageOOS) {
     try {
@@ -2129,6 +2258,14 @@ async function handleMonitoredATC(monitor, product) {
     }
   }
 
+  if (!addBtn || addBtn.disabled || pageOOS) {
+    if (monitor.skipMonitoring) {
+      console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
+      signalNavFailed(normUrl);
+      return;
+    }
+  }
+
   // Streaming fetch polling — reads chunks, terminates early on match
   let pollCount = 0;
   let pollInProgress = false;
@@ -2196,6 +2333,11 @@ async function init() {
     stopInit('walmart_handled');
     return;
   }
+  if (detected === 'samsclub') {
+    // Sam's Club is handled by samsclub-content.js — this script is Target-only.
+    stopInit('samsclub_handled');
+    return;
+  }
   if (detected !== 'target') {
     stopInit('unsupported_host');
     return;
@@ -2220,7 +2362,7 @@ async function init() {
     startHarvestRecurringTick();
   }
 
-  if (data.monitor?.active && page === 'product') {
+  if (page === 'product') {
     const normUrl    = normalizeProductUrl(location.href);
     const currentTcin = extractTcinFromUrl(location.href);
     // Match by normalised URL first, then by TCIN as fallback (handles URL slug redirects).
@@ -2228,7 +2370,13 @@ async function init() {
       normalizeProductUrl(p.url) === normUrl
       || (currentTcin && extractTcinFromUrl(p.url) === currentTcin)
     );
-    if (product) { await handleMonitoredATC(data.monitor, product); stopInit('monitor_mode'); return; }
+    const fixtureMonitored =
+      document.documentElement.hasAttribute('data-tch-fixture') && product;
+    if (product && (data.monitor?.active || fixtureMonitored)) {
+      await handleMonitoredATC(data.monitor, product);
+      stopInit('monitor_mode');
+      return;
+    }
   }
 
   if (!data.enabled) {
@@ -2242,6 +2390,18 @@ async function init() {
   if (!hasData) { showToast('Open popup to add your info', 'error'); stopInit('missing_settings'); return; }
 
   preferPickupMode = !!data.preferPickup;
+
+  const targetProducts = (data.monitor?.products || []).filter((p) => /target\.com/i.test(p.url));
+  const matchedProduct =
+    page === 'product'
+      ? targetProducts.find((p) => {
+          try {
+            return new URL(p.url).pathname === location.pathname;
+          } catch {
+            return false;
+          }
+        })
+      : targetProducts[0] || null;
 
   const settings = {
     shipping: data.shipping || {},
@@ -2261,6 +2421,7 @@ async function init() {
     checkoutSound: data.checkoutSound !== false,
     addExtraProduct: !!data.addExtraProduct,
     extraProductTcin: data.extraProductTcin || '',
+    productUrl: matchedProduct?.url || null,
   };
 
   // Extra product intercept: if we navigated here specifically to ATC the extra item, do that now.

@@ -1587,7 +1587,7 @@ function updateMonitorUI() {
   renderProducts();
 }
 
-monitorBtn.addEventListener('click', toggleMonitor);
+monitorBtn.addEventListener('click', () => toggleMonitor(/target\.com/i));
 
 async function pollStatus() {
   if (!hasChromeStorage()) return;
