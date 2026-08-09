@@ -610,6 +610,37 @@ await test('Session manager — visitor ID format', () => {
   assert.notEqual(id, id2, 'Two generated IDs should differ');
 });
 
+await test('Session manager — invalidateSession clears persisted accessToken', () => {
+  const tokenCache = new Map();
+  const accounts = new Map();
+
+  function getById(_table, id) {
+    return accounts.get(id) ?? null;
+  }
+
+  function upsert(_table, row) {
+    accounts.set(row.id, row);
+  }
+
+  function invalidateSession(accountId) {
+    tokenCache.delete(accountId);
+    if (accountId === 0) return;
+    const account = getById('accounts', accountId);
+    if (account?.accessToken) {
+      upsert('accounts', { ...account, accessToken: '', status: 'idle' });
+    }
+  }
+
+  accounts.set(1, { id: 1, email: 'a@b.com', accessToken: 'stale-jwt', status: 'logged_in' });
+  tokenCache.set(1, { accountId: 1, accessToken: 'stale-jwt' });
+
+  invalidateSession(1);
+
+  assert.equal(tokenCache.has(1), false, 'in-memory cache cleared');
+  assert.equal(accounts.get(1).accessToken, '', 'persisted token cleared');
+  assert.equal(accounts.get(1).status, 'idle', 'account status reset');
+});
+
 await test('Session manager — token cache expiry with 60s early guard', () => {
   const tokenCache = new Map();
 
