@@ -7,7 +7,8 @@
  * WM-3: walmart-main-world.js Queue-it WebSocket sniff → TCH_QUEUE_PASSED.
  * WM-4: sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed.
  * WM-5: sacred lock blocks poll re-navigation; NAV_FAILED clears navigationLock only.
- * WM-6: queue error paths — PX page wait/timeout NAV_FAILED; NAV_FAILED while not in queue.
+ * WM-6: queue error paths — PX page wait/timeout NAV_FAILED; NAV_FAILED while not in queue;
+ *        45min queue timeout releases sacred lock (WALMART_QUEUE_TIMEOUT).
  * WM-7: product-page __NEXT_DATA__ offerId → WM_OFFER_ID_READY updates monitor.products[].oid.
  *
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
@@ -661,6 +662,34 @@ function bgApplyAtcSuccess(navigationLock, inQueueUrls, message) {
   return normUrl;
 }
 
+/** Mirrors background.js WALMART_QUEUE_TIMEOUT handler — releases both locks. */
+function bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, message) {
+  const normUrl = normalizeProductUrl(message.url || '');
+  if (normUrl) {
+    navigationLock.delete(normUrl);
+    inQueueUrls.delete(normUrl);
+  }
+  return normUrl;
+}
+
+/** Mirrors wmWaitInProductQueue timeout — releases lock on product page URL. */
+function wmProductQueueTimeoutMessage(page) {
+  return [{ type: 'WALMART_QUEUE_TIMEOUT', url: `https://www.walmart.com${page.pathname}` }];
+}
+
+/** Mirrors wmHandleQueueRoom timeout — uses settings.productUrl. */
+function wmQueueRoomTimeoutMessages(settings) {
+  const lockUrl = settings?.productUrl;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_QUEUE_TIMEOUT', url: lockUrl }];
+}
+
+/** Mirrors wmHandleQueue timeout — product URL for poll matching. */
+function wmCheckoutQueueTimeoutMessages(settings, locationHref) {
+  const lockUrl = settings?.productUrl || locationHref;
+  return [{ type: 'WALMART_QUEUE_TIMEOUT', url: lockUrl }];
+}
+
 /** Mirrors wmHandleQueueRoom lock message — uses settings.productUrl, not /qp href. */
 function wmQueueRoomSacredLockMessages(settings) {
   const lockUrl = settings?.productUrl;
@@ -929,6 +958,65 @@ function runWm6QueueErrorPathTests() {
     !bgPollWouldSkipNavigation(normPredrop, inQueueUrls, navigationLock),
     'WM-6: NAV_FAILED while not in queue allows poll retry'
   );
+
+  // 45min queue timeout releases sacred lock — product-page queue.
+  const productQueueUrl = 'https://www.walmart.com/ip/wm6-queue-timeout/201';
+  const productQueueNorm = normalizeProductUrl(productQueueUrl);
+  const productQueuePage = makePage({
+    pathname: '/ip/wm6-queue-timeout/201',
+    bodyText: "You're in line — estimated wait time 30 minutes",
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  inQueueUrls.clear();
+  navigationLock.clear();
+  const queueEntry = wmDecideProductPageEntry(productQueuePage);
+  const inQueueMsg = queueEntry.messages.find((m) => m.type === 'WALMART_IN_QUEUE');
+  bgApplyWalmartInQueue(inQueueUrls, inQueueMsg);
+  navigationLock.add(productQueueNorm);
+  const productTimeoutMsgs = wmProductQueueTimeoutMessage(productQueuePage);
+  assert.equal(productTimeoutMsgs.length, 1, 'WM-6: product queue timeout sends one message');
+  assert.equal(productTimeoutMsgs[0].type, 'WALMART_QUEUE_TIMEOUT', 'WM-6: product queue timeout type');
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, productTimeoutMsgs[0]);
+  assert.ok(!inQueueUrls.has(productQueueNorm), 'WM-6: product queue timeout clears sacred lock');
+  assert.ok(!navigationLock.has(productQueueNorm), 'WM-6: product queue timeout clears navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(productQueueNorm, inQueueUrls, navigationLock),
+    'WM-6: poll may retry after product queue timeout'
+  );
+
+  // /qp waiting room timeout — uses settings.productUrl.
+  const qpProductUrl = 'https://www.walmart.com/ip/wm6-qp-timeout/202';
+  const qpNorm = normalizeProductUrl(qpProductUrl);
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: qpProductUrl });
+  const qpTimeoutMsgs = wmQueueRoomTimeoutMessages({ productUrl: qpProductUrl });
+  assert.equal(qpTimeoutMsgs.length, 1, 'WM-6: queue room timeout sends one message');
+  assert.ok(!qpTimeoutMsgs[0].url.includes('/qp'), 'WM-6: queue room timeout uses productUrl');
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, qpTimeoutMsgs[0]);
+  assert.ok(!inQueueUrls.has(qpNorm), 'WM-6: queue room timeout clears sacred lock');
+  assert.deepEqual(wmQueueRoomTimeoutMessages({}), [], 'WM-6: queue room timeout without productUrl sends nothing');
+
+  // Checkout queue timeout — prefers settings.productUrl.
+  const checkoutProductUrl = 'https://www.walmart.com/ip/wm6-checkout-timeout/203';
+  const checkoutNorm = normalizeProductUrl(checkoutProductUrl);
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: checkoutProductUrl });
+  const checkoutTimeoutMsgs = wmCheckoutQueueTimeoutMessages(
+    { productUrl: checkoutProductUrl },
+    'https://www.walmart.com/checkout'
+  );
+  assert.equal(checkoutTimeoutMsgs[0].url, checkoutProductUrl, 'WM-6: checkout queue timeout prefers productUrl');
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, checkoutTimeoutMsgs[0]);
+  assert.ok(!inQueueUrls.has(checkoutNorm), 'WM-6: checkout queue timeout clears sacred lock');
 }
 
 /** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */

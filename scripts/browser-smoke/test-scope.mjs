@@ -121,7 +121,7 @@ export const JOURNEYS = {
   'WM-6': {
     id: 'WM-6',
     retailer: 'walmart',
-    summary: 'Walmart queue error paths (PX timeout, NAV_FAILED while not in queue)',
+    summary: 'Walmart queue error paths (PX timeout, NAV_FAILED while not in queue, 45min queue timeout lock release)',
     impl: ['target-checkout-helper/walmart-content.js'],
     coverage: 'strong',
     tests: ['walmart-flow-simulation.mjs'],

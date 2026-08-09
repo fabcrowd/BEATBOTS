@@ -288,6 +288,14 @@ function wmIsProductQueued() {
   return atc.disabled || atc.getAttribute('aria-disabled') === 'true';
 }
 
+/** Release sacred lock after queue wait timeout — same URL as WALMART_IN_QUEUE. */
+function wmReleaseSacredQueueLock(url) {
+  if (!url) return;
+  try {
+    chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_TIMEOUT', url });
+  } catch (_) {}
+}
+
 /** WM-2/WM-4: sacred lock only when queue is confirmed — not disabled ATC alone. */
 function wmShouldEnterSacredQueueWait() {
   return wmHasQueueIndicators();
@@ -522,6 +530,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
+  wmReleaseSacredQueueLock(location.href);
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
   }
@@ -588,6 +597,7 @@ async function wmHandleQueueRoom(settings) {
 
   wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] /qp waiting room timeout after 45 min');
+  wmReleaseSacredQueueLock(settings?.productUrl);
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -724,6 +734,7 @@ async function wmHandleQueue(settings) {
   }
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Queue wait timed out after 45 min');
+  wmReleaseSacredQueueLock(settings.productUrl || location.href);
 }
 
 /**

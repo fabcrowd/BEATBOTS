@@ -1132,6 +1132,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    case 'WALMART_QUEUE_TIMEOUT': {
+      // Content script gave up after max queue wait — release sacred lock so
+      // background poll can retry or user can take over manually.
+      const normTimeoutUrl = normalizeProductUrl(message.url || '');
+      if (normTimeoutUrl) {
+        navigationLock.delete(normTimeoutUrl);
+        inQueueUrls.delete(normTimeoutUrl);
+        console.log('[TCH bg] WALMART_QUEUE_TIMEOUT released locks:', normTimeoutUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
     case 'WM_OFFER_ID_READY': {
       // Content script extracted OID from __NEXT_DATA__ on a Walmart product page.
       // Store it on the matching monitored product so wmDirectAtc() can use it.
