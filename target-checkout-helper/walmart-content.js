@@ -288,6 +288,19 @@ function wmIsProductQueued() {
   return atc.disabled || atc.getAttribute('aria-disabled') === 'true';
 }
 
+/** Release sacred lock after queue wait timeout — same URL as WALMART_IN_QUEUE. */
+function wmReleaseSacredQueueLock(url) {
+  if (!url) return;
+  try {
+    chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_TIMEOUT', url });
+  } catch (_) {}
+}
+
+/** WM-2/WM-4: sacred lock only when queue is confirmed — not disabled ATC alone. */
+function wmShouldEnterSacredQueueWait() {
+  return wmHasQueueIndicators();
+}
+
 /**
  * Detects Walmart's PerimeterX / bot-check loading page.
  * Shows as "Hang tight! We're loading your experience." or similar.
@@ -517,9 +530,36 @@ async function wmWaitInProductQueue(settings, oid) {
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Product-page queue wait timed out after 45 min');
+  wmReleaseSacredQueueLock(location.href);
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
   }
+}
+
+/**
+ * Pre-drop price guard — poll until live DOM price drops; does NOT arm sacred lock (WM-2).
+ */
+async function wmWaitForPriceDrop(settings) {
+  const maxPrice = parseFloat(settings.walmartMaxPrice) || 0;
+  if (maxPrice <= 0) return;
+
+  wmShowToast(`Price above max $${maxPrice.toFixed(2)} — waiting for drop price`, 'persistent');
+  console.log(`[WMT] Price guard wait — no sacred lock until queue confirmed`);
+
+  const maxWaitMs = 45 * 60 * 1000;
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    await wmSleep(1000);
+    const currentPrice = wmGetCurrentPrice(true);
+    if (currentPrice === null || currentPrice <= maxPrice) {
+      wmShowToast('Drop price reached — continuing', 'success');
+      console.log(`[WMT] Price guard cleared at $${currentPrice ?? 'unknown'}`);
+      return;
+    }
+  }
+
+  wmShowToast('Price wait exceeded 45 min — take over manually', 'error');
+  console.warn('[WMT] Price guard wait timed out after 45 min');
 }
 
 /**
@@ -557,6 +597,7 @@ async function wmHandleQueueRoom(settings) {
 
   wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] /qp waiting room timeout after 45 min');
+  wmReleaseSacredQueueLock(settings?.productUrl);
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -569,18 +610,16 @@ async function wmHandleProductPage(settings, oid) {
     const currentPrice = wmGetCurrentPrice();
     if (currentPrice !== null && currentPrice > maxPrice) {
       wmShowToast(`Price $${currentPrice.toFixed(2)} > max $${maxPrice.toFixed(2)} — holding position`, 'persistent');
-      console.log(`[WMT] Price guard: $${currentPrice} > max $${maxPrice} — entering queue wait`);
-      // Don't ATC yet, but DO hold position via queue wait (handles both queue + pre-drop price)
-      await wmWaitInProductQueue(settings, oid);
-      return;
+      console.log(`[WMT] Price guard: $${currentPrice} > max $${maxPrice} — waiting for drop price (no sacred lock)`);
+      await wmWaitForPriceDrop(settings);
     }
   }
 
   // ── Check for product-page queue ─────────────────────────────────────────
   // During drops, Walmart's queue appears on the /ip/... product page itself.
-  // The ATC button exists but is disabled until your queue position clears.
-  // Navigating away loses your spot — we must wait here.
-  if (wmHasQueueIndicators() || wmIsProductQueued()) {
+  // Sacred lock only when queue indicators are present (WM-2/WM-4) — disabled
+  // ATC alone before drop is not queue.
+  if (wmShouldEnterSacredQueueWait()) {
     await wmWaitInProductQueue(settings, oid);
     return;
   }
@@ -608,7 +647,7 @@ async function wmHandleProductPage(settings, oid) {
 
   if (!atcBtn) {
     // Re-check: did the queue load while we were waiting?
-    if (wmHasQueueIndicators() || wmIsProductQueued()) {
+    if (wmShouldEnterSacredQueueWait()) {
       await wmWaitInProductQueue(settings, oid);
       return;
     }
@@ -695,6 +734,7 @@ async function wmHandleQueue(settings) {
   }
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Queue wait timed out after 45 min');
+  wmReleaseSacredQueueLock(settings.productUrl || location.href);
 }
 
 /**

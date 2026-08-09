@@ -1107,7 +1107,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       stopMonitor().then(() => sendResponse({ ok: true }));
       return true;
 
-    case 'WALMART_NAV_FAILED': {
+    case 'WALMART_NAV_FAILED':
+    case 'SAMS_NAV_FAILED': {
       // Content script signals it couldn't proceed (PX timeout, ATC unavailable, etc.)
       // Release the navigation lock so the poll can try again on next cycle.
       const normFailUrl = normalizeProductUrl(message.url || '');
@@ -1126,6 +1127,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (normQueueUrl) {
         inQueueUrls.add(normQueueUrl);
         console.log('[TCH bg] WALMART_IN_QUEUE locked:', normQueueUrl);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    case 'WALMART_QUEUE_TIMEOUT': {
+      // Content script gave up after max queue wait — release sacred lock so
+      // background poll can retry or user can take over manually.
+      const normTimeoutUrl = normalizeProductUrl(message.url || '');
+      if (normTimeoutUrl) {
+        navigationLock.delete(normTimeoutUrl);
+        inQueueUrls.delete(normTimeoutUrl);
+        console.log('[TCH bg] WALMART_QUEUE_TIMEOUT released locks:', normTimeoutUrl);
       }
       sendResponse({ ok: true });
       return true;
@@ -1171,6 +1185,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const baseMonitor = monitor || { active: false, products: [], counts: {} };
         sendResponse({
           ...baseMonitor,
+          inQueueUrls: [...inQueueUrls],
+          navigationLock: [...navigationLock],
           checkoutTelemetry: checkoutTelemetry || getDefaultCheckoutTelemetry(),
         });
       });
