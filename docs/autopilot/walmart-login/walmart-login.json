@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "walmart-login",
+  "description": "Extract Walmart login path/redirect helpers into signinStep.js with Node tests",
+  "goals": [
+    "Testable Walmart login path detection",
+    "Shared redirect guard for Use Saved Session off",
+    "signinStep.js loaded on Walmart pages"
+  ],
+  "nonGoals": [
+    "Popup Walmart account status",
+    "Captcha automation",
+    "Target login changes"
+  ],
+  "technicalNotes": "Extend target-checkout-helper/core/signinStep.js. Refactor walmart-content.js _wmInit login block only.",
+  "_tdd": true,
+  "_step_size": "One logical change per commit.",
+  "requirements": [
+    {
+      "id": "1",
+      "category": "functional",
+      "priority": "high",
+      "description": "Add Walmart login helpers to signinStep.js with Node tests",
+      "testType": "unit",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "target-checkout-helper/core/signinStep.js",
+          "scripts/signin-step-test.mjs"
+        ],
+        "targetFiles": {
+          "modify": [
+            "target-checkout-helper/core/signinStep.js",
+            "scripts/signin-step-test.mjs"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "classifyWalmartLoginPath('/account/login') is true",
+        "classifyWalmartLoginPath('/ip/123') is false",
+        "shouldRedirectToWalmartLogin returns true when useSavedSession false, not logged in, not on login",
+        "shouldRedirectToWalmartLogin returns false when already on login page",
+        "WALMART_LOGIN_WAIT_MESSAGE is a non-empty string",
+        "signin-step-test.mjs passes"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Add Walmart assertions to signin-step-test.mjs",
+          "passes": true
+        },
+        "implement": {
+          "description": "Add helpers to signinStep.js",
+          "passes": true
+        },
+        "refactor": {
+          "description": "Export on TCH_SIGNIN_STEP",
+          "passes": true
+        }
+      },
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "integration",
+      "priority": "high",
+      "description": "Load signinStep.js in Walmart content_scripts manifest entry",
+      "dependsOn": [
+        "1"
+      ],
+      "acceptance": [
+        "manifest.json walmart content_scripts includes core/signinStep.js before walmart-content.js"
+      ],
+      "tdd": {
+        "test": {
+          "description": "grep manifest for walmart signinStep.js",
+          "passes": true
+        },
+        "implement": {
+          "description": "Update manifest.json",
+          "passes": true
+        },
+        "refactor": {
+          "passes": true
+        }
+      },
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "functional",
+      "priority": "high",
+      "description": "Refactor walmart-content.js login guard to use TCH_SIGNIN_STEP helpers",
+      "dependsOn": [
+        "2"
+      ],
+      "acceptance": [
+        "_wmInit uses classifyWalmartLoginPath for login page detection",
+        "_wmInit uses shouldRedirectToWalmartLogin for redirect decision",
+        "Login wait toast uses WALMART_LOGIN_WAIT_MESSAGE"
+      ],
+      "tdd": {
+        "test": {
+          "description": "syntax check walmart-content.js",
+          "passes": true
+        },
+        "implement": {
+          "description": "Refactor _wmInit login block",
+          "passes": true
+        },
+        "refactor": {
+          "passes": true
+        }
+      },
+      "passes": true
+    }
+  ]
+}

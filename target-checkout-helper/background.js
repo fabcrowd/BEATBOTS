@@ -557,7 +557,9 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
     if (res.status === 401 || res.status === 403) {
       redskyErrorStreak++;
       await maybeAutoRecoverTargetSession();
-    } else if (res.ok) {
+      return out;
+    }
+    if (res.ok) {
       redskyErrorStreak = 0;
       const json = await res.json();
       const batchMap = parseBatchFulfillmentResponse(json);
@@ -874,7 +876,8 @@ async function runBackgroundPoll() {
       }
     } catch {}
 
-    const sleepMs = hadApiError
+    const dropAggressive = computeBackgroundPollSleepMs(monitor) <= 250;
+    const sleepMs = hadApiError && !dropAggressive
       ? (monitor.errorRetryDelayMs || 3500)
       : computeBackgroundPollSleepMs(monitor);
     await sleep(sleepMs);
@@ -1452,7 +1455,6 @@ async function maybeRunDropAwareHarvestKeepalive() {
     : 25 * 60 * 1000;
   const now = Date.now();
   if (now - lastHarvestKeepaliveRunMs < minMs) return;
-  lastHarvestKeepaliveRunMs = now;
 
   try {
     await fetch('https://www.target.com/', {
@@ -1464,9 +1466,11 @@ async function maybeRunDropAwareHarvestKeepalive() {
     console.log('[TCH bg] session keep-alive ping sent');
   } catch (e) {
     console.warn('[TCH bg] session keep-alive fetch failed:', e);
+    return;
   }
 
   await tchCaptureOneSnapshot('keepalive', 'https://www.target.com/', 'target');
+  lastHarvestKeepaliveRunMs = Date.now();
   lastHarvestCaptureMs = Date.now();
   lastHarvestCaptureKind = 'keepalive';
   console.log('[TCH bg] session keep-alive: snapshot captured');
@@ -1561,6 +1565,7 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
 async function stopMonitor() {
   bgPollActive = false;
   lastHarvestKeepaliveRunMs = 0;
+  redskyErrorStreak = 0;
   inQueueUrls.clear();
   navigationLock.clear();
 

@@ -1,6 +1,12 @@
-# Lessons learned
+## @it must narrate thought process in chat
 
-## Don't gate independent features on the master toggle without checking precedent
+**Mistake:** Running silent multi-step tool batches during drop-prep/watch mode — user cannot follow reasoning from tmux logs alone.
+
+**Rule for next time:**
+- Every @it turn: **Observing → Hypothesis → Action → Result** before/after tool use.
+- Code reasoning in Cloud Agent chat; `it-live.md` is for automated gate summaries only.
+- Never echo credentials in chat or commits.
+
 
 **Mistake (twice):** When adding a recurring harvest tick, I gated it on
 `runtimeEnabled` (the master "extension on/off" flag). But the existing page-load

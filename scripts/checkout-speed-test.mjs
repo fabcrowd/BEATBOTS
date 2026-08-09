@@ -13,6 +13,7 @@ import vm from 'vm';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
 import { performance } from 'perf_hooks';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,7 +74,15 @@ section('Drop polling logic (mocked clock)');
 }
 
 {
-  // 4 minutes after drop → outside grace → base background sleep
+  // At exact drop instant → aggressive window
+  const now = DROP_MS;
+  const { computeBackgroundPollSleepMs, isInDropTensionWindow } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(computeBackgroundPollSleepMs(mon) === 250, 'bg sleep 250 at drop instant');
+  assert(isInDropTensionWindow(mon) === true, 'tension window true at drop instant');
+}
+
+{
   const now = DROP_MS + 4 * 60 * 1000;
   const { computeBackgroundPollSleepMs } = loadHelpers(now);
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: dropIso }) === 500, 'bg base after grace ends');
@@ -248,6 +257,14 @@ section('Micro-benchmark (local CPU only)');
   }
   const elapsed = performance.now() - t0;
   console.log(`${n} paired calls in ${elapsed.toFixed(1)}ms (${((n * 2) / (elapsed / 1000)).toFixed(0)} ops/s)`);
+}
+
+section('Sign-in step helpers');
+{
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'signin-step-test.mjs')], {
+    stdio: 'inherit',
+  });
+  if (r.status !== 0) process.exitCode = 1;
 }
 
 section('End-to-end checkout latency');

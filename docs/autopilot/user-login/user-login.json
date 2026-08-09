@@ -1,0 +1,250 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Gens-ai/autopilot/main/tasks.schema.json",
+  "name": "user-login",
+  "description": "Harden Target checkout sign-in detection, guest fallback, popup status, and Node tests",
+  "goals": [
+    "Reliable sign-in/guest gate detection on Target checkout",
+    "Clear popup login status and toasts during sign-in",
+    "Node tests for sign-in helper logic without live Target.com"
+  ],
+  "nonGoals": [
+    "Walmart login changes",
+    "Extension backend user accounts",
+    "CAPTCHA or new 2FA providers"
+  ],
+  "technicalNotes": "Vanilla MV3 extension. Extract pure helpers to target-checkout-helper/core/signinStep.js for vm-based Node tests. Follow content.js patterns; never reload /checkout during sign-in.",
+  "_tdd": true,
+  "_priority_order": [
+    "1. Extract testable sign-in helpers",
+    "2. Guest checkout fallback behavior",
+    "3. Popup status and toasts",
+    "4. Integration wiring in content.js"
+  ],
+  "_step_size": "One logical change per commit. Quality over speed.",
+  "requirements": [
+    {
+      "id": "1",
+      "category": "functional",
+      "priority": "high",
+      "description": "Extract sign-in step and guest-button helpers into core/signinStep.js with Node tests",
+      "testType": "unit",
+      "codeAnalysis": {
+        "approach": "create",
+        "existingFiles": [
+          "target-checkout-helper/content.js",
+          "scripts/checkout-speed-test.mjs"
+        ],
+        "relatedTests": [
+          "scripts/checkout-speed-test.mjs"
+        ],
+        "patterns": [
+          "Pure helpers in target-checkout-helper/core/",
+          "Node vm tests in scripts/*.mjs",
+          "IIFE content scripts import via script tags in manifest"
+        ],
+        "targetFiles": {
+          "modify": [
+            "target-checkout-helper/manifest.json",
+            "target-checkout-helper/content.js"
+          ],
+          "create": [
+            "target-checkout-helper/core/signinStep.js",
+            "scripts/signin-step-test.mjs"
+          ]
+        }
+      },
+      "acceptance": [
+        "signinStep.js exports classifyPathAsSignin(path) returning true for /login and /signin paths",
+        "signinStep.js exports guestButtonNeedles array matching content.js guest copy",
+        "signinStep.js exports matchesGuestCheckoutText(text) true for 'continue as guest' case-insensitive",
+        "scripts/signin-step-test.mjs runs under node and exits 0",
+        "content.js uses shared helpers instead of duplicated inline logic"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Create scripts/signin-step-test.mjs loading signinStep.js via vm and asserting path classification and guest text matching",
+          "file": "scripts/signin-step-test.mjs",
+          "passes": true
+        },
+        "implement": {
+          "description": "Create core/signinStep.js, register in manifest before content.js, refactor content.js to use it",
+          "passes": true
+        },
+        "refactor": {
+          "description": "Remove duplicated guest needle strings from content.js",
+          "passes": true
+        }
+      },
+      "verification": [
+        "node scripts/signin-step-test.mjs passes",
+        "node --check target-checkout-helper/core/signinStep.js passes"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2",
+      "category": "functional",
+      "priority": "high",
+      "description": "Attempt guest checkout once when sign-in gate shows and auto sign-in is unavailable",
+      "dependsOn": [
+        "1"
+      ],
+      "testType": "unit",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "target-checkout-helper/content.js",
+          "target-checkout-helper/core/signinStep.js"
+        ],
+        "relatedTests": [
+          "scripts/signin-step-test.mjs"
+        ],
+        "patterns": [
+          "One-shot flags per page load in content.js",
+          "showToast for user-visible status"
+        ],
+        "targetFiles": {
+          "modify": [
+            "target-checkout-helper/content.js",
+            "scripts/signin-step-test.mjs"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "When step is signin and autoSignIn is false, tryGuestCheckoutOnce clicks first matching guest control",
+        "Guest attempt runs at most once per page load (guard flag)",
+        "When autoSignIn is true with credentials, guest path is skipped",
+        "Tests cover shouldAttemptGuest({ autoSignIn, hasCredentials, alreadyTried }) logic"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Add shouldAttemptGuest and pickGuestButton tests to signin-step-test.mjs",
+          "file": "scripts/signin-step-test.mjs",
+          "passes": true
+        },
+        "implement": {
+          "description": "Add tryGuestCheckoutOnce in content.js sign-in branch using core helpers",
+          "passes": true
+        },
+        "refactor": {
+          "description": "Consolidate sign-in branch timing with existing checkout step watch",
+          "passes": true
+        }
+      },
+      "verification": [
+        "node scripts/signin-step-test.mjs passes",
+        "No performRetryNavigation reload on /checkout"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3",
+      "category": "ui",
+      "priority": "medium",
+      "description": "Improve popup login status labels and sign-in waiting toasts",
+      "dependsOn": [
+        "2"
+      ],
+      "testType": "unit",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "target-checkout-helper/popup.js",
+          "target-checkout-helper/popup.html",
+          "target-checkout-helper/background.js"
+        ],
+        "relatedTests": [],
+        "patterns": [
+          "setAcctItem for login dot in popup.js",
+          "showToast persistent flag in content.js"
+        ],
+        "targetFiles": {
+          "modify": [
+            "target-checkout-helper/popup.js",
+            "target-checkout-helper/content.js"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "Popup login status shows 'Checking…' then resolved label within probe callback",
+        "content.js shows persistent toast on signin step when waiting for manual login",
+        "Auto sign-in toasts remain distinct for email, password, and submit phases"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Add formatLoginStatusLabel helper test in signin-step-test.mjs or small popup helper test",
+          "file": "scripts/signin-step-test.mjs",
+          "passes": true
+        },
+        "implement": {
+          "description": "Update popup.js status strings and content.js toast messages per acceptance",
+          "passes": true
+        },
+        "refactor": {
+          "description": "Share status label strings between popup and tests",
+          "passes": true
+        }
+      },
+      "verification": [
+        "node --check popup.js and content.js pass",
+        "node scripts/signin-step-test.mjs passes"
+      ],
+      "passes": true
+    },
+    {
+      "id": "4",
+      "category": "testing",
+      "priority": "medium",
+      "description": "Wire signin-step-test into checkout-speed-test runner",
+      "dependsOn": [
+        "3"
+      ],
+      "testType": "unit",
+      "codeAnalysis": {
+        "approach": "extend",
+        "existingFiles": [
+          "scripts/checkout-speed-test.mjs"
+        ],
+        "relatedTests": [
+          "scripts/signin-step-test.mjs"
+        ],
+        "patterns": [
+          "checkout-speed-test.mjs spawns child test scripts"
+        ],
+        "targetFiles": {
+          "modify": [
+            "scripts/checkout-speed-test.mjs",
+            "autopilot.json"
+          ],
+          "create": []
+        }
+      },
+      "acceptance": [
+        "node scripts/checkout-speed-test.mjs runs signin-step-test.mjs and fails if sign-in tests fail",
+        "autopilot.json tests feedback loop still passes after integration"
+      ],
+      "tdd": {
+        "test": {
+          "description": "Add failing integration hook in checkout-speed-test that expects signin-step-test to run",
+          "file": "scripts/checkout-speed-test.mjs",
+          "passes": true
+        },
+        "implement": {
+          "description": "Import/spawn signin-step-test from checkout-speed-test.mjs",
+          "passes": true
+        },
+        "refactor": {
+          "description": "Print combined summary line for all Node extension tests",
+          "passes": true
+        }
+      },
+      "verification": [
+        "node scripts/checkout-speed-test.mjs exits 0",
+        "bash scripts/autopilot-syntax-check.sh exits 0"
+      ],
+      "passes": true
+    }
+  ]
+}
