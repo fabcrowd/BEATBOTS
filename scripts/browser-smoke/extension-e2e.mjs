@@ -41,6 +41,12 @@ async function main() {
   });
 
   await popupPage.waitForSelector('#appTitle', { timeout: 15000 });
+  await popupPage.waitForSelector('#tabMain', { timeout: 10000 });
+  await popupPage.click('#tabMain');
+  await popupPage.waitForFunction(
+    () => document.getElementById('appTitle')?.textContent?.trim() === 'Target Checkout Helper',
+    { timeout: 10000 }
+  );
   const appTitle = await popupPage.$eval('#appTitle', (el) => el.textContent?.trim());
   assert.equal(appTitle, 'Target Checkout Helper');
 

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Install Cursor-native Autopilot for this repo.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+mkdir -p "$HOME/.local/bin"
+ln -sf "$ROOT/scripts/autopilot-cursor/run.sh" "$HOME/.local/bin/autopilot-cursor"
+ln -sf "$ROOT/scripts/autopilot-cursor/cleanup.sh" "$HOME/.local/bin/autopilot-cursor-cleanup"
+ln -sf "$ROOT/scripts/loop.sh" "$HOME/.local/bin/loop"
+chmod +x "$ROOT/scripts/autopilot-cursor/run.sh" "$ROOT/scripts/autopilot-cursor/cleanup.sh" "$ROOT/scripts/loop.sh" "$ROOT/scripts/autopilot-overnight.sh"
+echo "Linked:"
+echo "  autopilot-cursor -> ~/.local/bin/autopilot-cursor"
+echo "  loop             -> ~/.local/bin/loop"
+echo ""
+echo "Cursor commands: $ROOT/.cursor/commands/{it,loop,autopilot,prd,tasks,autopilot-init}.md"
+echo ""
+echo "Ensure PATH includes ~/.local/bin and authenticate:"
+echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+echo "  export CURSOR_API_KEY=...   # or: agent login"
+echo ""
+echo "Tonight:"
+echo "  loop --detach"
+echo "  # or: ./scripts/loop.sh --detach"
