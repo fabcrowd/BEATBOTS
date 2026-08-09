@@ -86,6 +86,12 @@ export function setCachedSession(ctx: SessionContext): void {
 
 export function invalidateSession(accountId: number): void {
   tokenCache.delete(accountId)
+  // Drop persisted token so getSession() re-runs login on retry (not stale DB JWT).
+  if (accountId === GUEST_ACCOUNT_ID) return
+  const account = getById<Account>('accounts', accountId)
+  if (account?.accessToken) {
+    upsert('accounts', { ...account, accessToken: '', status: 'idle' })
+  }
 }
 
 // Guest session uses accountId = 0 as a sentinel
