@@ -778,6 +778,26 @@ function runWm4SacredLockTests() {
   inQueueUrls.clear();
   bgApplyWalmartInQueue(inQueueUrls, navFailMsg);
   assert.equal(inQueueUrls.size, 0, 'WM-4: NAV_FAILED does not populate inQueueUrls');
+
+  // WM-4 error path: empty/missing WALMART_IN_QUEUE URL must not pollute inQueueUrls.
+  inQueueUrls.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: '' });
+  assert.equal(inQueueUrls.size, 0, 'WM-4: empty WALMART_IN_QUEUE url must not arm sacred lock');
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE' });
+  assert.equal(inQueueUrls.size, 0, 'WM-4: missing WALMART_IN_QUEUE url must not arm sacred lock');
+
+  // WM-4: checkout queue falls back to location.href when productUrl absent.
+  inQueueUrls.clear();
+  const checkoutFallbackHref = 'https://www.walmart.com/checkout';
+  const fallbackMessages = wmCheckoutQueueSacredLockMessages({}, checkoutFallbackHref);
+  assert.equal(fallbackMessages.length, 1, 'WM-4: checkout queue without productUrl still sends lock');
+  assert.equal(
+    fallbackMessages[0].url,
+    checkoutFallbackHref,
+    'WM-4: checkout queue falls back to location.href'
+  );
+  const normCheckout = bgApplyWalmartInQueue(inQueueUrls, fallbackMessages[0]);
+  assert.ok(inQueueUrls.has(normCheckout), 'WM-4: checkout fallback arms inQueueUrls');
 }
 
 function runWm6QueueErrorPathTests() {
@@ -1148,6 +1168,19 @@ function runWm5SacredLockNavTests() {
   assert.ok(
     bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
     'WM-5: poll still blocked after repeated NAV_FAILED during queue'
+  );
+
+  // WM-5 error path: NAV_FAILED with empty URL must not clear unrelated navigationLock.
+  const otherUrl = normalizeProductUrl('https://www.walmart.com/ip/wm5-other/888');
+  inQueueUrls.clear();
+  navigationLock.clear();
+  navigationLock.add(otherUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: '' });
+  assert.ok(navigationLock.has(otherUrl), 'WM-5: empty NAV_FAILED url must not clear unrelated lock');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED' });
+  assert.ok(
+    navigationLock.has(otherUrl),
+    'WM-5: missing NAV_FAILED url must not clear unrelated lock'
   );
 }
 

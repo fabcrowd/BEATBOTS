@@ -594,6 +594,29 @@ function runSc6ErrorPathHardeningTests() {
     'SC-6: disabled wait timeout releases navigationLock'
   );
   assert.equal(inQueueUrls.size, 0, 'SC-6: disabled wait timeout must not arm sacred lock');
+
+  // SC-6: repeated SAMS_NAV_FAILED must not arm sacred lock (WM-5 parity).
+  navigationLock.clear();
+  inQueueUrls.clear();
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.equal(inQueueUrls.size, 0, 'SC-6: repeated NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-6: poll may retry after repeated NAV_FAILED'
+  );
+
+  // SC-6 error path: empty SAMS_NAV_FAILED must not clear unrelated navigationLock.
+  const otherNorm = normalizeProductUrl('https://www.samsclub.com/p/sc6-other/777');
+  navigationLock.clear();
+  inQueueUrls.clear();
+  navigationLock.add(otherNorm);
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: '' });
+  assert.ok(
+    navigationLock.has(otherNorm),
+    'SC-6: empty NAV_FAILED url must not clear unrelated lock'
+  );
 }
 
 function main() {
