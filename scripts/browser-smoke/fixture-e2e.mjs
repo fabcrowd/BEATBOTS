@@ -150,7 +150,8 @@ async function applyRouteStorage(popup, route, port) {
   await setStorage(popup, data);
 
   if (
-    route.invariants?.includes('wm5-pre-timeout-live-poll-cycle') &&
+    (route.invariants?.includes('wm5-pre-timeout-live-poll-cycle') ||
+      route.invariants?.includes('wm5-checkout-spa-live-poll-cycle')) &&
     productPath &&
     route.path !== productPath
   ) {
@@ -272,6 +273,69 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs) 
     pollWouldSkipNavigation(normLockUrl, new Set(afterInQueue), new Set(afterNavLock)),
     true,
     `FIX-3 WM-5: pre-timeout live poll must skip navigate while sacred lock holds on ${normLockUrl}`
+  );
+}
+
+/** WM-5: checkout SPA stall with pre-armed sacred lock must survive pre-timeout live poll. */
+async function assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs) {
+  if (!route.monitorProductPath) {
+    throw new Error(`wm5-checkout-spa-live-poll-cycle requires monitorProductPath on ${route.path}`);
+  }
+  const lockUrl = `http://${route.host}:${port}${route.monitorProductPath}`;
+  const normLockUrl = normalizeProductUrl(lockUrl);
+
+  let initialInQueue = [];
+  for (let i = 0; i < 16; i++) {
+    await new Promise((r) => setTimeout(r, 40));
+    const initial = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    initialInQueue = initial?.inQueueUrls || [];
+    if (initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl)) break;
+  }
+  assert.ok(
+    initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: checkout SPA live poll expects sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(initialInQueue)}`
+  );
+
+  await new Promise((r) => setTimeout(r, 50));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 2000));
+  const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const reloadInQueue = afterReload?.inQueueUrls || [];
+  const reloadNavLock = afterReload?.navigationLock || [];
+  assert.ok(
+    reloadInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: checkout SPA reload must preserve sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(reloadInQueue)}`
+  );
+  assert.equal(
+    pollWouldSkipNavigation(normLockUrl, new Set(reloadInQueue), new Set(reloadNavLock)),
+    true,
+    `FIX-3 WM-5: checkout SPA reload must skip navigate while sacred lock holds on ${normLockUrl}`
+  );
+  assert.ok(
+    !logs.some((l) => l.includes('releasing sacred lock for poll recovery')),
+    `FIX-3 WM-5: checkout SPA live poll must not release sacred lock before timeout on ${route.path}`
+  );
+
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
+  await new Promise((r) => setTimeout(r, 100));
+  await sendBg(popup, { type: 'NAV_FAILED', url: lockUrl });
+  await new Promise((r) => setTimeout(r, 300));
+
+  const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const afterInQueue = after?.inQueueUrls || [];
+  const afterNavLock = after?.navigationLock || [];
+  assert.ok(
+    afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: checkout SPA live poll must preserve sacred lock before timeout on ${normLockUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
+  );
+  assert.ok(
+    !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: checkout SPA NAV_FAILED must not re-arm navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
+  );
+  assert.equal(
+    pollWouldSkipNavigation(normLockUrl, new Set(afterInQueue), new Set(afterNavLock)),
+    true,
+    `FIX-3 WM-5: checkout SPA live poll must skip navigate while sacred lock holds on ${normLockUrl}`
   );
 }
 
@@ -2545,6 +2609,10 @@ async function main() {
 
     if (route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')) {
       await assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs);
+    }
+
+    if (route.invariants?.includes('wm5-checkout-spa-live-poll-cycle')) {
+      await assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs);
     }
 
     await new Promise((r) => setTimeout(r, routeWaitMs(route)));

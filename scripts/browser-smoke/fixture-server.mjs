@@ -439,9 +439,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartCheckoutSpaSacred,
     initLog: '[WMT] init',
     journey: 'WM-5',
-    invariants: ['wm5-checkout-spa-timeout-clears-sacred-lock'],
+    invariants: [
+      'wm5-checkout-spa-timeout-clears-sacred-lock',
+      'wm5-checkout-spa-live-poll-cycle',
+    ],
     monitorProductPath: '/ip/mock-checkout-spa-sacred/996',
-    checkoutTimeoutMs: 750,
+    checkoutTimeoutMs: 5000,
   },
   {
     host: 'www.walmart.com',
