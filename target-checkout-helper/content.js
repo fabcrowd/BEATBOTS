@@ -1279,11 +1279,24 @@ function getPageType() {
   return 'other';
 }
 
+function hasCheckoutPaymentShell() {
+  if (getPageType() !== 'checkout') return false;
+  if (document.querySelector(SEL.cardNumber)) return true;
+  if (hasCheckoutAuthGate()) return false;
+  const shippingVisible = ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
+    .some((s) => document.querySelector(s));
+  if (shippingVisible) return false;
+  if (document.querySelector('[data-test*="payment" i], [data-test*="Payment" i]')) return true;
+  const body = (document.body?.innerText || '').slice(0, 10000).toLowerCase();
+  return /\bpayment\b/.test(body) && /\b(card|wallet|circle|debit|credit)\b/.test(body);
+}
+
 function getCheckoutStep(useSavedPayment = false) {
   const opts = {
     hasPlaceOrder: !!(document.querySelector(SEL.placeOrder) || findByText('place order')),
     hasAuthGate: hasCheckoutAuthGate(),
     hasCardNumber: !!document.querySelector(SEL.cardNumber),
+    hasPaymentShell: hasCheckoutPaymentShell(),
     hasShippingFields: ['input[id*="firstName"]', 'input[name="firstName"]', 'input[autocomplete="given-name"]']
       .some((s) => document.querySelector(s)),
     useSavedPayment,
@@ -1546,7 +1559,9 @@ async function runCheckoutPendingActions(settings, step, options = {}) {
     ? TCH_SIGNIN_STEP.shouldAutoSignInOnCheckoutPending(step, hasCredentials)
     : step === 'signin' && hasCredentials;
   if (autoSignIn) {
-    if (isCheckoutSignedInConfirm() || looksLoggedInOnTarget()) {
+    const trySignedInContinue = isCheckoutSignedInConfirm()
+      || (step === 'signin' && looksLoggedInOnTarget());
+    if (trySignedInContinue) {
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       if (await tryCheckoutSignedInContinue()) {
         showToast('Checkout: continuing with signed-in account…', 'persistent');
