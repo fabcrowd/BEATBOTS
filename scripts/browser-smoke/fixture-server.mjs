@@ -442,8 +442,10 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'wm5-checkout-spa-timeout-clears-sacred-lock',
       'wm5-checkout-spa-live-poll-cycle',
+      'wm5-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-checkout-spa-sacred/996',
+    pollRecoveryProductPath: '/ip/mock-checkout-spa-sacred-recovery/997',
     checkoutTimeoutMs: 5000,
   },
   {
@@ -457,6 +459,14 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/ip/mock-checkout-spa-sacred/996',
+    file: MOCK_URLS.walmartProductNoAtc,
+    initLog: '[WMT] init',
+    journey: 'WM-5',
+    invariants: [],
+  },
+  {
+    host: 'www.walmart.com',
+    path: '/ip/mock-checkout-spa-sacred-recovery/997',
     file: MOCK_URLS.walmartProductNoAtc,
     initLog: '[WMT] init',
     journey: 'WM-5',
