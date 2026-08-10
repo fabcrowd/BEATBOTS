@@ -1394,6 +1394,73 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('sc6-checkout-spa-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+    const pollWaitMs = route.checkoutTimeoutMs > 0 ? route.checkoutTimeoutMs : 2000;
+
+    // Live background poll: SC-6 checkout SPA timeout must never arm sacred lock during real poll cycles.
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture SC-6 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, route.checkoutTimeoutMs + 900));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 SC-6: checkout SPA reload during live poll must not arm inQueueUrls on ${normMonitorUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('scHandleCheckout timed out')).length >= 2,
+      `FIX-3 SC-6: checkout SPA reload must re-trigger timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    const navFailTypes = ['SAMS_NAV_FAILED', 'NAV_FAILED', 'SAMS_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: monitorUrl });
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 SC-6: live poll cycle ${i + 1} must not arm inQueueUrls on checkout SPA ${normMonitorUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 SC-6: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on checkout SPA ${normMonitorUrl} after ${navFailTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, pollWaitMs + 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 SC-6: live poll must not arm inQueueUrls on checkout SPA ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+        `FIX-3 SC-6: navigationLock alone must not imply sacred lock on checkout SPA ${normMonitorUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('wm4-live-poll-cycle')) {
     const walmartProbePath =
       route.path.includes('/qp/') ? '/ip/mock-wm4-qp-live/111' : '/ip/mock-wm4-checkout-live/222';
@@ -2353,6 +2420,7 @@ function routeWaitMs(route) {
   if (route.invariants?.includes('tgt-cart-checkout-missing')) return 9500;
   if (route.invariants?.includes('tgt-cart-live-poll-cycle')) return 9500;
   if (route.invariants?.includes('sc6-cart-live-poll-cycle')) return 9500;
+  if (route.invariants?.includes('sc6-checkout-spa-live-poll-cycle')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('sc4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('tgt4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('sc4-shipping-payment-review')) return 10000;
