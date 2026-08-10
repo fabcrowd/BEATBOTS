@@ -1052,6 +1052,21 @@ async function _wmInit() {
         })
       : !isLoggedIn && !onLoginPage;
     if (shouldRedirect) {
+      const page = wmGetPageType();
+      if (wmHasQueueIndicators() || page === 'queue-room' || page === 'queue' || page === 'checkout' || page === 'cart') {
+        console.log('[WMT] login redirect skipped — queue or active checkout path');
+        wmInitInFlight = false;
+        return;
+      }
+      await wmSleep(1500);
+      const loggedInAfterWait = !!(
+        document.querySelector('[data-automation-id="account-greeting"]') ||
+        Array.from(document.querySelectorAll('a')).some(a => /\/account\/logout|sign-out/i.test(a.href || ''))
+      );
+      if (loggedInAfterWait) {
+        wmInitInFlight = false;
+        return;
+      }
       wmShowToast('Use Saved Session is OFF — redirecting to Walmart login…');
       window.location.href = 'https://www.walmart.com/account/login';
       wmInitInFlight = false;

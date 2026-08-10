@@ -79,6 +79,14 @@ assert(
   S.resolveCheckoutStep({ useSavedPayment: true, hasEnabledContinueButton: true }) === 'saved',
   'saved when continue present'
 );
+assert(
+  S.resolveCheckoutStep({ hasPaymentShell: true }) === 'payment',
+  'wallet-only payment shell routes to payment step'
+);
+assert(
+  S.resolveCheckoutStep({ hasPaymentShell: true, hasAuthGate: true }) === 'signin',
+  'auth gate before wallet payment shell'
+);
 assert(S.resolveCheckoutStep({}) === 'unknown', 'empty signals unknown');
 
 assert(S.shouldAutoSignInOnCheckoutPending('unknown', true), 'auto signin on unknown with creds');

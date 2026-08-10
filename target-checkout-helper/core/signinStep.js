@@ -84,6 +84,7 @@
    *   hasPlaceOrder?: boolean,
    *   hasAuthGate?: boolean,
    *   hasCardNumber?: boolean,
+   *   hasPaymentShell?: boolean,
    *   hasShippingFields?: boolean,
    *   useSavedPayment?: boolean,
    *   hasEnabledContinueButton?: boolean,
@@ -94,7 +95,7 @@
     opts = opts || {};
     if (opts.hasPlaceOrder) return 'review';
     if (opts.hasAuthGate) return 'signin';
-    if (opts.hasCardNumber) return 'payment';
+    if (opts.hasCardNumber || opts.hasPaymentShell) return 'payment';
     if (opts.hasShippingFields) return 'shipping';
     if (opts.useSavedPayment && opts.hasEnabledContinueButton) return 'saved';
     return 'unknown';
