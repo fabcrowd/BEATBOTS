@@ -595,6 +595,7 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'sc4-shipping-payment-review',
       'sc4-manual-review',
+      'sc5-sc6-live-poll-cycle',
     ],
     monitorProductPath: '/p/mock-fcfs/789',
   },
