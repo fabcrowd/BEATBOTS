@@ -211,6 +211,7 @@ export const FIXTURE_E2E_ROUTES = [
       'wm5-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-queue/456',
+    sacredLockProductPath: '/ip/mock-queue/456',
     pollRecoveryProductPath: '/ip/mock-queue-poll-recovery/461',
     queueTimeoutMs: 5000,
   },
