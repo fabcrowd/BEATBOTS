@@ -544,7 +544,7 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.samsclubCart,
     initLog: '[TCH] init',
     journey: 'SC-2',
-    invariants: ['no-sacred-lock', 'sc2-cart-checkout'],
+    invariants: ['no-sacred-lock', 'sc2-cart-checkout', 'sc5-sc6-live-poll-cycle'],
     monitorProductPath: '/p/mock-fcfs/789',
   },
   {
