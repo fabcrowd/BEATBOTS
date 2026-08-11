@@ -274,6 +274,13 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs) 
     true,
     `FIX-3 WM-5: pre-timeout live poll must skip navigate while sacred lock holds on ${normLockUrl}`
   );
+
+  // Cross-page routes START_MONITOR before navigation; stop poll so post-QUEUE_TIMEOUT
+  // navigate to the monitored product cannot re-arm sacred lock on a queue fixture (WM-5).
+  if (route.path !== lockPath) {
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 /** WM-5: checkout SPA stall with pre-armed sacred lock must survive pre-timeout live poll. */
