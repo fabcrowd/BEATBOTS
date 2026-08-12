@@ -2624,6 +2624,13 @@ async function main() {
 
     await new Promise((r) => setTimeout(r, routeWaitMs(route)));
 
+    // WM-5: stop background poll before poll-recovery asserts so a live monitor
+    // cannot navigate the open tab (checkout SPA / cross-page queue) after timeout.
+    if (route.invariants?.includes('wm5-poll-recovery-rearm')) {
+      await sendBg(popup, { type: 'STOP_MONITOR' });
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
     assert.ok(
       logs.some((l) => l.includes(route.initLog)),
       `FIX-2 ${route.journey}: expected ${route.initLog} on ${url}, got: ${logs.slice(0, 5).join(' | ') || '(none)'}`

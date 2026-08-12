@@ -308,6 +308,16 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/checkout/spa-stall-sacred"',
     ],
   },
+  walmartCheckoutSpaSacredCross: {
+    fixtureId: 'walmart-checkout-spa-sacred-cross',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-spa-sacred-cross"',
+      'data-tch-checkout-timeout-ms="5000"',
+      'data-tch-path="/checkout/spa-stall-sacred-cross"',
+      'sacred lock keys monitor product',
+    ],
+  },
   walmartProductNoAtc: {
     fixtureId: 'walmart-product-no-atc',
     journeys: ['WM-6'],
