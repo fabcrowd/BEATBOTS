@@ -206,6 +206,36 @@ const FIXTURE_MARKERS = {
       'data-tch-cart-checkout-wait-ms="750"',
     ],
   },
+  samsclubCartNoCheckoutCross: {
+    fixtureId: 'samsclub-cart-no-checkout-cross',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-cart-no-checkout-cross"',
+      'data-tch-path="/cart/no-checkout-cross"',
+      'data-tch-cart-checkout-wait-ms="750"',
+      'monitor keys product',
+    ],
+  },
+  samsclubProductCartCrossMonitor: {
+    fixtureId: 'samsclub-product-cart-cross-monitor',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-cart-cross-monitor"',
+      'data-tch-path="/p/mock-fcfs-cart-cross-monitor/794"',
+      'data-automation-id="add-to-cart-btn"',
+      'href="/cart/no-checkout-cross"',
+    ],
+  },
+  samsclubProductCartCrossRecovery: {
+    fixtureId: 'samsclub-product-cart-cross-recovery',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-cart-cross-recovery"',
+      'data-tch-path="/p/mock-fcfs-cart-cross-recovery/795"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   samsclubProductCartMissing: {
     fixtureId: 'samsclub-product-cart-missing',
     journeys: ['SC-6'],

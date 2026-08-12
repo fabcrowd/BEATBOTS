@@ -2631,6 +2631,17 @@ async function main() {
       await new Promise((r) => setTimeout(r, 300));
     }
 
+    // SC-6: cross-page cart — tab on /cart/* while monitor keys a product URL.
+    if (
+      route.invariants?.includes('sc6-poll-recovery-rearm') &&
+      route.path.startsWith('/cart/') &&
+      route.monitorProductPath &&
+      route.path !== route.monitorProductPath
+    ) {
+      await sendBg(popup, { type: 'STOP_MONITOR' });
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
     assert.ok(
       logs.some((l) => l.includes(route.initLog)),
       `FIX-2 ${route.journey}: expected ${route.initLog} on ${url}, got: ${logs.slice(0, 5).join(' | ') || '(none)'}`
