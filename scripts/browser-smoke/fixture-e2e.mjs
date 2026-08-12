@@ -2631,9 +2631,10 @@ async function main() {
       await new Promise((r) => setTimeout(r, 300));
     }
 
-    // SC-6: cross-page cart — tab on /cart/* while monitor keys a product URL.
+    // SC-6 / WM-6: cross-page cart — tab on /cart/* while monitor keys a product URL.
     if (
-      route.invariants?.includes('sc6-poll-recovery-rearm') &&
+      (route.invariants?.includes('sc6-poll-recovery-rearm') ||
+        route.invariants?.includes('wm6-poll-recovery-rearm')) &&
       route.path.startsWith('/cart/') &&
       route.monitorProductPath &&
       route.path !== route.monitorProductPath

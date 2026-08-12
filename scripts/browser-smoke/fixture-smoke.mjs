@@ -284,6 +284,35 @@ const FIXTURE_MARKERS = {
       'data-tch-cart-checkout-wait-ms="750"',
     ],
   },
+  walmartCartNoCheckoutCross: {
+    fixtureId: 'walmart-cart-no-checkout-cross',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-cart-no-checkout-cross"',
+      'data-tch-path="/cart/no-checkout-cross"',
+      'data-tch-cart-checkout-wait-ms="750"',
+      'monitor keys product',
+    ],
+  },
+  walmartProductCartCrossMonitor: {
+    fixtureId: 'walmart-product-cart-cross-monitor',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-cart-cross-monitor"',
+      'data-tch-path="/ip/mock-cart-cross-monitor/890"',
+      'data-automation-id="add-to-cart-btn"',
+      'href="/cart/no-checkout-cross"',
+    ],
+  },
+  walmartProductCartCrossRecovery: {
+    fixtureId: 'walmart-product-cart-cross-recovery',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-cart-cross-recovery"',
+      'data-tch-path="/ip/mock-cart-cross-recovery/891"',
+      'data-tch-atc-wait-ms="750"',
+    ],
+  },
   walmartProductCartMissing: {
     fixtureId: 'walmart-product-cart-missing',
     journeys: ['WM-6'],
