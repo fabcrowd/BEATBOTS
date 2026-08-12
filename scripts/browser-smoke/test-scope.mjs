@@ -323,6 +323,7 @@ export const MOCK_URLS = {
   walmartProductPriceGuardTimeout: 'fixtures/walmart-product-price-guard-timeout.html',
   walmartCheckoutSpaTimeout: 'fixtures/walmart-checkout-spa-timeout.html',
   walmartCheckoutSpaSacred: 'fixtures/walmart-checkout-spa-sacred.html',
+  walmartCheckoutSpaSacredCross: 'fixtures/walmart-checkout-spa-sacred-cross.html',
   walmartProductPollRecovery: 'fixtures/walmart-product-poll-recovery.html',
   walmartProductQueuePollRecovery: 'fixtures/walmart-product-queue-poll-recovery.html',
   walmartCheckoutPollRecovery: 'fixtures/walmart-checkout-poll-recovery.html',
