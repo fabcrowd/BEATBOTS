@@ -7,7 +7,7 @@
  * WM-3: walmart-main-world.js Queue-it WebSocket sniff → TCH_QUEUE_PASSED.
  * WM-4: sacred lock (WALMART_IN_QUEUE → inQueueUrls) only after queue confirmed.
  * WM-5: sacred lock blocks poll re-navigation; NAV_FAILED clears navigationLock only.
- * WM-6: queue error paths — PX page wait/timeout NAV_FAILED; NAV_FAILED while not in queue.
+ * WM-6: queue error paths — PX page wait/timeout NAV_FAILED; cart checkout-missing NAV_FAILED; NAV_FAILED while not in queue.
  * WM-7: product-page __NEXT_DATA__ offerId → WM_OFFER_ID_READY updates monitor.products[].oid.
  *
  * Run: node scripts/browser-smoke/walmart-flow-simulation.mjs
@@ -327,7 +327,16 @@ async function wmHandleCartSim(page, settings) {
 
   if (!checkoutBtn) {
     actions.push('checkout_missing');
-    return { path: 'checkout_not_found', actions };
+    return {
+      path: 'checkout_not_found',
+      actions,
+      messages: [
+        {
+          type: 'WALMART_NAV_FAILED',
+          url: settings.productUrl || `https://www.walmart.com${page.pathname}`,
+        },
+      ],
+    };
   }
 
   actions.push('click_checkout');
@@ -1030,6 +1039,65 @@ function runWm6QueueErrorPathTests() {
   );
 }
 
+/** WM-6: cart checkout-missing — NAV_FAILED uses productUrl, no sacred lock (parity SC-6). */
+async function runWm6CartCheckoutMissingTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(WMT_SRC, /wmHandleCart/, 'WM-6: wmHandleCart defined');
+  assert.match(WMT_SRC, /wmSignalNavFailed\(settings\?\.productUrl/, 'WM-6: cart NAV_FAILED uses productUrl');
+  assert.match(WMT_SRC, /wmCartCheckoutWaitMs/, 'WM-6: cart checkout wait helper');
+
+  const productUrl = 'https://www.walmart.com/ip/wm6-cart-missing/888';
+  const cartPage = makePage({ pathname: '/cart/no-checkout', elements: [] });
+  const cartResult = await wmHandleCartSim(cartPage, { productUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'WM-6: cart missing checkout');
+  assert.deepEqual(cartResult.actions, ['checkout_missing']);
+  const navFail = cartResult.messages?.find((m) => m.type === 'WALMART_NAV_FAILED');
+  assert.ok(navFail, 'WM-6: cart checkout-missing sends WALMART_NAV_FAILED');
+  assert.equal(navFail.url, productUrl, 'WM-6: NAV_FAILED uses productUrl not cart URL');
+
+  const normUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normUrl]);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'WM-6: cart checkout-missing must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'WM-6: cart checkout-missing releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-6: poll may retry after cart checkout-missing NAV_FAILED'
+  );
+
+  const productPage = makePage({
+    pathname: '/ip/wm6-cart-missing/888',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: false,
+      },
+      {
+        selectors: ['a[href="/cart/no-checkout"]', 'button[data-automation-id="go-to-cart-btn"]'],
+        text: 'View cart',
+        tag: 'a',
+        href: '/cart/no-checkout',
+      },
+    ],
+  });
+  const productResult = await wmHandleProductPageSim(productPage, { productUrl });
+  assert.equal(productResult.path, 'product_to_cart', 'WM-6: product ATC → cart');
+  assert.equal(productPage.navigatedTo, '/cart');
+
+  const chainCartPage = makePage({ pathname: '/cart/no-checkout', elements: [] });
+  const chainCartResult = await wmHandleCartSim(chainCartPage, { productUrl });
+  assert.equal(chainCartResult.path, 'checkout_not_found', 'WM-6: product→cart chain missing checkout');
+  const chainNavFail = chainCartResult.messages?.find((m) => m.type === 'WALMART_NAV_FAILED');
+  assert.ok(chainNavFail, 'WM-6: product→cart chain sends WALMART_NAV_FAILED');
+  assert.equal(chainNavFail.url, productUrl, 'WM-6: chain NAV_FAILED uses productUrl');
+}
+
 /** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */
 function wmExtractPageOidFromNextData(nextData) {
   try {
@@ -1433,6 +1501,7 @@ async function main() {
   runWm4SacredLockTests();
   runWm5SacredLockNavTests();
   runWm6QueueErrorPathTests();
+  await runWm6CartCheckoutMissingTests();
   runWm7OfferIdReadyTests();
   console.log(
     'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, offerId ready'
