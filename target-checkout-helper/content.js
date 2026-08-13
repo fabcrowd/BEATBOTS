@@ -196,7 +196,11 @@ async function handleSignInPage(settings, opts = {}) {
     if (isCheckoutPasswordOnlyReauth() && passInput) {
       console.log('[TCH] auto sign-in: checkout password-only re-auth');
       try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      const loginBtn = document.querySelector('button#login, [data-test="account-signin-button"]') || submitBtn;
+      const authRoot = getCheckoutAuthRoot() || document;
+      const scopedLogin = authRoot.querySelector('button#login, [data-test="account-signin-button"]');
+      const loginBtn = (submitBtn && isVisible(submitBtn) && !submitBtn.disabled)
+        ? submitBtn
+        : (scopedLogin && isVisible(scopedLogin) && !scopedLogin.disabled ? scopedLogin : null);
       if (!loginBtn) return;
       await sleep(300);
       await signInClickAndType(passInput, settings.targetPassword);
@@ -734,6 +738,8 @@ const SESSION_STALE_HINT_KEY = 'tch:sessionStaleHintAt';
 const DROP_WINDOW_TIP_KEY = 'tch:dropWindowTipShown';
 const EXTRA_ATC_STATE_KEY = 'tch:extraAtcState'; // 'needed' | 'done'
 const MONITOR_BIN_PENDING_KEY = 'tch:monitorBinPending'; // set before BIN nav; cleared on checkout load
+const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
+const SIGNIN_EMAIL_STEP_KEY = 'tch:signInEmailStepDone';
 let preferPickupMode = false;
 let checkoutRetryTimer = null;
 let checkoutRetryScheduled = false;
@@ -800,6 +806,8 @@ function clearCheckoutRetryState() {
   try { sessionStorage.removeItem(RETRY_NAV_MARK_KEY); } catch {}
   try { sessionStorage.removeItem(CART_READY_KEY); } catch {}
   try { sessionStorage.removeItem(EXTRA_ATC_STATE_KEY); } catch {}
+  try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
+  try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
 }
 
 function markCartReady() {
@@ -1520,8 +1528,6 @@ async function handleCheckoutPage(settings) {
 }
 
 /** Sign-in, loading shell, or unrecognized checkout DOM — wait without reloading the tab. */
-const GUEST_CHECKOUT_ATTEMPT_KEY = 'tch:guestCheckoutAttempted';
-const SIGNIN_EMAIL_STEP_KEY = 'tch:signInEmailStepDone';
 const PENDING_RETRY_INTERVAL_MS = 3000;
 const PENDING_MAX_RETRIES = 15;
 
@@ -1610,6 +1616,10 @@ function watchForCheckoutStep(settings, options = {}) {
         lastPendingRetryMs = Date.now();
         pendingRetryCount++;
         await runCheckoutPendingActions(settings, step, { silent: pendingRetryCount > 1 });
+      } else if (pendingRetryCount >= PENDING_MAX_RETRIES) {
+        pendingRetryCount = 0;
+        lastPendingRetryMs = 0;
+        try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
       }
       return;
     }
@@ -2470,6 +2480,8 @@ async function init() {
 
   if (page !== 'checkout') {
     checkoutFlowStart = null;
+    try { sessionStorage.removeItem(GUEST_CHECKOUT_ATTEMPT_KEY); } catch {}
+    try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
   } else {
     flushNavigationTiming('product_to_checkout', 'nav_product_to_checkout');
     flushNavigationTiming('cart_to_checkout', 'nav_cart_to_checkout');
