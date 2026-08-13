@@ -985,6 +985,87 @@ function testSc4CheckoutTimeoutPollRecovery() {
   );
 }
 
+/**
+ * SC-6: checkout SPA live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 sc6-checkout-spa-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runSc6CheckoutSpaLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout/spa-stall';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  // Live poll: monitor keys productUrl; tab may be on checkout SPA stall.
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-6: checkout SPA live poll must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'SC-6: checkout SPA tab URL must not be sacred lock key'
+  );
+
+  let timeoutCycles = 0;
+  const simulateCheckoutSpaTimeout = () => {
+    timeoutCycles += 1;
+    return { type: 'SAMS_NAV_FAILED', url: monitorProductUrl };
+  };
+
+  // Checkout timeout cycle 1 (scHandleCheckout timed out).
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(inQueueUrls.size, 0, 'SC-6: checkout SPA timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-6: checkout SPA timeout releases navigationLock');
+
+  // Simulate page reload during live poll — poll re-navigates, timeout fires again.
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(timeoutCycles, 2, 'SC-6: reload must re-trigger checkout SPA timeout');
+  assert.equal(inQueueUrls.size, 0, 'SC-6: reload during live poll must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-6: reload timeout releases navigationLock');
+  assert.match(SC_SRC, /scHandleCheckout timed out/, 'SC-6: checkout SPA timeout log in source');
+
+  // Live poll cycles: SAMS_NAV_FAILED + NAV_FAILED — never sacred lock.
+  const navFailTypes = ['SAMS_NAV_FAILED', 'NAV_FAILED', 'SAMS_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-6: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-6: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-6: live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  // Final poll wait: navigationLock may re-arm; sacred lock must stay empty.
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-6: live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-6: navigationLock alone must not imply sacred lock on checkout SPA after poll wait'
+  );
+
+  // Contrast WM-5: sacred lock on same monitor URL would block poll through reload + NAV_FAILED.
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-6: contrast WM-5 — sacred lock would block poll; Sam checkout SPA timeout does not arm it'
+  );
+}
+
 function main() {
   testSc1Hosts();
   testSc1Manifest();
@@ -1009,8 +1090,9 @@ function main() {
   testSc4CheckoutReviewPath();
   testSc4CheckoutTimeoutNavFailed();
   testSc4CheckoutTimeoutPollRecovery();
+  runSc6CheckoutSpaLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, no sacred lock, error-path hardening"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, no sacred lock, error-path hardening, checkout SPA live poll cycle"
   );
 }
 
