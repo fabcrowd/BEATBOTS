@@ -823,6 +823,62 @@ function testSc6ProductToCartCheckoutMissingChain() {
   );
 }
 
+/** SC-6: cross-page cart checkout-missing — tab on /cart/*, monitor keys distinct productUrl (parity WM-6 / FIX-3). */
+function testSc6CartCrossPageCheckoutMissingChain() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794';
+  const recoveryProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-recovery/795';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  const cartResult = scHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'SC-6: cross-page cart missing checkout');
+  assert.deepEqual(cartResult.actions, ['checkout_missing']);
+  const navFail = cartResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(navFail, 'SC-6: cross-page cart sends SAMS_NAV_FAILED');
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'SC-6: cross-page NAV_FAILED uses monitor productUrl not cart tab URL'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normalizeProductUrl(`https://www.samsclub.com${cartPage.pathname}`),
+    'SC-6: cross-page NAV_FAILED must not key cart pathname'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cross-page cart checkout-missing must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'SC-6: cross-page cart checkout-missing releases navigationLock on monitor product'
+  );
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'SC-6: poll may retry monitor product after cross-page cart NAV_FAILED'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-6: cross-page poll recovery clears monitor lock');
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'SC-6: cross-page poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cross-page poll recovery must not arm sacred lock');
+  bgApplyNavFailed(navigationLock, inQueueUrls, {
+    type: 'SAMS_NAV_FAILED',
+    url: recoveryProductUrl,
+  });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'SC-6: cross-page NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
 /** Mirrors scCheckoutHasReview — SC-4 review step detection. */
 function scCheckoutHasReviewSim(page) {
   const placeOrder = page.querySelector('[data-automation-id="place-order-btn"]');
@@ -947,6 +1003,7 @@ function main() {
   testSc6Source();
   runSc6ErrorPathHardeningTests();
   testSc6ProductToCartCheckoutMissingChain();
+  testSc6CartCrossPageCheckoutMissingChain();
   testSc4Source();
   testSc4ManualReviewStop();
   testSc4CheckoutReviewPath();
