@@ -1098,6 +1098,63 @@ async function runWm6CartCheckoutMissingTests() {
   assert.equal(chainNavFail.url, productUrl, 'WM-6: chain NAV_FAILED uses productUrl');
 }
 
+/** WM-6: cross-page cart checkout-missing — tab on /cart/*, monitor keys distinct productUrl (parity SC-6 / FIX-3). */
+async function runWm6CartCrossPageCheckoutMissingTests() {
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-cart-cross-monitor/890';
+  const recoveryProductUrl = 'https://www.walmart.com/ip/mock-cart-cross-recovery/891';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  const cartResult = await wmHandleCartSim(cartPage, { productUrl: monitorProductUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'WM-6: cross-page cart missing checkout');
+  assert.deepEqual(cartResult.actions, ['checkout_missing']);
+  const navFail = cartResult.messages?.find((m) => m.type === 'WALMART_NAV_FAILED');
+  assert.ok(navFail, 'WM-6: cross-page cart sends WALMART_NAV_FAILED');
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'WM-6: cross-page NAV_FAILED uses monitor productUrl not cart tab URL'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normalizeProductUrl(`https://www.walmart.com${cartPage.pathname}`),
+    'WM-6: cross-page NAV_FAILED must not key cart pathname'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'WM-6: cross-page cart checkout-missing must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'WM-6: cross-page cart checkout-missing releases navigationLock on monitor product'
+  );
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'WM-6: poll may retry monitor product after cross-page cart NAV_FAILED'
+  );
+
+  // Poll recovery rearm — NAV_FAILED on monitor product, then background re-arms recovery product (no sacred lock).
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.ok(!navigationLock.has(normMonitorUrl), 'WM-6: cross-page poll recovery clears monitor lock');
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'WM-6: cross-page poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'WM-6: cross-page poll recovery must not arm sacred lock');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: recoveryProductUrl,
+  });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'WM-6: cross-page NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
 /** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */
 function wmExtractPageOidFromNextData(nextData) {
   try {
@@ -1502,6 +1559,7 @@ async function main() {
   runWm5SacredLockNavTests();
   runWm6QueueErrorPathTests();
   await runWm6CartCheckoutMissingTests();
+  await runWm6CartCrossPageCheckoutMissingTests();
   runWm7OfferIdReadyTests();
   console.log(
     'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, offerId ready'
