@@ -93,6 +93,14 @@ function getHarvestKeepaliveMinIntervalMs(monitor) {
  *
  * Cadence tightens monotonically as `monitor.dropExpectedAt` approaches.
  */
+/**
+ * Consecutive RedSky 401/403 responses required before auto session wipe.
+ * Drop-tension polling (250ms) can accumulate 3 errors in under a second — use a higher bar there.
+ */
+function sessionRecoveryMinStreak(monitor) {
+  return computeBackgroundPollSleepMs(monitor) <= 250 ? 12 : 3;
+}
+
 function getHarvestBurstSameUrlDedupMs(monitor) {
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return 120 * 1000;

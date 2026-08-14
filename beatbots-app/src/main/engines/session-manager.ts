@@ -125,7 +125,7 @@ export async function createGuestSession(apiKey = DEFAULT_API_KEY): Promise<Sess
     accountId: GUEST_ACCOUNT_ID,
     email: 'guest',
     accessToken: token,
-    tokenExpiresAt: Date.now() + expiresIn * 1000,
+    tokenExpiresAt: adjustedNow() + expiresIn * 1000,
     visitorId,
     apiKey,
     proxy: null,
