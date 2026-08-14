@@ -962,6 +962,68 @@ function testSc4CheckoutTimeoutNavFailed() {
   );
 }
 
+/**
+ * SC-3: disabled ATC wait timeout → poll recovery rearm — no sacred lock.
+ * Parity with FIX-3 sc3-poll-recovery-rearm (fixture-e2e has browser coverage).
+ */
+function runSc3PollRecoveryRearmTests() {
+  const productUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  const disabledPage = makePage({
+    pathname: '/p/mock-fcfs-disabled/792',
+    elements: [
+      {
+        selectors: ['button[data-testid="add-to-cart"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+  const waitResult = scSimulateWaitForDisabledAtc(disabledPage);
+  assert.equal(waitResult.action, 'atc_timeout', 'SC-3: disabled ATC wait ends in timeout');
+  const timeoutMsg = waitResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(timeoutMsg, 'SC-3: disabled ATC wait timeout sends SAMS_NAV_FAILED');
+  assert.equal(timeoutMsg.url, productUrl, 'SC-3: NAV_FAILED uses monitor productUrl');
+
+  navigationLock.add(normUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, timeoutMsg);
+  assert.ok(!navigationLock.has(normUrl), 'SC-3: disabled ATC timeout releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, 'SC-3: disabled ATC timeout must not arm sacred lock');
+  assert.match(SC_SRC, /FCFS restock wait/, 'SC-3: disabled ATC restock wait log in source');
+  assert.match(
+    SC_SRC,
+    /ATC button not found or disabled/,
+    'SC-3: disabled ATC timeout user-facing log in source'
+  );
+
+  // Poll recovery rearm — background re-navigates after NAV_FAILED, no sacred lock.
+  navigationLock.add(normUrl);
+  assert.ok(
+    navigationLock.has(normUrl),
+    'SC-3: poll recovery re-arms navigationLock after disabled ATC NAV_FAILED'
+  );
+  assert.equal(inQueueUrls.size, 0, 'SC-3: poll recovery must not arm sacred lock');
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+  assert.ok(
+    !navigationLock.has(normUrl),
+    'SC-3: repeated NAV_FAILED during poll recovery releases lock for retry'
+  );
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-3: poll may retry after disabled ATC poll recovery (no sacred lock)'
+  );
+
+  // Contrast WM-4: sacred lock would block poll; SC-3 disabled ATC never arms it.
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'SC-3: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
 function testSc4CheckoutTimeoutPollRecovery() {
   const productUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
   const normUrl = normalizeProductUrl(productUrl);
@@ -1166,6 +1228,7 @@ function main() {
   testSc3DisabledAtcNotQueue();
   testSc3ProductPageHappyPath();
   testSc3ProductPageNavigateCartFallback();
+  runSc3PollRecoveryRearmTests();
   testSc5Source();
   runSc5FcfsNoSacredLockTests();
   testSc6Source();
@@ -1180,7 +1243,7 @@ function main() {
   runSc6CheckoutSpaLivePollCycleTests();
   runSc6CartLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
   );
 }
 
