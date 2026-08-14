@@ -83,6 +83,14 @@ section('Drop polling logic (mocked clock)');
 }
 
 {
+  const now = DROP_MS - 7 * 60 * 1000;
+  const { sessionRecoveryMinStreak } = loadHelpers(now);
+  const mon = { dropExpectedAt: dropIso };
+  assert(sessionRecoveryMinStreak(mon) === 12, 'session wipe needs 12 streak in drop tension');
+  assert(sessionRecoveryMinStreak({}) === 3, 'session wipe needs 3 streak outside drop tension');
+}
+
+{
   const now = DROP_MS + 4 * 60 * 1000;
   const { computeBackgroundPollSleepMs } = loadHelpers(now);
   assert(computeBackgroundPollSleepMs({ dropExpectedAt: dropIso }) === 500, 'bg base after grace ends');

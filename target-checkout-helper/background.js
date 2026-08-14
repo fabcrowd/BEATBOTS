@@ -197,13 +197,20 @@ async function maybeAutoRecoverTargetSession() {
     return { ok: false, skipped: true };
   }
 
-  // Guard 1: require 3+ consecutive 401/403s before wiping site data.
+  // Guard 1: require N consecutive 401/403s before wiping site data.
   // A single PX rejection or transient error must not nuke the session.
-  // On the first two occurrences, show a toast hint only.
-  if (redskyErrorStreak < 3) {
-    console.warn(`[TCH bg] session recovery suppressed — streak ${redskyErrorStreak}/3 (toast only)`);
+  // Drop-tension polling (250ms) needs a higher bar — 3 errors arrive in <1s there.
+  let minStreak = 3;
+  try {
+    const { monitor } = await chrome.storage.local.get('monitor').catch(() => ({}));
+    if (monitor && typeof sessionRecoveryMinStreak === 'function') {
+      minStreak = sessionRecoveryMinStreak(monitor);
+    }
+  } catch {}
+  if (redskyErrorStreak < minStreak) {
+    console.warn(`[TCH bg] session recovery suppressed — streak ${redskyErrorStreak}/${minStreak} (toast only)`);
     notifyTargetTabsSessionHint();
-    return { ok: false, reason: 'streak_below_threshold', streak: redskyErrorStreak };
+    return { ok: false, reason: 'streak_below_threshold', streak: redskyErrorStreak, minStreak };
   }
 
   // Guard 2: never wipe site data while the user is in an active checkout flow.

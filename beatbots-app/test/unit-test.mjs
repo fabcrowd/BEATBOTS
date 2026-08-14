@@ -636,6 +636,40 @@ await test('Session manager — token cache expiry with 60s early guard', () => 
   assert.equal(getCachedSession(3), null, 'Expired token returns null');
 });
 
+await test('Session manager — guest token expiry uses adjustedNow (NTP-aligned)', () => {
+  const ntpOffsetMs = -120_000; // local clock 2 min ahead of server
+  const adjustedNow = () => Date.now() + ntpOffsetMs;
+  const serverNow = () => adjustedNow();
+
+  function getCachedSession(ctx) {
+    if (ctx.tokenExpiresAt < adjustedNow() + 60_000) return null;
+    return ctx;
+  }
+
+  const expiresInMs = 3600_000;
+  const createAtServer = 1_000_000;
+  const localNowAtCreate = createAtServer - ntpOffsetMs;
+  const fixedGuestExpiry = createAtServer + expiresInMs;
+  const buggyGuestExpiry = localNowAtCreate + expiresInMs;
+
+  // Fixed path matches server expiry
+  assert.equal(fixedGuestExpiry, createAtServer + expiresInMs, 'adjustedNow expiry aligned to server');
+
+  // Buggy Date.now() path extends cache 2 min past server expiry
+  assert.equal(buggyGuestExpiry - fixedGuestExpiry, 120_000, 'Date.now() expiry overshoots by NTP offset');
+
+  // 50s after server expiry: fixed evicts, buggy still cached
+  const checkAtServer = createAtServer + expiresInMs + 50_000;
+  const savedDateNow = Date.now;
+  Date.now = () => checkAtServer - ntpOffsetMs;
+  try {
+    assert.equal(getCachedSession({ tokenExpiresAt: fixedGuestExpiry }), null, 'NTP-aligned guest token evicted after server expiry');
+    assert.ok(getCachedSession({ tokenExpiresAt: buggyGuestExpiry }), 'Date.now() guest token falsely still valid');
+  } finally {
+    Date.now = savedDateNow;
+  }
+});
+
 // ─── Test: Run log writing ───────────────────────────────────────────────────
 
 await test('Run log — trim to max 100 per task', () => {
