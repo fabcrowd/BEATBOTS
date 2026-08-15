@@ -51,6 +51,36 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/cart/no-checkout"',
     ],
   },
+  targetCartNoCheckoutCross: {
+    fixtureId: 'target-cart-no-checkout-cross',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-cart-no-checkout-cross"',
+      'data-tch-path="/cart/no-checkout-cross"',
+      'data-tch-cart-checkout-wait-ms="750"',
+      'monitor keys product',
+    ],
+  },
+  targetProductCartCrossMonitor: {
+    fixtureId: 'target-product-cart-cross-monitor',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-cart-cross-monitor"',
+      'data-tch-path="/p/mock-cart-cross-monitor/A-880088"',
+      'data-test="shipItButton"',
+      'href="/cart/no-checkout-cross"',
+    ],
+  },
+  targetProductCartCrossRecovery: {
+    fixtureId: 'target-product-cart-cross-recovery',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-cart-cross-recovery"',
+      'data-tch-path="/p/mock-cart-cross-recovery/A-880089"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   targetProductNoAtc: {
     fixtureId: 'target-product-no-atc',
     journeys: ['TGT-1'],

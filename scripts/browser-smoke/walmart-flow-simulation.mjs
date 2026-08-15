@@ -1325,6 +1325,85 @@ async function runWm6CartLivePollCycleTests() {
   );
 }
 
+/**
+ * WM-6: checkout SPA live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 wm6-live-poll-cycle on checkout SPA (fixture-e2e has browser coverage).
+ */
+function runWm6CheckoutSpaLivePollCycleTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-checkout-spa/992';
+  const checkoutTabUrl = 'https://www.walmart.com/checkout/spa-stall';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-6: checkout SPA live poll must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'WM-6: checkout SPA tab URL must not be sacred lock key'
+  );
+
+  let timeoutCycles = 0;
+  const simulateCheckoutSpaTimeout = () => {
+    timeoutCycles += 1;
+    return { type: 'WALMART_NAV_FAILED', url: monitorProductUrl };
+  };
+
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(inQueueUrls.size, 0, 'WM-6: checkout SPA timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'WM-6: checkout SPA timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(timeoutCycles, 2, 'WM-6: reload must re-trigger checkout SPA timeout');
+  assert.equal(inQueueUrls.size, 0, 'WM-6: reload during live poll must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'WM-6: reload timeout releases navigationLock');
+  assert.match(WMT_SRC, /wmHandleCheckout timed out/, 'WM-6: checkout SPA timeout log in source');
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `WM-6: checkout SPA live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `WM-6: checkout SPA live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `WM-6: checkout SPA live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-6: checkout SPA live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'WM-6: checkout SPA navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'WM-6: contrast WM-5 — sacred lock would block poll; checkout SPA timeout does not arm it'
+  );
+}
+
 /** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */
 function wmExtractPageOidFromNextData(nextData) {
   try {
@@ -1815,6 +1894,7 @@ async function main() {
   await runWm6CartCheckoutMissingTests();
   await runWm6CartCrossPageCheckoutMissingTests();
   await runWm6CartLivePollCycleTests();
+  runWm6CheckoutSpaLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
     'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-6 poll recovery rearm, cart live poll cycle, offerId ready'
