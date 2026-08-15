@@ -29,6 +29,20 @@ export function tailTchLines(lines, n = 15) {
  * @param {string[]} [tchLines]
  * @returns {string}
  */
+/**
+ * Strip checkout page text from logs before writing to git-tracked markdown.
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitizeRehearsalLog(text) {
+  let out = String(text || '');
+  out = out.replace(/"body"\s*:\s*"[^"]*"/g, '"body":"[redacted]"');
+  out = out.replace(/"dialogs"\s*:\s*\[[^\]]*\]/gs, '"dialogs":["[redacted]"]');
+  out = out.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[email-redacted]');
+  out = out.replace(/\b(?:\d[ -]*?){13,19}\b/g, '[card-redacted]');
+  return out;
+}
+
 export function formatRehearsalFail(code, message, tchLines = []) {
   const tail = tailTchLines(tchLines);
   const parts = [`blockedReason: ${code}`, message];
@@ -60,6 +74,12 @@ function selfTest() {
   const msg = formatRehearsalFail(BLOCKED_REASON.REVIEW_TIMEOUT, 'timed out', lines);
   if (!msg.includes('blockedReason: review_timeout') || !msg.includes('line 19')) {
     console.error('FAIL: formatRehearsalFail');
+    process.exit(1);
+  }
+  const dirty = 'DOM probe: {"body":"Jane Doe jane@example.com 4111111111111111"}';
+  const clean = sanitizeRehearsalLog(dirty);
+  if (clean.includes('jane@example.com') || clean.includes('4111111111111111') || !clean.includes('[redacted]')) {
+    console.error('FAIL: sanitizeRehearsalLog');
     process.exit(1);
   }
   console.log('rehearsal-errors.mjs: PASS');

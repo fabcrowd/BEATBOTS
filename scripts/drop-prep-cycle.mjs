@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { sanitizeRehearsalLog } from './browser-smoke/rehearsal-errors.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -62,7 +63,7 @@ if (fs.existsSync(ENV_REHEARSAL)) {
   results.push(`- **checkout-rehearsal:** ${r.ok ? 'PASS' : 'FAIL (see log)'}`);
   if (!r.ok) {
     results.push('```');
-    results.push(r.out.trim().slice(-1200));
+    results.push(sanitizeRehearsalLog(r.out.trim().slice(-1200)));
     results.push('```');
   }
 } else {
