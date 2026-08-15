@@ -50,8 +50,11 @@ async function captureFailureDebug(page, reason) {
     const probe = await page.evaluate(() => ({
       url: location.href,
       title: document.title,
-      body: (document.body?.innerText || '').slice(0, 1200),
-      dialogs: [...document.querySelectorAll('[role="dialog"]')].map((d) => (d.innerText || '').slice(0, 300)),
+      bodyLength: (document.body?.innerText || '').length,
+      dialogCount: document.querySelectorAll('[role="dialog"]').length,
+      hasAuthModal: !!document.querySelector('[data-test="authModal"], [data-test="loginModal"]'),
+      hasPasswordInput: !!document.querySelector('input[type="password"]'),
+      hasPlaceOrder: !!document.querySelector('[data-test="placeOrderButton"], button[data-test*="place-order" i]'),
     }));
     console.error('\nDOM probe:', JSON.stringify(probe, null, 2));
   } catch (e) {
