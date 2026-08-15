@@ -481,7 +481,7 @@ function getCheckoutAuthRoot() {
   return Array.from(document.querySelectorAll('[role="dialog"]')).find((d) => {
     if (!isVisible(d)) return false;
     const tx = (d.innerText || '').toLowerCase();
-    return tx.includes('sign in') || tx.includes('account') || tx.includes('checkout');
+    return tx.includes('sign in') || tx.includes('sign-in') || tx.includes('account');
   }) || null;
 }
 
