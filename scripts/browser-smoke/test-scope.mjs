@@ -47,7 +47,7 @@ export const JOURNEYS = {
     summary: 'Target content script initializes on target.com ([TCH] init)',
     impl: ['target-checkout-helper/content.js'],
     coverage: 'strong',
-    tests: ['extension-e2e.mjs', 'extension-functional.mjs'],
+    tests: ['extension-e2e.mjs', 'extension-functional.mjs', 'target-content-simulation.mjs'],
   },
   'TGT-2': {
     id: 'TGT-2',
@@ -71,7 +71,7 @@ export const JOURNEYS = {
     summary: 'Default stop at review; Place Order only when autoPlaceOrder is enabled',
     impl: ['target-checkout-helper/content.js', 'target-checkout-helper/popup.html (#autoPlaceOrder unchecked by default)'],
     coverage: 'strong',
-    tests: ['review-dedup-simulation.mjs', 'extension-e2e.mjs'],
+    tests: ['review-dedup-simulation.mjs', 'extension-e2e.mjs', 'target-content-simulation.mjs'],
   },
   'WM-1': {
     id: 'WM-1',
@@ -267,6 +267,7 @@ export const EXTENSION_SUITE = {
   'extension-e2e.mjs': ['TGT-1', 'TGT-2', 'TGT-4'],
   'extension-functional.mjs': ['MON-1', 'MON-2', 'MON-3', 'TGT-1', 'TGT-2', 'WM-4', 'WM-5', 'WM-6', 'WM-7', 'SC-1'],
   'review-dedup-simulation.mjs': ['TGT-3', 'TGT-4'],
+  'target-content-simulation.mjs': ['TGT-1', 'TGT-4'],
   'walmart-flow-simulation.mjs': ['WM-1', 'WM-2', 'WM-4', 'WM-5', 'WM-6'],
   'walmart-main-world-simulation.mjs': ['WM-3'],
   'samsclub-module-simulation.mjs': ['SC-1', 'SC-2', 'SC-3', 'SC-4', 'SC-5', 'SC-6'],
