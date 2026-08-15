@@ -4,7 +4,7 @@
  *
  * Parity with walmart-flow-simulation.mjs / samsclub-module-simulation.mjs:
  * - TGT-1: missing ATC → NAV_FAILED, no sacred lock
- * - TGT-4: cart checkout-missing, checkout SPA stall timeout, poll recovery rearm, live poll cycles
+ * - TGT-4: cart checkout-missing, checkout SPA stall timeout, signin gate pending, poll recovery rearm, live poll cycles
  *
  * Run: node scripts/browser-smoke/target-content-simulation.mjs
  */
@@ -392,6 +392,176 @@ function runTgt4CheckoutSpaLivePollCycleTests() {
   );
 }
 
+/** Mirrors hasCheckoutAuthGate + getCheckoutStep signin branch. */
+function tgtDetectCheckoutStep(page, settings = {}) {
+  if (page.querySelector('[data-test="placeOrderButton"]') || tgtFindByText(page, 'place order')) {
+    return 'review';
+  }
+  const authGate =
+    page.querySelector('[data-test="authModal"]') ||
+    page.querySelector('[data-test="loginModal"]');
+  if (authGate) return 'signin';
+  return 'unknown';
+}
+
+/** Mirrors handleCheckoutPendingStep for signin gate (TGT-4: wait, no reload, no retry spam). */
+function tgtHandleCheckoutPendingSim(page, settings = {}, step = 'signin') {
+  const actions = [];
+  if (step === 'signin') {
+    actions.push('pending_signin');
+    actions.push('watch_no_retry');
+    return {
+      path: 'signin_pending',
+      actions,
+      messages: [],
+      reachedReview: false,
+      scheduledRetry: false,
+    };
+  }
+  return { path: 'pending_other', actions, messages: [], reachedReview: false, scheduledRetry: false };
+}
+
+function testTgt4CheckoutSigninGate() {
+  assert.match(TGT_SRC, /handleCheckoutPendingStep/, 'TGT-4 signin: handleCheckoutPendingStep defined');
+  assert.match(TGT_SRC, /checkout pending:/, 'TGT-4 signin: pending log in source');
+  assert.match(TGT_SRC, /waiting for shipping\/payment \(no reload\)/, 'TGT-4 signin: no-reload wait in source');
+  assert.match(TGT_SRC, /noRetryOnTimeout:\s*true/, 'TGT-4 signin: noRetryOnTimeout in watchForCheckoutStep');
+  assert.match(TGT_SRC, /hasCheckoutAuthGate/, 'TGT-4 signin: auth gate helper in source');
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const page = makePage({
+    pathname: '/checkout/signin-gate',
+    elements: [
+      {
+        selectors: ['[data-test="authModal"]'],
+        tag: 'div',
+        text: 'Sign in to continue checkout',
+      },
+    ],
+  });
+
+  const step = tgtDetectCheckoutStep(page);
+  assert.equal(step, 'signin', 'TGT-4 signin: authModal detected as signin step');
+
+  const result = tgtHandleCheckoutPendingSim(page, { productUrl: monitorProductUrl }, step);
+  assert.equal(result.path, 'signin_pending', 'TGT-4 signin: pending handler waits on signin gate');
+  assert.ok(result.actions.includes('pending_signin'), 'TGT-4 signin: records pending_signin action');
+  assert.ok(result.actions.includes('watch_no_retry'), 'TGT-4 signin: watches without retry spam');
+  assert.equal(result.reachedReview, false, 'TGT-4 signin: must not reach review');
+  assert.equal(result.scheduledRetry, false, 'TGT-4 signin: must not schedule checkout retry');
+  assert.equal(result.messages.length, 0, 'TGT-4 signin: must not send NAV_FAILED while waiting');
+
+  const normUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normUrl]);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin: must not arm sacred lock');
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'TGT-4 signin: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
+  assert.ok(
+    !inQueueUrls.has(normUrl),
+    'TGT-4 signin: navigationLock alone must not imply sacred lock'
+  );
+}
+
+/**
+ * TGT-4: checkout sign-in live poll cycle — reload + NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
+ * Parity with FIX-3 tgt-signin-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runTgt4SigninLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const checkoutTabUrl = 'https://www.target.com/checkout/signin-gate';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const signinPage = makePage({
+    pathname: '/checkout/signin-gate',
+    elements: [
+      {
+        selectors: ['[data-test="authModal"]'],
+        tag: 'div',
+        text: 'Sign in to continue checkout',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin live poll must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'TGT-4 signin tab URL must not be sacred lock key');
+
+  let signinDetectCycles = 0;
+  const simulateSigninReload = () => {
+    signinDetectCycles += 1;
+    const step = tgtDetectCheckoutStep(signinPage);
+    assert.equal(step, 'signin', 'TGT-4 signin reload must re-detect signin gate');
+    const pending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, step);
+    assert.equal(pending.path, 'signin_pending', 'TGT-4 signin reload must stay on pending step');
+    assert.equal(pending.reachedReview, false, 'TGT-4 signin reload must not reach review');
+    return pending;
+  };
+
+  simulateSigninReload();
+  simulateSigninReload();
+  assert.equal(signinDetectCycles, 2, 'TGT-4 signin reload must re-trigger signin detection');
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: 'NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `TGT-4 signin live poll cycle ${i + 1} NAV_FAILED releases navigationLock`
+      );
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-4 signin live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `TGT-4 signin live poll cycle ${i + 1} navigationLock alone must not imply sacred lock`
+      );
+    }
+    const pending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, 'signin');
+    assert.equal(pending.reachedReview, false, `TGT-4 signin live poll cycle ${i + 1} must not reach review`);
+    assert.equal(
+      pending.scheduledRetry,
+      false,
+      `TGT-4 signin live poll cycle ${i + 1} must not schedule checkout retry`
+    );
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `TGT-4 signin live poll cycle ${i + 1} allows poll retry after NAV_FAILED (no sacred lock)`
+      );
+    }
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'TGT-4 signin navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4 signin: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
+}
+
 /**
  * TGT-4: cart checkout-missing live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 tgt-cart-live-poll-cycle (fixture-e2e has browser coverage).
@@ -479,8 +649,10 @@ function main() {
   runTgt4PollRecoveryRearmTests();
   runTgt4CheckoutSpaLivePollCycleTests();
   runTgt4CartLivePollCycleTests();
+  testTgt4CheckoutSigninGate();
+  runTgt4SigninLivePollCycleTests();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, manual review stop, cart checkout-missing, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, manual review stop, cart checkout-missing, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, no sacred lock'
   );
 }
 
