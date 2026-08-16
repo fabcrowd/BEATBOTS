@@ -364,6 +364,36 @@ const FIXTURE_MARKERS = {
       'data-tch-checkout-timeout-ms="750"',
     ],
   },
+  samsclubCheckoutSpaCross: {
+    fixtureId: 'samsclub-checkout-spa-cross',
+    journeys: ['SC-4', 'SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-checkout-spa-cross"',
+      'data-tch-path="/checkout/spa-stall-cross"',
+      'data-tch-checkout-timeout-ms="750"',
+      'monitor keys product',
+    ],
+  },
+  samsclubProductCheckoutSpaCrossMonitor: {
+    fixtureId: 'samsclub-product-checkout-spa-cross-monitor',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-checkout-spa-cross-monitor"',
+      'data-tch-path="/p/mock-checkout-spa-cross-monitor/796"',
+      'data-automation-id="add-to-cart-btn"',
+      'href="/checkout/spa-stall-cross"',
+    ],
+  },
+  samsclubProductCheckoutSpaCrossRecovery: {
+    fixtureId: 'samsclub-product-checkout-spa-cross-recovery',
+    journeys: ['SC-6'],
+    markers: [
+      'data-tch-fixture="samsclub-product-checkout-spa-cross-recovery"',
+      'data-tch-path="/p/mock-checkout-spa-cross-recovery/797"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   walmartCartNoCheckout: {
     fixtureId: 'walmart-cart-no-checkout',
     journeys: ['WM-6'],
