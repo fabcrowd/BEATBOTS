@@ -120,6 +120,35 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/p/-/A-66666666"',
     ],
   },
+  targetProductMissingAtcCrossMonitor: {
+    fixtureId: 'target-product-missing-atc-cross-monitor',
+    journeys: ['TGT-1'],
+    markers: [
+      'data-tch-fixture="target-product-missing-atc-cross-monitor"',
+      'data-tch-path="/p/mock-missing-atc-cross-monitor/A-880094"',
+      'data-test="shipItButton"',
+    ],
+  },
+  targetProductMissingAtcCross: {
+    fixtureId: 'target-product-missing-atc-cross',
+    journeys: ['TGT-1'],
+    markers: [
+      'data-tch-fixture="target-product-missing-atc-cross"',
+      'data-tch-path="/p/mock-missing-atc-cross/A-880095"',
+      'data-tch-atc-wait-ms="750"',
+      'monitor keys product',
+    ],
+  },
+  targetProductMissingAtcCrossRecovery: {
+    fixtureId: 'target-product-missing-atc-cross-recovery',
+    journeys: ['TGT-1'],
+    markers: [
+      'data-tch-fixture="target-product-missing-atc-cross-recovery"',
+      'data-tch-path="/p/mock-missing-atc-cross-recovery/A-880096"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   walmartProductPreDrop: {
     fixtureId: 'walmart-product-predrop',
     journeys: ['WM-2'],

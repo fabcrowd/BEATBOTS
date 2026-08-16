@@ -187,6 +187,59 @@ function testTgt1MissingAtcElement() {
   assert.ok(!navigationLock.has(normUrl), 'TGT-1: missing ATC releases navigationLock');
 }
 
+/**
+ * TGT-1: cross-page missing ATC — tab on distinct product path, NAV_FAILED keys monitor productUrl.
+ * Parity with FIX-3 tgt-missing-atc-cross-poll-recovery (fixture-e2e has browser coverage).
+ */
+function testTgt1MissingAtcCrossPagePollRecovery() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094';
+  const recoveryProductUrl = 'https://www.target.com/p/mock-missing-atc-cross-recovery/A-880096';
+  const tabProductUrl = 'https://www.target.com/p/mock-missing-atc-cross/A-880095';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normTabUrl = normalizeProductUrl(tabProductUrl);
+
+  const page = makePage({ pathname: '/p/mock-missing-atc-cross/A-880095', elements: [] });
+  const result = tgtDecideMissingAtc(page, monitorProductUrl);
+  assert.equal(result.action, 'atc_unavailable', 'TGT-1: cross-page missing ATC is nav_failed');
+  const navFail = result.messages.find((m) => m.type === 'NAV_FAILED');
+  assert.ok(navFail, 'TGT-1: cross-page missing ATC sends NAV_FAILED');
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'TGT-1: cross-page NAV_FAILED uses monitor productUrl not tab product URL'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normTabUrl,
+    'TGT-1: cross-page NAV_FAILED must not key tab product pathname'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'TGT-1: cross-page missing ATC must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'TGT-1: cross-page missing ATC releases navigationLock on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'TGT-1: poll recovery re-arms navigationLock on recovery product after cross-page missing ATC NAV_FAILED'
+  );
+  assert.equal(inQueueUrls.size, 0, 'TGT-1: cross-page poll recovery must not arm sacred lock');
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'TGT-1: cross-page NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
 function testTgt4ManualReviewStop() {
   const page = makePage({
     pathname: '/checkout',
@@ -701,6 +754,7 @@ function main() {
   testTgt1Source();
   testTgt4Source();
   testTgt1MissingAtcElement();
+  testTgt1MissingAtcCrossPagePollRecovery();
   testTgt4ManualReviewStop();
   testTgt4CartCheckoutMissing();
   testTgt4CartCrossPageCheckoutMissing();
@@ -711,7 +765,7 @@ function main() {
   testTgt4CheckoutSigninGate();
   runTgt4SigninLivePollCycleTests();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, manual review stop, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, manual review stop, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, no sacred lock'
   );
 }
 
