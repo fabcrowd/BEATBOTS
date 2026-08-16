@@ -2377,6 +2377,21 @@ async function init() {
       stopInit('monitor_mode');
       return;
     }
+    // FIX-3 cross-page product tab: tab URL differs from monitor product (parity cart/checkout cross).
+    const crossFixtureProduct =
+      document.documentElement.hasAttribute('data-tch-fixture')
+      && document.documentElement.hasAttribute('data-tch-atc-wait-ms')
+      && (data.monitor?.products || []).length === 1
+      ? data.monitor.products[0]
+      : null;
+    if (
+      crossFixtureProduct
+      && normalizeProductUrl(crossFixtureProduct.url) !== normUrl
+    ) {
+      await handleMonitoredATC(data.monitor, crossFixtureProduct);
+      stopInit('monitor_mode');
+      return;
+    }
   }
 
   if (!data.enabled) {
