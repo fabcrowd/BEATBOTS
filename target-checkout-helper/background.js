@@ -557,6 +557,25 @@ async function checkTcinsStock(tcins, apiKey, redskyBase) {
     if (res.status === 401 || res.status === 403) {
       redskyErrorStreak++;
       await maybeAutoRecoverTargetSession();
+      // Probe one TCIN without parallel N singles (streak inflation) but don't return an
+      // empty map — that treats every monitored product as OOS for the whole poll cycle.
+      try {
+        const probeUrl = `${base}/redsky_aggregations/v1/web/product_fulfillment_v1`
+          + `?key=${encodeURIComponent(apiKey)}&tcin=${encodeURIComponent(tcins[0])}`;
+        const probeRes = await fetch(probeUrl, {
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (probeRes.ok) {
+          const json = await probeRes.json();
+          redskyErrorStreak = 0;
+          const prod = json?.data?.product;
+          const result = mergeTargetStockAndPrice(parseFulfillmentBlock(prod?.fulfillment), prod);
+          if (result !== null) out.set(tcins[0], result);
+        }
+      } catch {}
       return out;
     }
     if (res.ok) {
