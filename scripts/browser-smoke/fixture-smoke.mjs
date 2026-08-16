@@ -42,6 +42,36 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/checkout/spa-stall"',
     ],
   },
+  targetCheckoutSpaCross: {
+    fixtureId: 'target-checkout-spa-cross',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-checkout-spa-cross"',
+      'data-tch-path="/checkout/spa-stall-cross"',
+      'data-tch-checkout-timeout-ms="750"',
+      'monitor keys product',
+    ],
+  },
+  targetProductCheckoutSpaCrossMonitor: {
+    fixtureId: 'target-product-checkout-spa-cross-monitor',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-checkout-spa-cross-monitor"',
+      'data-tch-path="/p/mock-checkout-spa-cross-monitor/A-880092"',
+      'data-test="shipItButton"',
+      'href="/checkout/spa-stall-cross"',
+    ],
+  },
+  targetProductCheckoutSpaCrossRecovery: {
+    fixtureId: 'target-product-checkout-spa-cross-recovery',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-checkout-spa-cross-recovery"',
+      'data-tch-path="/p/mock-checkout-spa-cross-recovery/A-880093"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   targetCartNoCheckout: {
     fixtureId: 'target-cart-no-checkout',
     journeys: ['TGT-4'],

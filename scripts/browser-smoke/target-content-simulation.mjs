@@ -257,6 +257,64 @@ function testTgt4CartCrossPageCheckoutMissing() {
 }
 
 /**
+ * TGT-4: cross-page checkout SPA timeout — tab on /checkout/*, NAV_FAILED keys monitor productUrl.
+ * Parity with FIX-3 tgt4-checkout-spa-cross-poll-recovery (fixture-e2e has browser coverage).
+ */
+function testTgt4CheckoutSpaCrossPagePollRecovery() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092';
+  const recoveryProductUrl = 'https://www.target.com/p/mock-checkout-spa-cross-recovery/A-880093';
+  const checkoutTabUrl = 'https://www.target.com/checkout/spa-stall-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  assert.match(
+    TGT_SRC,
+    /signalNavFailed\(settings\.productUrl \|\| getRememberedProductUrl\(\) \|\| location\.href\)/,
+    'TGT-4: checkout SPA timeout uses settings.productUrl before location.href'
+  );
+
+  const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'TGT-4: cross-page checkout SPA NAV_FAILED uses monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normCheckoutTabUrl,
+    'TGT-4: cross-page checkout SPA NAV_FAILED must not key checkout tab URL'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page checkout SPA timeout must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'TGT-4: cross-page checkout SPA timeout releases navigationLock on monitor product'
+  );
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'TGT-4: poll may retry monitor product after cross-page checkout SPA timeout'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'TGT-4: cross-page poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page poll recovery must not arm sacred lock');
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'TGT-4: cross-page NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
+/**
  * TGT-4: checkout SPA timeout + cart checkout-missing + missing ATC NAV_FAILED → poll recovery rearm.
  * Parity with FIX-3 tgt-poll-recovery-rearm (fixture-e2e has browser coverage).
  */
@@ -646,13 +704,14 @@ function main() {
   testTgt4ManualReviewStop();
   testTgt4CartCheckoutMissing();
   testTgt4CartCrossPageCheckoutMissing();
+  testTgt4CheckoutSpaCrossPagePollRecovery();
   runTgt4PollRecoveryRearmTests();
   runTgt4CheckoutSpaLivePollCycleTests();
   runTgt4CartLivePollCycleTests();
   testTgt4CheckoutSigninGate();
   runTgt4SigninLivePollCycleTests();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, manual review stop, cart checkout-missing, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, manual review stop, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, no sacred lock'
   );
 }
 
