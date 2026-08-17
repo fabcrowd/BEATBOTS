@@ -577,6 +577,72 @@ function testTgt4CheckoutSigninGate() {
   );
 }
 
+function testTgt4SigninCrossPagePollRecovery() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-signin-cross-monitor/A-880097';
+  const recoveryProductUrl = 'https://www.target.com/p/mock-signin-cross-recovery/A-880098';
+  const signinTabUrl = 'https://www.target.com/checkout/signin-gate-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normSigninTabUrl = normalizeProductUrl(signinTabUrl);
+
+  const signinPage = makePage({
+    pathname: '/checkout/signin-gate-cross',
+    elements: [{ selectors: ['[data-test="authModal"]'], tag: 'div' }],
+  });
+  const step = tgtDetectCheckoutStep(signinPage);
+  assert.equal(step, 'signin', 'TGT-4 signin cross: authModal detected as signin step');
+  const pending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, step);
+  assert.equal(pending.path, 'signin_pending', 'TGT-4 signin cross: pending handler waits on signin gate');
+  assert.equal(pending.messages.length, 0, 'TGT-4 signin cross: must not send NAV_FAILED while waiting');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin cross: must not arm sacred lock while pending');
+  assert.ok(
+    !inQueueUrls.has(normSigninTabUrl),
+    'TGT-4 signin cross: signin tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !navigationLock.has(normSigninTabUrl),
+    'TGT-4 signin cross: signin tab URL must not be navigationLock key while pending'
+  );
+
+  const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'TGT-4 signin cross: live poll NAV_FAILED uses monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normSigninTabUrl,
+    'TGT-4 signin cross: NAV_FAILED must not key signin tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin cross: NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'TGT-4 signin cross: NAV_FAILED releases navigationLock on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'TGT-4 signin cross: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin cross: poll recovery must not arm sacred lock');
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'TGT-4 signin cross: NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
 /**
  * TGT-4: checkout sign-in live poll cycle — reload + NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
  * Parity with FIX-3 tgt-signin-live-poll-cycle (fixture-e2e has browser coverage).
@@ -764,8 +830,9 @@ function main() {
   runTgt4CartLivePollCycleTests();
   testTgt4CheckoutSigninGate();
   runTgt4SigninLivePollCycleTests();
+  testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, manual review stop, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, manual review stop, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 

@@ -2109,6 +2109,13 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       ? `http://${route.host}:${port}${route.monitorProductPath}`
       : pageUrl;
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const isCrossPageSignin = Boolean(
+      route.pollRecoveryProductPath &&
+        route.monitorProductPath &&
+        route.path !== route.monitorProductPath
+    );
+    const navFailedUrl = isCrossPageSignin ? monitorUrl : pageUrl;
 
     // Live background poll: checkout sign-in reload must stay on pending step (no review, no sacred lock).
     await sendBg(popup, {
@@ -2136,12 +2143,18 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       !logs.some((l) => l.includes('[TCH] review reached')),
       `FIX-3 TGT-4: signin reload during live poll must not reach review on ${pageUrl}`
     );
+    if (isCrossPageSignin) {
+      assert.ok(
+        !reloadInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+        `FIX-3 TGT-4: signin cross-page reload must not sacred-lock signin tab ${normPageUrl}`
+      );
+    }
     const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
     for (let i = 0; i < liveSignalTypes.length; i++) {
       if (liveSignalTypes[i] === 'ATC_SUCCESS') {
         await sendBgFireAndForget(popup, { type: 'ATC_SUCCESS', url: monitorUrl });
       } else {
-        await sendBg(popup, { type: liveSignalTypes[i], url: pageUrl });
+        await sendBg(popup, { type: liveSignalTypes[i], url: navFailedUrl });
       }
       await new Promise((r) => setTimeout(r, 650));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
@@ -2151,6 +2164,12 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
         0,
         `FIX-3 TGT-4: signin live poll cycle ${i + 1} must not arm inQueueUrls on ${pageUrl} after ${liveSignalTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
       );
+      if (isCrossPageSignin) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+          `FIX-3 TGT-4: signin cross-page live poll cycle ${i + 1} must not sacred-lock signin tab ${normPageUrl} after ${liveSignalTypes[i]}`
+        );
+      }
       if (cycle?.navigationLock?.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
         assert.ok(
           !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
@@ -2631,11 +2650,12 @@ async function main() {
       await new Promise((r) => setTimeout(r, 300));
     }
 
-    // SC-6 / WM-6: cross-page cart — tab on /cart/* while monitor keys a product URL.
+    // SC-6 / WM-6 / TGT-4: cross-page cart or signin — tab on /cart/* or /checkout/signin-gate-cross while monitor keys a product URL.
     if (
       (route.invariants?.includes('sc6-poll-recovery-rearm') ||
-        route.invariants?.includes('wm6-poll-recovery-rearm')) &&
-      route.path.startsWith('/cart/') &&
+        route.invariants?.includes('wm6-poll-recovery-rearm') ||
+        (route.invariants?.includes('tgt-poll-recovery-rearm') &&
+          route.invariants?.includes('tgt-signin-live-poll-cycle'))) &&
       route.monitorProductPath &&
       route.path !== route.monitorProductPath
     ) {

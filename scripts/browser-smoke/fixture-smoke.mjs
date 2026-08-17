@@ -33,6 +33,36 @@ const FIXTURE_MARKERS = {
     journeys: ['TGT-4'],
     markers: ['data-tch-fixture="target-checkout-signin"', 'data-test="authModal"'],
   },
+  targetCheckoutSigninCross: {
+    fixtureId: 'target-checkout-signin-cross',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-checkout-signin-cross"',
+      'data-tch-path="/checkout/signin-gate-cross"',
+      'data-test="authModal"',
+      'monitor keys product',
+    ],
+  },
+  targetProductSigninCrossMonitor: {
+    fixtureId: 'target-product-signin-cross-monitor',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-signin-cross-monitor"',
+      'data-tch-path="/p/mock-signin-cross-monitor/A-880097"',
+      'data-test="shipItButton"',
+      'href="/checkout/signin-gate-cross"',
+    ],
+  },
+  targetProductSigninCrossRecovery: {
+    fixtureId: 'target-product-signin-cross-recovery',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-signin-cross-recovery"',
+      'data-tch-path="/p/mock-signin-cross-recovery/A-880098"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   targetCheckoutSpaTimeout: {
     fixtureId: 'target-checkout-spa-timeout',
     journeys: ['TGT-4'],
