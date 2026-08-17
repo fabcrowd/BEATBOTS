@@ -57,7 +57,6 @@ export const FIXTURE_E2E_ROUTES = [
       'tgt-checkout-signin',
       'tgt-signin-live-poll-cycle',
       'tgt-poll-recovery-rearm',
-      'nav-failed-releases-lock',
     ],
     monitorProductPath: '/p/mock-signin-cross-monitor/A-880097',
     pollRecoveryProductPath: '/p/mock-signin-cross-recovery/A-880098',
