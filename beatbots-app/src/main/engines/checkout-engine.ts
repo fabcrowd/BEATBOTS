@@ -25,6 +25,7 @@ import { consumeCookie, peekPool } from '../models/cookie-pool'
 import { Profile, Account, Task, TaskSettings } from '../../shared/types'
 import { getById } from '../storage/db'
 import { adjustedNow } from '../utils/drop-timing'
+import { fetchWithTimeout } from '../utils/fetch-timeout'
 import crypto from 'crypto'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -444,7 +445,7 @@ export class CheckoutEngine {
       ...(shapeHeaders ?? {}),
     }
 
-    return fetch(url, {
+    return fetchWithTimeout(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
