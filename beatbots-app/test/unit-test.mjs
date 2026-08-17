@@ -719,6 +719,32 @@ await test('Renderer build — dist/index.html + assets exist', () => {
   assert.ok(assets.some(f => f.endsWith('.css')), 'CSS bundle exists in assets');
 });
 
+await test('Checkout fetch — mergeAbortSignals honors short timeout', async () => {
+  function mergeAbortSignals(userSignal, timeoutMs) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    if (!userSignal) return timeoutSignal;
+    if (typeof AbortSignal.any === 'function') {
+      return AbortSignal.any([userSignal, timeoutSignal]);
+    }
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (userSignal.aborted || timeoutSignal.aborted) {
+      abort();
+      return controller.signal;
+    }
+    userSignal.addEventListener('abort', abort, { once: true });
+    timeoutSignal.addEventListener('abort', abort, { once: true });
+    return controller.signal;
+  }
+
+  const neverAbort = new AbortController().signal;
+  const merged = mergeAbortSignals(neverAbort, 50);
+  let aborted = false;
+  merged.addEventListener('abort', () => { aborted = true; }, { once: true });
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(aborted, true, 'request timeout aborts merged signal');
+});
+
 // ─── Report ──────────────────────────────────────────────────────────────────
 
 console.log('\n' + '═'.repeat(60));
