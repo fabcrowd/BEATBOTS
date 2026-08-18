@@ -221,7 +221,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.target.com',
     path: '/p/mock-missing-atc-cross/A-880095',
-    file: 'fixtures/target-product-missing-atc-cross.html',
+    file: MOCK_URLS.targetProductMissingAtcCross,
     initLog: '[TCH] init',
     journey: 'TGT-1',
     invariants: [
@@ -514,7 +514,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/qp/waiting-room-monitored-timeout',
-    file: 'fixtures/walmart-qp-room-monitored-pretimeout.html',
+    file: MOCK_URLS.walmartQpRoomMonitoredPretimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -546,7 +546,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/checkout/monitored-timeout',
-    file: 'fixtures/walmart-checkout-monitored-pretimeout.html',
+    file: MOCK_URLS.walmartCheckoutMonitoredPretimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -563,7 +563,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/ip/mock-product-queue-pretimeout/460',
-    file: 'fixtures/walmart-product-queue-pretimeout.html',
+    file: MOCK_URLS.walmartProductQueuePretimeout,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -640,7 +640,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/checkout/spa-stall-sacred-cross',
-    file: 'fixtures/walmart-checkout-spa-sacred-cross.html',
+    file: MOCK_URLS.walmartCheckoutSpaSacredCross,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -777,7 +777,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.samsclub.com',
     path: '/cart/no-checkout-cross',
-    file: 'fixtures/samsclub-cart-no-checkout-cross.html',
+    file: MOCK_URLS.samsclubCartNoCheckoutCross,
     initLog: '[TCH] init',
     journey: 'SC-6',
     invariants: [
@@ -794,7 +794,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs-cart-cross-monitor/794',
-    file: 'fixtures/samsclub-product-cart-cross-monitor.html',
+    file: MOCK_URLS.samsclubProductCartCrossMonitor,
     initLog: '[TCH] init',
     journey: 'SC-6',
     invariants: [],
@@ -802,7 +802,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.samsclub.com',
     path: '/p/mock-fcfs-cart-cross-recovery/795',
-    file: 'fixtures/samsclub-product-cart-cross-recovery.html',
+    file: MOCK_URLS.samsclubProductCartCrossRecovery,
     initLog: '[TCH] init',
     journey: 'SC-6',
     invariants: [],

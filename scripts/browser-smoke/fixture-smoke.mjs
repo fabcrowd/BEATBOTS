@@ -207,6 +207,17 @@ const FIXTURE_MARKERS = {
       'data-automation-id="queue-hold-spot-btn"',
     ],
   },
+  walmartProductQueuePretimeout: {
+    fixtureId: 'walmart-product-queue-pretimeout',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-queue-pretimeout"',
+      'data-tch-queue-timeout-ms="5000"',
+      'data-tch-path="/ip/mock-product-queue-pretimeout/460"',
+      'estimated wait time',
+      'data-automation-id="queue-hold-spot-btn"',
+    ],
+  },
   walmartQpRoom: {
     fixtureId: 'walmart-qp-room',
     journeys: ['WM-3', 'WM-4'],
@@ -480,12 +491,32 @@ const FIXTURE_MARKERS = {
       'estimated wait time',
     ],
   },
+  walmartQpRoomMonitoredPretimeout: {
+    fixtureId: 'walmart-qp-room-monitored-pretimeout',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-qp-room-monitored-pretimeout"',
+      'data-tch-queue-timeout-ms="5000"',
+      'data-tch-path="/qp/waiting-room-monitored-timeout"',
+      'estimated wait time',
+    ],
+  },
   walmartCheckoutQueueTimeout: {
     fixtureId: 'walmart-checkout-queue-timeout',
     journeys: ['WM-4', 'WM-6'],
     markers: [
       'data-tch-fixture="walmart-checkout-queue-timeout"',
       'data-tch-queue-timeout-ms="750"',
+      'estimated wait time',
+    ],
+  },
+  walmartCheckoutMonitoredPretimeout: {
+    fixtureId: 'walmart-checkout-monitored-pretimeout',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-monitored-pretimeout"',
+      'data-tch-queue-timeout-ms="5000"',
+      'data-tch-path="/checkout/monitored-timeout"',
       'estimated wait time',
     ],
   },
