@@ -553,6 +553,27 @@ const FIXTURE_MARKERS = {
       'poll recovery',
     ],
   },
+  walmartProductQueuePollCross: {
+    fixtureId: 'walmart-product-queue-poll-cross',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-queue-poll-cross"',
+      'data-tch-path="/ip/mock-queue-poll/457"',
+      'data-tch-queue-timeout-ms="5000"',
+      'data-automation-id="queue-hold-spot-btn"',
+      'sacred lock keys monitor product',
+    ],
+  },
+  walmartProductQueuePollCrossRecovery: {
+    fixtureId: 'walmart-product-queue-poll-cross-recovery',
+    journeys: ['WM-5'],
+    markers: [
+      'data-tch-fixture="walmart-product-queue-poll-cross-recovery"',
+      'data-tch-path="/ip/mock-queue-poll-recovery/461"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   walmartCheckoutPollRecovery: {
     fixtureId: 'walmart-checkout-poll-recovery',
     journeys: ['WM-5'],

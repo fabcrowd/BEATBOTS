@@ -348,6 +348,8 @@ export const MOCK_URLS = {
   walmartCheckoutSpaSacredCross: 'fixtures/walmart-checkout-spa-sacred-cross.html',
   walmartProductPollRecovery: 'fixtures/walmart-product-poll-recovery.html',
   walmartProductQueuePollRecovery: 'fixtures/walmart-product-queue-poll-recovery.html',
+  walmartProductQueuePollCross: 'fixtures/walmart-product-queue-poll-cross.html',
+  walmartProductQueuePollCrossRecovery: 'fixtures/walmart-product-queue-poll-cross-recovery.html',
   walmartCheckoutPollRecovery: 'fixtures/walmart-checkout-poll-recovery.html',
 };
 

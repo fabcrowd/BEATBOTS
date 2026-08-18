@@ -331,7 +331,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/ip/mock-queue-poll/457',
-    file: 'fixtures/walmart-product-queue-poll-cross.html',
+    file: MOCK_URLS.walmartProductQueuePollCross,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
@@ -348,7 +348,7 @@ export const FIXTURE_E2E_ROUTES = [
   {
     host: 'www.walmart.com',
     path: '/ip/mock-queue-poll-recovery/461',
-    file: 'fixtures/walmart-product-queue-poll-cross-recovery.html',
+    file: MOCK_URLS.walmartProductQueuePollCrossRecovery,
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [],
