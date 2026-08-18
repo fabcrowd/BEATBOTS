@@ -13,6 +13,19 @@ export const BLOCKED_REASON = {
   OOS_OR_ATC_FAILED: 'oos_or_atc_failed',
 };
 
+export const REVIEW_REACHED_MARKER = '[TCH] review reached';
+
+/**
+ * True only when review was logged after product-phase start (ignores warmup/sign-in noise).
+ * @param {string[]} lines
+ * @param {number} startIndex
+ * @returns {boolean}
+ */
+export function hasReviewReachedSince(lines, startIndex = 0) {
+  const slice = (lines || []).slice(Math.max(0, startIndex));
+  return slice.some((l) => String(l).includes(REVIEW_REACHED_MARKER));
+}
+
 /**
  * @param {string[]} lines
  * @param {number} [n]
@@ -60,6 +73,17 @@ function selfTest() {
   const msg = formatRehearsalFail(BLOCKED_REASON.REVIEW_TIMEOUT, 'timed out', lines);
   if (!msg.includes('blockedReason: review_timeout') || !msg.includes('line 19')) {
     console.error('FAIL: formatRehearsalFail');
+    process.exit(1);
+  }
+  const warmup = ['[TCH] checkout step: shipping', REVIEW_REACHED_MARKER];
+  const product = ['[TCH] monitor ATC for', '[TCH] checkout step: payment'];
+  const combined = warmup.concat(product);
+  if (hasReviewReachedSince(combined, warmup.length)) {
+    console.error('FAIL: hasReviewReachedSince should ignore pre-product review');
+    process.exit(1);
+  }
+  if (!hasReviewReachedSince(combined.concat(REVIEW_REACHED_MARKER), warmup.length)) {
+    console.error('FAIL: hasReviewReachedSince should detect post-product review');
     process.exit(1);
   }
   console.log('rehearsal-errors.mjs: PASS');

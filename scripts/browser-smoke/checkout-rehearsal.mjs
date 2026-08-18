@@ -24,6 +24,7 @@ import {
   BLOCKED_REASON,
   exitRehearsal,
   formatRehearsalFail,
+  hasReviewReachedSince,
 } from './rehearsal-errors.mjs';
 import {
   DEFAULT_PRODUCT_URL,
@@ -166,15 +167,16 @@ async function main() {
   await new Promise((r) => setTimeout(r, 5000));
 
   console.log('\nNavigating to product (extension drives toward review)...\n');
+  const productPhaseStart = tchLines.length;
   await shop.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
 
   const deadline = Date.now() + MAX_MS;
   while (Date.now() < deadline) {
-    if (tchLines.some((l) => l.includes('[TCH] review reached'))) break;
+    if (hasReviewReachedSince(tchLines, productPhaseStart)) break;
     await new Promise((r) => setTimeout(r, 1500));
   }
 
-  if (!tchLines.some((l) => l.includes('[TCH] review reached'))) {
+  if (!hasReviewReachedSince(tchLines, productPhaseStart)) {
     await failRehearsal(
       classifyRehearsalFailure(tchLines),
       `Timed out waiting for [TCH] review reached (${MAX_MS}ms).`,
