@@ -1797,6 +1797,122 @@ function runWm5SacredLockNavTests() {
   );
 }
 
+/** Mirrors wmWaitInProductQueue lock message — uses settings.productUrl when monitored. */
+function wmProductQueueSacredLockMessages(settings, locationHref) {
+  const lockUrl = settings?.productUrl || locationHref;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/** WM-5: cross-page product queue poll — tab on /ip/*, sacred lock keys monitor productUrl (parity FIX-3). */
+function runWm5ProductQueuePollCrossPagePollRecoveryTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-queue/456';
+  const recoveryProductUrl = 'https://www.walmart.com/ip/mock-queue-poll-recovery/461';
+  const queueTabUrl = 'https://www.walmart.com/ip/mock-queue-poll/457';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normQueueTabUrl = normalizeProductUrl(queueTabUrl);
+
+  assert.match(
+    WMT_SRC,
+    /const lockUrl = settings\?\.productUrl \|\| location\.href/,
+    'WM-5: product-page queue lock uses settings.productUrl before location.href'
+  );
+  assert.match(
+    WMT_SRC,
+    /wmSignalQueueTimeout\(lockUrl\)/,
+    'WM-5: product-page queue timeout uses lockUrl (monitor product when cross-page)'
+  );
+
+  const lockMessages = wmProductQueueSacredLockMessages({ productUrl: monitorProductUrl }, queueTabUrl);
+  assert.equal(lockMessages.length, 1, 'WM-5: product queue cross-page emits one lock message');
+  assert.equal(
+    lockMessages[0].url,
+    monitorProductUrl,
+    'WM-5: product queue cross-page lock uses monitor productUrl not tab URL'
+  );
+  assert.notEqual(
+    normalizeProductUrl(lockMessages[0].url),
+    normQueueTabUrl,
+    'WM-5: product queue cross-page lock must not key queue tab URL'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  bgApplyWalmartInQueue(inQueueUrls, lockMessages[0]);
+  assert.ok(
+    inQueueUrls.has(normMonitorUrl),
+    'WM-5: cross-page product queue arms sacred lock on monitor product'
+  );
+  assert.ok(
+    !inQueueUrls.has(normQueueTabUrl),
+    'WM-5: cross-page product queue sacred lock must not key queue tab URL'
+  );
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'WM-5: cross-page product queue sacred lock blocks poll on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: monitorProductUrl,
+  });
+  assert.ok(
+    inQueueUrls.has(normMonitorUrl),
+    'WM-5: cross-page product queue NAV_FAILED must not clear sacred lock'
+  );
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'WM-5: cross-page product queue NAV_FAILED releases navigationLock only'
+  );
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'WM-5: cross-page product queue poll still blocked after NAV_FAILED while sacred lock holds'
+  );
+
+  assert.ok(
+    inQueueUrls.has(normMonitorUrl),
+    'WM-5: cross-page product queue reload preserves sacred lock'
+  );
+  assert.ok(
+    !bgWouldNavigateRestock(normMonitorUrl, queueTabUrl, inQueueUrls, navigationLock),
+    'WM-5: cross-page restock must not navigate queue tab while sacred lock holds monitor product'
+  );
+
+  bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: monitorProductUrl,
+  });
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'WM-5: cross-page product queue timeout clears sacred lock'
+  );
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'WM-5: cross-page product queue poll may retry after QUEUE_TIMEOUT'
+  );
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'WM-5: cross-page product queue poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'WM-5: cross-page product queue poll recovery must not arm sacred lock');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: recoveryProductUrl,
+  });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'WM-5: cross-page product queue NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
 /** WM-5: cross-page checkout SPA sacred lock — tab on /checkout/*, lock keys monitor productUrl (parity FIX-3). */
 function runWm5CheckoutSpaCrossPageSacredPollRecoveryTests() {
   const monitorProductUrl = 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002';
@@ -1888,6 +2004,7 @@ async function main() {
   runWm3MainWorldQueueTests();
   runWm4SacredLockTests();
   runWm5SacredLockNavTests();
+  runWm5ProductQueuePollCrossPagePollRecoveryTests();
   runWm5CheckoutSpaCrossPageSacredPollRecoveryTests();
   runWm6QueueErrorPathTests();
   runWm6PollRecoveryRearmTests();
@@ -1897,7 +2014,7 @@ async function main() {
   runWm6CheckoutSpaLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-6 poll recovery rearm, cart live poll cycle, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-6 poll recovery rearm, cart live poll cycle, offerId ready'
   );
 }
 
