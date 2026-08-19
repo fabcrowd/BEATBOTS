@@ -1342,6 +1342,86 @@ function runSc6CartLivePollCycleTests() {
   );
 }
 
+/**
+ * SC-5/SC-6: FCFS live poll cycle — reload + repeated NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
+ * Parity with FIX-3 sc5-sc6-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runSc5Sc6LivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-happy/700';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-5/SC-6: FCFS live poll must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-5/SC-6: monitor URL must not be sacred lock key on start'
+  );
+
+  for (let r = 0; r < 2; r++) {
+    navigationLock.add(normMonitorUrl);
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-5/SC-6: reload ${r + 1} during live poll must not arm sacred lock`
+    );
+    assert.ok(
+      !inQueueUrls.has(normMonitorUrl),
+      `SC-5/SC-6: reload ${r + 1} must not sacred-lock monitor URL`
+    );
+    bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `SC-5/SC-6: reload ${r + 1} NAV_FAILED releases navigationLock`
+    );
+  }
+
+  assert.match(SC_SRC, /handleProductPage — FCFS ATC/, 'SC-5/SC-6: FCFS product handler log in source');
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: liveSignalTypes[i],
+        url: monitorProductUrl,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-5/SC-6: live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-5/SC-6: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-5/SC-6: live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-5/SC-6: live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-5/SC-6: navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-5/SC-6: contrast WM-5 — sacred lock would block poll; FCFS does not arm it'
+  );
+}
+
 function main() {
   testSc1Hosts();
   testSc1Manifest();
@@ -1371,8 +1451,9 @@ function main() {
   testSc4CheckoutTimeoutPollRecovery();
   runSc6CheckoutSpaLivePollCycleTests();
   runSc6CartLivePollCycleTests();
+  runSc5Sc6LivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle, SC-5/SC-6 live poll cycle"
   );
 }
 

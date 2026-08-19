@@ -2281,6 +2281,74 @@ function runWm5LivePollCycleTests() {
 }
 
 /**
+ * WM-2: pre-drop live poll cycle — NAV_FAILED during real poll must never arm sacred lock.
+ * Parity with FIX-3 wm2-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runWm2LivePollCycleTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    WMT_SRC,
+    /does NOT arm sacred lock \(WM-2\)/,
+    'WM-2 live poll: pre-drop price guard must not arm sacred lock'
+  );
+
+  const monitorUrl = 'https://www.walmart.com/ip/mock-predrop/123';
+  const normMonitorUrl = normalizeProductUrl(monitorUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'WM-2 live poll: pre-drop must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'WM-2 live poll: monitor URL must not be sacred lock key on start'
+  );
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `WM-2 live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normMonitorUrl),
+      `WM-2 live poll cycle ${i + 1} must not sacred-lock pre-drop ${normMonitorUrl} after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `WM-2 live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `WM-2 live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-2 live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'WM-2 live poll: navigationLock alone must not imply sacred lock on pre-drop'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'WM-2 live poll: contrast WM-5 — sacred lock would block poll; pre-drop does not arm it'
+  );
+}
+
+/**
  * WM-4: unmonitored queue live poll cycle — reload + NAV_FAILED must not arm sacred lock.
  * Parity with FIX-3 wm4-live-poll-cycle on unmonitored /qp + /checkout (Target-only monitor).
  */
@@ -2383,6 +2451,7 @@ async function main() {
   runDispatchTests();
   await runFlowTests();
   runWm2PredropQueueTests();
+  runWm2LivePollCycleTests();
   await runWm2FlowTests();
   runWm3MainWorldQueueTests();
   runWm4SacredLockTests();
@@ -2401,7 +2470,7 @@ async function main() {
   runWm6CheckoutSpaLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-6 poll recovery rearm, cart live poll cycle, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 live poll cycle, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-6 poll recovery rearm, cart live poll cycle, offerId ready'
   );
 }
 
