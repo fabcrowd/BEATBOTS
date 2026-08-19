@@ -46,6 +46,111 @@ async function waitForMonitorLocks(popup, check, label, timeoutMs = 35000) {
   throw new Error(`MON-3: timeout waiting for ${label}`);
 }
 
+/** Mirrors popup.js toggleMonitor retailer filter. */
+function filterProductsByRetailer(products, retailerFilter) {
+  return retailerFilter ? products.filter((p) => retailerFilter.test(p.url)) : products;
+}
+
+/** Mirrors background.js WALMART_NAV_FAILED handler — releases navigationLock only. */
+function applyWalmartNavFailed(navigationLock, inQueueUrls, message) {
+  const normFailUrl = normalizeProductUrl(message.url || '');
+  if (normFailUrl) navigationLock.delete(normFailUrl);
+  return normFailUrl;
+}
+
+/**
+ * MON-2 offline parity: walmart-only monitor during live poll on Target tab.
+ * Parity with FIX-3 mon2-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runMon2LivePollCycleOfflineTests() {
+  const targetPageUrl = 'https://www.target.com/p/mock-product/A-880080';
+  const targetCheckoutUrl = 'https://www.target.com/checkout/review';
+  const walmartProbeUrl = 'https://www.walmart.com/ip/mock-mon2-target-live/333';
+  const normTargetPageUrl = normalizeProductUrl(targetPageUrl);
+  const normTargetCheckoutUrl = normalizeProductUrl(targetCheckoutUrl);
+  const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+
+  const allProducts = [
+    { url: targetPageUrl, qty: 1, name: 'MON-2 Target product' },
+    { url: walmartProbeUrl, qty: 1, name: 'MON-2 Walmart probe' },
+  ];
+  const walmartFilter = /walmart\.com/i;
+  const walmartOnlyProducts = filterProductsByRetailer(allProducts, walmartFilter);
+
+  assert.equal(walmartOnlyProducts.length, 1, 'MON-2 live poll: walmart-only monitor sends one product');
+  assert.ok(
+    walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+    'MON-2 live poll: monitor products must be walmart.com only'
+  );
+  assert.ok(
+    !walmartOnlyProducts.some((p) => /target\.com/i.test(p.url)),
+    'MON-2 live poll: target URL must be excluded from walmart-only monitor'
+  );
+
+  for (const targetUrl of [targetPageUrl, targetCheckoutUrl]) {
+    const normTargetUrl = normalizeProductUrl(targetUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.ok(
+      !inQueueUrls.has(normTargetUrl),
+      `MON-2 live poll: Target ${normTargetUrl} must not be sacred lock key before poll`
+    );
+
+    // Simulated Target tab reload during walmart-only poll — no sacred lock on Target URL.
+    assert.ok(
+      !inQueueUrls.has(normTargetUrl),
+      `MON-2 live poll: Target reload must not arm inQueueUrls on ${normTargetUrl}`
+    );
+    assert.ok(
+      walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+      `MON-2 live poll: walmart-only products must hold after Target reload on ${normTargetUrl}`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normWalmartProbeUrl);
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: navFailTypes[i],
+        url: walmartProbeUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `MON-2 live poll cycle ${i + 1} must not arm inQueueUrls on Target ${normTargetUrl} after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normTargetUrl),
+        `MON-2 live poll cycle ${i + 1} must not sacred-lock Target ${normTargetUrl} after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+        `MON-2 live poll cycle ${i + 1} must keep walmart-only products on ${normTargetUrl} after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normWalmartProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normWalmartProbeUrl),
+          `MON-2 live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normTargetUrl, inQueueUrls, navigationLock),
+        `MON-2 live poll cycle ${i + 1} must not block poll on unmonitored Target ${normTargetUrl}`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 live poll must not arm inQueueUrls on Target ${normTargetUrl}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normTargetCheckoutUrl) || normTargetUrl === normTargetCheckoutUrl,
+      `MON-2 live poll: Target checkout URL must not be sacred lock key during walmart-only poll`
+    );
+  }
+}
+
 async function sendBg(page, msg) {
   return page.evaluate(
     (m) =>
@@ -65,6 +170,8 @@ async function sendBg(page, msg) {
 }
 
 async function main() {
+  runMon2LivePollCycleOfflineTests();
+
   const launched = await launchWithExtension({ profilePrefix: 'tch-func-' });
   browser = launched.browser;
   userDataDir = launched.userDataDir;
