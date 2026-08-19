@@ -560,6 +560,96 @@ function runSc5FcfsNoSacredLockTests() {
   assert.ok(!inQueueUrls.has(normUrl), 'SC-5: ATC_SUCCESS clears inQueueUrls without arming');
 }
 
+/**
+ * Parity with FIX-3 sc5-sc6-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runSc5Sc6LivePollCycleTests() {
+  const scenarios = [
+    {
+      label: 'SC-5 FCFS',
+      productUrl: 'https://www.samsclub.com/p/mock-fcfs-live/700',
+    },
+    {
+      label: 'SC-6 restock',
+      productUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+    },
+    {
+      label: 'SC-6 invisible ATC',
+      productUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible/791',
+    },
+    {
+      label: "SC cart",
+      productUrl: 'https://www.samsclub.com/cart',
+    },
+    {
+      label: 'SC checkout SPA',
+      productUrl: 'https://www.samsclub.com/checkout/spa-stall',
+    },
+  ];
+
+  for (const { label, productUrl } of scenarios) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.ok(
+      !inQueueUrls.has(normUrl),
+      `${label}: must not be sacred lock key before live poll`
+    );
+
+    // Simulated FCFS tab reload during live poll — no sacred lock.
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: reload during live poll must not arm inQueueUrls`
+    );
+    assert.ok(
+      !inQueueUrls.has(normUrl),
+      `${label}: URL must not be sacred lock key after reload`
+    );
+
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      navigationLock.add(normUrl);
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: productUrl });
+      } else {
+        bgApplyNavFailed(navigationLock, inQueueUrls, {
+          type: liveSignalTypes[i],
+          url: productUrl,
+        });
+      }
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normUrl),
+        `${label}: live poll cycle ${i + 1} must not sacred-lock ${normUrl} after ${liveSignalTypes[i]}`
+      );
+      if (navigationLock.has(normUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normUrl),
+          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+        );
+      }
+      assert.ok(
+        !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label}: live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+      );
+    }
+
+    assert.equal(inQueueUrls.size, 0, `${label}: live poll must not arm inQueueUrls`);
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; SC FCFS does not arm it`
+    );
+  }
+}
+
 function testSc5Source() {
   assert.ok(SC_SRC.includes('scSignalAtcSuccess'), 'SC-5: scSignalAtcSuccess defined');
   assert.ok(
@@ -1358,6 +1448,7 @@ function main() {
   runSc3PollRecoveryRearmTests();
   testSc5Source();
   runSc5FcfsNoSacredLockTests();
+  runSc5Sc6LivePollCycleTests();
   testSc6Source();
   runSc6ErrorPathHardeningTests();
   runSc6PollRecoveryRearmTests();
@@ -1372,7 +1463,7 @@ function main() {
   runSc6CheckoutSpaLivePollCycleTests();
   runSc6CartLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
   );
 }
 

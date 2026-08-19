@@ -532,6 +532,72 @@ function runWm2PredropQueueTests() {
 }
 
 /**
+ * Parity with FIX-3 wm2-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runWm2LivePollCycleTests() {
+  const predropProductUrl = 'https://www.walmart.com/ip/mock-predrop-live/555';
+  const normPredropUrl = normalizeProductUrl(predropProductUrl);
+
+  const predropPage = makePage({
+    pathname: '/ip/mock-predrop-live/555',
+    bodyText: 'Add to cart soon',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+        disabled: true,
+      },
+    ],
+  });
+  assert.equal(
+    wmShouldEnterSacredQueueWait(predropPage),
+    false,
+    'WM-2 live poll: pre-drop disabled ATC must not arm sacred wait'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  // Pre-drop NAV_FAILED during live poll — never arm sacred lock.
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normPredropUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: predropProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `WM-2 live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normPredropUrl),
+      `WM-2 live poll cycle ${i + 1} must not sacred-lock pre-drop ${normPredropUrl} after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normPredropUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normPredropUrl),
+        `WM-2 live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normPredropUrl} after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normPredropUrl, inQueueUrls, navigationLock),
+      `WM-2 live poll cycle ${i + 1} must allow poll retry on pre-drop (no sacred lock) after ${navFailTypes[i]}`
+    );
+  }
+
+  assert.equal(inQueueUrls.size, 0, 'WM-2 live poll must not arm inQueueUrls on pre-drop product');
+
+  const wmSacredLock = new Set([normPredropUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normPredropUrl, wmSacredLock, new Set()),
+    'WM-2: contrast WM-5 — sacred lock would block poll; pre-drop WM-2 does not arm it'
+  );
+}
+
+/**
  * WM-3: Load walmart-main-world.js in a VM sandbox and assert Queue-it WebSocket
  * frames dispatch TCH_QUEUE_PASSED on document.documentElement.
  */
@@ -2383,6 +2449,7 @@ async function main() {
   runDispatchTests();
   await runFlowTests();
   runWm2PredropQueueTests();
+  runWm2LivePollCycleTests();
   await runWm2FlowTests();
   runWm3MainWorldQueueTests();
   runWm4SacredLockTests();
