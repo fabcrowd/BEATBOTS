@@ -34,7 +34,7 @@ const WM_SEL = {
 };
 
 /** Minimal DOM stub for offline wmGetPageType / handler simulations. */
-function makePage({ pathname, bodyText = '', elements = [] }) {
+function makePage({ pathname, bodyText = '', elements = [], docAttrs = {} }) {
   const bySelector = new Map();
   for (const el of elements) {
     for (const sel of el.selectors || []) {
@@ -58,6 +58,15 @@ function makePage({ pathname, bodyText = '', elements = [] }) {
     pathname,
     bodyText,
     navigatedTo: null,
+    documentElement: {
+      getAttribute(name) {
+        const v = docAttrs[name];
+        return v === undefined ? null : String(v);
+      },
+      hasAttribute(name) {
+        return Object.prototype.hasOwnProperty.call(docAttrs, name);
+      },
+    },
     querySelector(sel) {
       const hit = bySelector.get(sel);
       if (hit) {
@@ -131,13 +140,27 @@ function wmPxInitDecision(page) {
   return { action: 'px_wait', messages: [] };
 }
 
+/** Mirrors wmPxTimeoutMs() — walmart-content.js */
+function wmPxTimeoutMs(page) {
+  const root = page.documentElement;
+  const override = root?.getAttribute('data-tch-px-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  if (root?.hasAttribute('data-tch-fixture')) return 2000;
+  return 2 * 60 * 1000;
+}
+
 /**
- * Mirrors wmInit PX setTimeout (2min) — NAV_FAILED only if still on PX page.
+ * Mirrors wmInit PX setTimeout — NAV_FAILED only if still on PX page after wmPxTimeoutMs().
  * @param {ReturnType<typeof makePage>} page
- * @param {number} elapsedMs
+ * @param {number} [elapsedMs] defaults to wmPxTimeoutMs(page)
  */
-function wmPxTimeoutMessages(page, elapsedMs = 120000) {
-  if (elapsedMs < 120000) return [];
+function wmPxTimeoutMessages(page, elapsedMs) {
+  const timeoutMs = wmPxTimeoutMs(page);
+  const elapsed = elapsedMs ?? timeoutMs;
+  if (elapsed < timeoutMs) return [];
   if (!wmIsPxPage(page)) return [];
   return [{ type: 'WALMART_NAV_FAILED', url: `https://www.walmart.com${page.pathname}` }];
 }
@@ -1474,6 +1497,157 @@ function runWm6CheckoutSpaLivePollCycleTests() {
   );
 }
 
+/**
+ * WM-6: data-tch-px-timeout-ms override — timeout fires at override ms, not prod 2min default.
+ * Parity with FIX-3 px-timeout-ms-override (fixture-e2e has browser coverage).
+ */
+function runWm6PxTimeoutOverrideTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(WMT_SRC, /data-tch-px-timeout-ms/, 'WM-6 PX override: attribute in source');
+  assert.match(WMT_SRC, /wmPxTimeoutMs/, 'WM-6 PX override: timeout helper in source');
+
+  const overridePage = makePage({
+    pathname: '/ip/mock-px-override/558',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: {
+      'data-tch-fixture': 'walmart-product-px-override',
+      'data-tch-px-timeout-ms': '750',
+    },
+  });
+  assert.ok(wmIsPxPage(overridePage), 'WM-6 PX override: hang-tight page detected');
+  assert.equal(wmPxTimeoutMs(overridePage), 750, 'WM-6 PX override: reads data-tch-px-timeout-ms');
+  assert.deepEqual(
+    wmPxTimeoutMessages(overridePage, 749),
+    [],
+    'WM-6 PX override: no NAV_FAILED before override timeout'
+  );
+  const overrideTimeoutMsgs = wmPxTimeoutMessages(overridePage, 750);
+  assert.equal(overrideTimeoutMsgs.length, 1, 'WM-6 PX override: NAV_FAILED at override timeout');
+  assert.equal(overrideTimeoutMsgs[0].type, 'WALMART_NAV_FAILED');
+
+  const fixtureDefaultPage = makePage({
+    pathname: '/ip/mock-px-fixture-default/559',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px' },
+  });
+  assert.equal(wmPxTimeoutMs(fixtureDefaultPage), 2000, 'WM-6 PX override: fixture default is 2s');
+  assert.deepEqual(
+    wmPxTimeoutMessages(fixtureDefaultPage, 1999),
+    [],
+    'WM-6 PX override: no NAV_FAILED before fixture default timeout'
+  );
+  assert.equal(
+    wmPxTimeoutMessages(fixtureDefaultPage, 2000).length,
+    1,
+    'WM-6 PX override: NAV_FAILED at fixture default timeout'
+  );
+
+  const prodPage = makePage({
+    pathname: '/ip/wm6-px-prod/560',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  assert.equal(wmPxTimeoutMs(prodPage), 120000, 'WM-6 PX override: prod default is 2min');
+  assert.deepEqual(
+    wmPxTimeoutMessages(prodPage, 119999),
+    [],
+    'WM-6 PX override: no NAV_FAILED before prod timeout'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  const normPx = normalizeProductUrl(overrideTimeoutMsgs[0].url);
+  navigationLock.add(normPx);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, overrideTimeoutMsgs[0]);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 PX override: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normPx), 'WM-6 PX override: timeout releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normPx, inQueueUrls, navigationLock),
+    'WM-6 PX override: poll may retry after override timeout'
+  );
+}
+
+/**
+ * WM-6: PX page live poll cycle with timeout override — reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 wm6-live-poll-cycle on px-override route (fixture-e2e has browser coverage).
+ */
+function runWm6PxLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-px-override/558';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  const pxPage = makePage({
+    pathname: '/ip/mock-px-override/558',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: {
+      'data-tch-fixture': 'walmart-product-px-override',
+      'data-tch-px-timeout-ms': '750',
+    },
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 PX live poll: must not arm sacred lock on start');
+  assert.equal(wmPxInitDecision(pxPage).action, 'px_wait', 'WM-6 PX live poll: PX wait branch');
+
+  let pxTimeoutCycles = 0;
+  const simulatePxTimeout = () => {
+    pxTimeoutCycles += 1;
+    const msgs = wmPxTimeoutMessages(pxPage, 750);
+    assert.equal(msgs.length, 1, 'WM-6 PX live poll: override timeout sends NAV_FAILED');
+    return msgs[0];
+  };
+
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulatePxTimeout());
+  assert.equal(inQueueUrls.size, 0, 'WM-6 PX live poll: override timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'WM-6 PX live poll: timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulatePxTimeout());
+  assert.equal(pxTimeoutCycles, 2, 'WM-6 PX live poll: reload must re-trigger PX override timeout');
+  assert.equal(inQueueUrls.size, 0, 'WM-6 PX live poll: reload must not arm sacred lock');
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `WM-6 PX live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `WM-6 PX live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `WM-6 PX live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 PX live poll: must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'WM-6 PX live poll: navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'WM-6 PX live poll: contrast WM-5 — sacred lock would block poll; PX override timeout does not arm it'
+  );
+}
+
 /** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */
 function wmExtractPageOidFromNextData(nextData) {
   try {
@@ -2555,11 +2729,13 @@ async function main() {
   runWm6PollRecoveryRearmTests();
   await runWm6CartCheckoutMissingTests();
   await runWm6CartCrossPageCheckoutMissingTests();
-  await runWm6CartLivePollCycleTests();
+  await   runWm6CartLivePollCycleTests();
   runWm6CheckoutSpaLivePollCycleTests();
+  runWm6PxTimeoutOverrideTests();
+  runWm6PxLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, PX timeout override, PX live poll cycle, offerId ready'
   );
 }
 
