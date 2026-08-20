@@ -2343,6 +2343,121 @@ function runWm5PreTimeoutLivePollCycleTests() {
 }
 
 /**
+ * WM-5: QUEUE_TIMEOUT → poll recovery rearm on distinct recovery product — no sacred lock.
+ * Parity with FIX-3 wm5-poll-recovery-rearm on monitored /qp, /checkout, and product-page queue timeout routes.
+ */
+function runWm5PollRecoveryRearmTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(WMT_SRC, /WALMART_QUEUE_TIMEOUT/, 'WM-5 poll recovery: QUEUE_TIMEOUT handler in source');
+  assert.match(WMT_SRC, /wmSignalQueueTimeout/, 'WM-5 poll recovery: queue timeout signal in source');
+
+  function assertWm5PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+    navigationLock.add(normMonitorUrl);
+    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: sacred lock armed before QUEUE_TIMEOUT`);
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll blocked while sacred lock holds monitor product`
+    );
+
+    bgApplyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: monitorProductUrl,
+    });
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: QUEUE_TIMEOUT clears sacred lock on monitor product`);
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `${label}: QUEUE_TIMEOUT clears navigationLock on monitor product`
+    );
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry monitor product after QUEUE_TIMEOUT`
+    );
+
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+    assert.ok(
+      !inQueueUrls.has(normRecoveryUrl),
+      `${label}: recovery product must not be in sacred lock`
+    );
+
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: recoveryProductUrl,
+    });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+    assert.ok(
+      !bgPollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normRecoveryUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; post-timeout recovery does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: '/qp monitored timeout',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored-recovery/998',
+      lockMessages: () =>
+        wmQueueRoomSacredLockMessages({
+          productUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+        }),
+    },
+    {
+      label: '/checkout monitored timeout',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored-recovery/999',
+      lockMessages: () =>
+        wmCheckoutQueueSacredLockMessages({
+          productUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+        }),
+    },
+    {
+      label: 'product-page queue timeout',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout-recovery/459',
+      lockMessages: () =>
+        wmProductQueueSacredLockMessages(
+          { productUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458' },
+          'https://www.walmart.com/ip/mock-product-queue-timeout/458'
+        ),
+    },
+  ];
+
+  for (const { label, monitorProductUrl, recoveryProductUrl, lockMessages } of scenarios) {
+    const lockMsg = lockMessages()[0];
+    assert.ok(lockMsg, `${label}: queue entry emits WALMART_IN_QUEUE with monitor productUrl`);
+    assert.equal(
+      lockMsg.url,
+      monitorProductUrl,
+      `${label}: sacred lock keys monitor productUrl not queue tab URL`
+    );
+    assertWm5PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label);
+  }
+}
+
+/**
  * WM-5: checkout SPA live poll cycle — pre-armed sacred lock survives reload + NAV_FAILED before timeout.
  * Parity with FIX-3 wm5-checkout-spa-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -2721,6 +2836,7 @@ async function main() {
   runWm5ProductQueuePollCrossPagePollRecoveryTests();
   runWm5CheckoutSpaCrossPageSacredPollRecoveryTests();
   runWm5PreTimeoutLivePollCycleTests();
+  runWm5PollRecoveryRearmTests();
   runWm5CheckoutSpaLivePollCycleTests();
   runWm5LivePollCycleTests();
   runWm4LivePollCycleTests();
@@ -2735,7 +2851,7 @@ async function main() {
   runWm6PxLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, PX timeout override, PX live poll cycle, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, PX timeout override, PX live poll cycle, offerId ready'
   );
 }
 
