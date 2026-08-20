@@ -1157,6 +1157,89 @@ function runSc3PollRecoveryRearmTests() {
   );
 }
 
+/**
+ * SC-4: checkout review live poll cycle — reload + SAMS_NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
+ * Parity with FIX-3 sc4-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runSc4LivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout',
+    elements: [
+      {
+        selectors: ['[data-automation-id="place-order-btn"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-4: checkout review live poll must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'SC-4: checkout tab URL must not be sacred lock key'
+  );
+
+  const reviewResult1 = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+  assert.equal(reviewResult1.path, 'review_manual', 'SC-4: initial review manual stop');
+  assert.ok(scCheckoutHasReviewSim(reviewPage), 'SC-4: review step detected before reload');
+
+  const reviewResult2 = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+  assert.equal(reviewResult2.path, 'review_manual', 'SC-4: checkout reload must re-detect review');
+  assert.equal(reviewPage.elements[0].clicked, false, 'SC-4: reload must not auto-click Place Order');
+  assert.equal(inQueueUrls.size, 0, 'SC-4: reload during live poll must not arm inQueueUrls');
+  assert.match(SC_SRC, /\[SC\] review reached/, 'SC-4: review reached log in source');
+
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: liveSignalTypes[i],
+        url: monitorProductUrl,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-4: live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-4: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-4: live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-4: live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-4: navigationLock alone must not imply sacred lock on checkout review after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-4: contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it'
+  );
+}
+
 function testSc4CheckoutTimeoutPollRecovery() {
   const productUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
   const normUrl = normalizeProductUrl(productUrl);
@@ -1460,10 +1543,11 @@ function main() {
   testSc4CheckoutReviewPath();
   testSc4CheckoutTimeoutNavFailed();
   testSc4CheckoutTimeoutPollRecovery();
+  runSc4LivePollCycleTests();
   runSc6CheckoutSpaLivePollCycleTests();
   runSc6CartLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-4 live poll cycle, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle"
   );
 }
 
