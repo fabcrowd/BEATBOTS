@@ -1684,6 +1684,123 @@ function runWm6PxLivePollCycleTests() {
   );
 }
 
+/**
+ * Shared WM-6 PX live poll cycle assertions for fixture routes (hang-tight, captcha, px-block).
+ * Parity with FIX-3 wm6-live-poll-cycle on those routes (fixture-e2e has browser coverage).
+ */
+function assertWm6PxLivePollCycle({ page, monitorProductUrl, timeoutMs, label }) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+  assert.equal(wmPxInitDecision(page).action, 'px_wait', `${label}: PX wait branch`);
+
+  let pxTimeoutCycles = 0;
+  const simulatePxTimeout = () => {
+    pxTimeoutCycles += 1;
+    const msgs = wmPxTimeoutMessages(page, timeoutMs);
+    assert.equal(msgs.length, 1, `${label}: timeout sends NAV_FAILED`);
+    return msgs[0];
+  };
+
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulatePxTimeout());
+  assert.equal(inQueueUrls.size, 0, `${label}: timeout must not arm sacred lock`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: timeout releases navigationLock`);
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulatePxTimeout());
+  assert.equal(pxTimeoutCycles, 2, `${label}: reload must re-trigger PX timeout`);
+  assert.equal(inQueueUrls.size, 0, `${label}: reload must not arm sacred lock`);
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm inQueueUrls after poll wait`);
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    `${label}: navigationLock alone must not imply sacred lock after poll wait`
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; PX timeout does not arm it`
+  );
+}
+
+/**
+ * WM-6: PX hang-tight, #px-captcha, and px-block live poll cycles — reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 wm6-live-poll-cycle on /ip/mock-px/555, /ip/mock-px-captcha/556, /ip/mock-px-block/557.
+ */
+function runWm6PxFixtureRoutesLivePollCycleTests() {
+  const hangTightUrl = 'https://www.walmart.com/ip/mock-px/555';
+  const hangTightPage = makePage({
+    pathname: '/ip/mock-px/555',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px' },
+  });
+  assert.ok(wmIsPxPage(hangTightPage), 'WM-6 PX hang-tight live poll: page detected');
+  assertWm6PxLivePollCycle({
+    page: hangTightPage,
+    monitorProductUrl: hangTightUrl,
+    timeoutMs: wmPxTimeoutMs(hangTightPage),
+    label: 'WM-6 PX hang-tight live poll',
+  });
+
+  const pxCaptchaUrl = 'https://www.walmart.com/ip/mock-px-captcha/556';
+  const pxCaptchaPage = makePage({
+    pathname: '/ip/mock-px-captcha/556',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  assert.ok(wmIsPxPage(pxCaptchaPage), 'WM-6 PX captcha live poll: page detected');
+  assertWm6PxLivePollCycle({
+    page: pxCaptchaPage,
+    monitorProductUrl: pxCaptchaUrl,
+    timeoutMs: wmPxTimeoutMs(pxCaptchaPage),
+    label: 'WM-6 PX captcha live poll',
+  });
+
+  const pxBlockUrl = 'https://www.walmart.com/ip/mock-px-block/557';
+  const pxBlockPage = makePage({
+    pathname: '/ip/mock-px-block/557',
+    bodyText: 'Access denied',
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px-block' },
+    elements: [{ selectors: ['[class*="px-block"]'], tag: 'div' }],
+  });
+  assert.ok(wmIsPxPage(pxBlockPage), 'WM-6 PX block live poll: page detected');
+  assertWm6PxLivePollCycle({
+    page: pxBlockPage,
+    monitorProductUrl: pxBlockUrl,
+    timeoutMs: wmPxTimeoutMs(pxBlockPage),
+    label: 'WM-6 PX block live poll',
+  });
+}
+
 /** Mirrors walmart-content.js __NEXT_DATA__ OID extraction on product pages. */
 function wmExtractPageOidFromNextData(nextData) {
   try {
@@ -2885,9 +3002,10 @@ async function main() {
   runWm6CheckoutSpaLivePollCycleTests();
   runWm6PxTimeoutOverrideTests();
   runWm6PxLivePollCycleTests();
+  runWm6PxFixtureRoutesLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, PX timeout override, PX live poll cycle, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, offerId ready'
   );
 }
 
