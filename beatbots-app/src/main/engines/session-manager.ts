@@ -233,6 +233,7 @@ export class SessionManager extends EventEmitter {
           }
 
           this.emit('status', { accountId: account.id, status: 'logged_in', text: 'Logged in (OTP)' })
+          this.persistLoginSession(account, token, expiresIn)
           return { ok: true, token, expiresIn }
         }
 
@@ -250,12 +251,27 @@ export class SessionManager extends EventEmitter {
       }
 
       this.emit('status', { accountId: account.id, status: 'logged_in', text: 'Logged in' })
+      this.persistLoginSession(account, token, expiresIn)
       return { ok: true, token, expiresIn }
 
     } catch (e: any) {
       upsert('accounts', { ...account, status: 'error' })
       return { ok: false, error: e.message }
     }
+  }
+
+  /** Cache + DB persist after standalone or getSession login success. */
+  private persistLoginSession(account: Account, token: string, expiresIn: number): void {
+    const ctx: SessionContext = {
+      accountId: account.id,
+      email: account.email,
+      accessToken: token,
+      tokenExpiresAt: adjustedNow() + expiresIn * 1000,
+      visitorId: generateVisitorId(),
+      apiKey: this.apiKey,
+      proxy: this.proxy,
+    }
+    setCachedSession(ctx)
   }
 
   private async doLoginRequest(email: string, password: string, otp?: string): Promise<Response> {

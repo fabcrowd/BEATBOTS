@@ -183,7 +183,12 @@ export class CheckoutEngine {
     onStatus('Placing order...')
     const orderResult = await this.placeOrder(session, checkoutId, atcCookie.cookies, abortSignal)
     if (!orderResult.ok) {
-      return { ok: false, error: `Place order failed: ${orderResult.error}`, retryable: true, durationMs: Date.now() - startMs }
+      return {
+        ok: false,
+        error: `Place order failed: ${orderResult.error}`,
+        retryable: orderResult.retryable ?? true,
+        durationMs: Date.now() - startMs,
+      }
     }
 
     onStatus(`Order placed: ${orderResult.orderId}`)
@@ -380,7 +385,7 @@ export class CheckoutEngine {
     checkoutId: string,
     shapeCookies: Record<string, string>,
     signal: AbortSignal
-  ): Promise<{ ok: boolean; orderId?: string; orderTotal?: number; error?: string }> {
+  ): Promise<{ ok: boolean; orderId?: string; orderTotal?: number; error?: string; retryable?: boolean }> {
 
     const resp = await this.fetch(`${CHECKOUT_BASE}/checkout/${checkoutId}/place_order`, {
       method: 'POST',
@@ -399,6 +404,14 @@ export class CheckoutEngine {
 
     const orderId = data?.order?.id || data?.order_id || ''
     const orderTotal = data?.order?.total_amount || data?.total_amount || undefined
+
+    if (!orderId) {
+      return {
+        ok: false,
+        error: 'Place order returned HTTP 200 but no order ID in response',
+        retryable: false,
+      }
+    }
 
     return { ok: true, orderId, orderTotal }
   }

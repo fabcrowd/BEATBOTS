@@ -535,20 +535,33 @@ await test('Checkout engine — order ID & total parsing from place_order respon
     return { orderId, orderTotal };
   }
 
+  function validatePlaceOrderResponse(data) {
+    const { orderId, orderTotal } = parseOrderResponse(data);
+    if (!orderId) {
+      return { ok: false, error: 'Place order returned HTTP 200 but no order ID in response', retryable: false };
+    }
+    return { ok: true, orderId, orderTotal };
+  }
+
   // Nested form
   const r1 = parseOrderResponse({ order: { id: 'ORD-123456', total_amount: 42.99 } });
   assert.equal(r1.orderId, 'ORD-123456');
   assert.equal(r1.orderTotal, 42.99);
+  assert.ok(validatePlaceOrderResponse({ order: { id: 'ORD-123456', total_amount: 42.99 } }).ok);
 
   // Flat form
   const r2 = parseOrderResponse({ order_id: 'ORD-789', total_amount: 9.99 });
   assert.equal(r2.orderId, 'ORD-789');
   assert.equal(r2.orderTotal, 9.99);
+  assert.ok(validatePlaceOrderResponse({ order_id: 'ORD-789', total_amount: 9.99 }).ok);
 
-  // Empty
+  // Empty body must fail — prevents false success / endless-mode double checkout
   const r3 = parseOrderResponse({});
   assert.equal(r3.orderId, '');
   assert.equal(r3.orderTotal, undefined);
+  const empty = validatePlaceOrderResponse({});
+  assert.equal(empty.ok, false);
+  assert.equal(empty.retryable, false);
 });
 
 // ─── Test: Task runner — retry backoff ────────────────────────────────────────
