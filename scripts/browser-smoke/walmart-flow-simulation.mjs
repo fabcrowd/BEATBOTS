@@ -1323,17 +1323,53 @@ function runWm6PollRecoveryRearmTests() {
   assert.match(WMT_SRC, /wmAtcWaitTimeoutMs/, 'WM-6 missing-atc: ATC wait helper in source');
   assertWm6PollRecoveryRearm(noAtcUrl, noAtcMsg, 'WM-6 missing-atc');
 
+  const hangTightUrl = 'https://www.walmart.com/ip/mock-px/555';
+  const hangTightPage = makePage({
+    pathname: '/ip/mock-px/555',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px' },
+  });
+  assert.ok(wmIsPxPage(hangTightPage), 'WM-6 PX hang-tight: page detected');
+  const hangTightTimeoutMsgs = wmPxTimeoutMessages(hangTightPage, 2000);
+  assert.equal(hangTightTimeoutMsgs.length, 1, 'WM-6 PX hang-tight: timeout sends NAV_FAILED');
+  assert.equal(hangTightTimeoutMsgs[0].url, hangTightUrl, 'WM-6 PX hang-tight: NAV_FAILED url');
+  assertWm6PollRecoveryRearm(
+    hangTightUrl,
+    { type: 'WALMART_NAV_FAILED', url: hangTightUrl },
+    'WM-6 PX hang-tight'
+  );
+
   const pxUrl = 'https://www.walmart.com/ip/mock-px-captcha/556';
   const pxPage = makePage({
     pathname: '/ip/mock-px-captcha/556',
     elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
   });
-  assert.ok(wmIsPxPage(pxPage), 'WM-6 PX: captcha page detected');
+  assert.ok(wmIsPxPage(pxPage), 'WM-6 PX captcha: page detected');
   const pxTimeoutMsgs = wmPxTimeoutMessages(pxPage, 120000);
-  assert.equal(pxTimeoutMsgs.length, 1, 'WM-6 PX: timeout sends NAV_FAILED');
-  const pxMsg = { type: 'WALMART_NAV_FAILED', url: pxUrl };
+  assert.equal(pxTimeoutMsgs.length, 1, 'WM-6 PX captcha: timeout sends NAV_FAILED');
+  assertWm6PollRecoveryRearm(
+    pxUrl,
+    { type: 'WALMART_NAV_FAILED', url: pxUrl },
+    'WM-6 PX captcha'
+  );
+
+  const pxBlockUrl = 'https://www.walmart.com/ip/mock-px-block/557';
+  const pxBlockPage = makePage({
+    pathname: '/ip/mock-px-block/557',
+    bodyText: 'Access denied',
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px-block' },
+    elements: [{ selectors: ['[class*="px-block"]'], tag: 'div' }],
+  });
+  assert.ok(wmIsPxPage(pxBlockPage), 'WM-6 PX block: page detected');
+  const pxBlockTimeoutMsgs = wmPxTimeoutMessages(pxBlockPage, 2000);
+  assert.equal(pxBlockTimeoutMsgs.length, 1, 'WM-6 PX block: timeout sends NAV_FAILED');
+  assert.equal(pxBlockTimeoutMsgs[0].url, pxBlockUrl, 'WM-6 PX block: NAV_FAILED url');
+  assertWm6PollRecoveryRearm(
+    pxBlockUrl,
+    { type: 'WALMART_NAV_FAILED', url: pxBlockUrl },
+    'WM-6 PX block'
+  );
   assert.match(WMT_SRC, /wmPxTimeoutMs/, 'WM-6 PX: timeout helper in source');
-  assertWm6PollRecoveryRearm(pxUrl, pxMsg, 'WM-6 PX timeout');
 }
 
 /**
