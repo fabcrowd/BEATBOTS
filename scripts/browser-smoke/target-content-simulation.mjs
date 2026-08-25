@@ -740,6 +740,175 @@ function runTgt4SigninLivePollCycleTests() {
 }
 
 /**
+ * TGT-1: product-page live poll cycle — reload + ATC_SUCCESS/NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 tgt-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runTgt1LivePollCycleTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-product-live/A-880001';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  const productPage = makePage({ pathname: '/p/mock-product-live/A-880001', elements: [] });
+  let initCycles = 0;
+  const simulateProductReload = () => {
+    initCycles += 1;
+    const result = tgtDecideMissingAtc(productPage, monitorProductUrl);
+    assert.equal(result.action, 'atc_unavailable', 'TGT-1: product reload missing ATC path');
+    const navFail = result.messages.find((m) => m.type === 'NAV_FAILED');
+    assert.ok(navFail, 'TGT-1: product reload sends NAV_FAILED');
+    assert.equal(navFail.url, monitorProductUrl, 'TGT-1: product NAV_FAILED uses monitor productUrl');
+    return navFail;
+  };
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-1: product live poll must not arm sacred lock on start');
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateProductReload());
+  assert.equal(inQueueUrls.size, 0, 'TGT-1: product missing ATC must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'TGT-1: product missing ATC releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateProductReload());
+  assert.equal(initCycles, 2, 'TGT-1: product reload must re-trigger missing ATC detection');
+  assert.equal(inQueueUrls.size, 0, 'TGT-1: product reload during live poll must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'TGT-1: product reload missing ATC releases navigationLock');
+
+  const liveSignalTypes = ['ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: 'NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `TGT-1: product live poll cycle ${i + 1} NAV_FAILED releases navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `TGT-1: product live poll cycle ${i + 1} allows poll retry after NAV_FAILED (no sacred lock)`
+      );
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-1: product live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `TGT-1: product live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-1: product live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'TGT-1: product navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-1: contrast WM-5 — sacred lock would block poll; product missing ATC does not arm it'
+  );
+}
+
+/**
+ * TGT-4: checkout review live poll cycle — reload preserves manual stop + no sacred lock.
+ * Parity with FIX-3 tgt4-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runTgt4ReviewLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-review-live/A-880002';
+  const checkoutTabUrl = 'https://www.target.com/checkout/review';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout/review',
+    elements: [
+      {
+        selectors: ['[data-test="placeOrderButton"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review live poll must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'TGT-4: checkout tab URL must not be sacred lock key');
+
+  let reviewCycles = 0;
+  const simulateReviewReload = () => {
+    reviewCycles += 1;
+    const result = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(result.path, 'review_manual', 'TGT-4: review reload must preserve manual stop');
+    assert.ok(result.actions.includes('review_manual_stop'), 'TGT-4: review reload must not click Place Order');
+    assert.equal(reviewPage.elements[0].clicked, false, 'TGT-4: Place Order must remain unclicked after reload');
+    return result;
+  };
+
+  simulateReviewReload();
+  simulateReviewReload();
+  assert.equal(reviewCycles, 2, 'TGT-4: checkout reload must re-detect review step');
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: 'NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `TGT-4 review live poll cycle ${i + 1} NAV_FAILED releases navigationLock`
+      );
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-4 review live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `TGT-4 review live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    const reviewResult = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(reviewResult.path, 'review_manual', `TGT-4 review live poll cycle ${i + 1} preserves manual stop`);
+    assert.equal(
+      reviewPage.elements[0].clicked,
+      false,
+      `TGT-4 review live poll cycle ${i + 1} must not auto-click Place Order`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'TGT-4 review navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4 review: contrast WM-5 — sacred lock would block poll; review step does not arm it'
+  );
+}
+
+/**
  * TGT-4: cart checkout-missing live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 tgt-cart-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -821,18 +990,20 @@ function main() {
   testTgt4Source();
   testTgt1MissingAtcElement();
   testTgt1MissingAtcCrossPagePollRecovery();
+  runTgt1LivePollCycleTests();
   testTgt4ManualReviewStop();
   testTgt4CartCheckoutMissing();
   testTgt4CartCrossPageCheckoutMissing();
   testTgt4CheckoutSpaCrossPagePollRecovery();
   runTgt4PollRecoveryRearmTests();
   runTgt4CheckoutSpaLivePollCycleTests();
+  runTgt4ReviewLivePollCycleTests();
   runTgt4CartLivePollCycleTests();
   testTgt4CheckoutSigninGate();
   runTgt4SigninLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, manual review stop, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, cart checkout-missing, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
