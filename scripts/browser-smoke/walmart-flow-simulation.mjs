@@ -31,6 +31,7 @@ const WM_SEL = {
   viewCart: 'a[href="/cart"][data-automation-id], button[data-automation-id="go-to-cart-btn"]',
   checkout: '[data-automation-id="checkout-btn"], a[href^="/checkout"]',
   placeOrder: '[data-automation-id="place-order-btn"]',
+  price: '[itemprop="price"], [data-automation-id="product-price"], [class*="price-characteristic"]',
 };
 
 /** Minimal DOM stub for offline wmGetPageType / handler simulations. */
@@ -44,11 +45,16 @@ function makePage({ pathname, bodyText = '', elements = [], docAttrs = {} }) {
   const all = elements.map((el) => ({
     tag: el.tag || 'button',
     text: el.text || '',
+    content: el.content,
     disabled: !!el.disabled,
     ariaDisabled: el.ariaDisabled,
     visible: el.visible !== false,
     href: el.href,
     clicked: false,
+    getAttribute(name) {
+      if (name === 'content' && this.content != null) return String(this.content);
+      return null;
+    },
     click() {
       this.clicked = true;
     },
@@ -163,6 +169,55 @@ function wmPxTimeoutMessages(page, elapsedMs) {
   if (elapsed < timeoutMs) return [];
   if (!wmIsPxPage(page)) return [];
   return [{ type: 'WALMART_NAV_FAILED', url: `https://www.walmart.com${page.pathname}` }];
+}
+
+/** Mirrors wmGetCurrentPrice() — walmart-content.js (DOM path for fixture simulation). */
+function wmGetCurrentPrice(page, liveOnly = false) {
+  void liveOnly;
+  for (const sel of WM_SEL.price.split(', ')) {
+    const el = page.querySelector(sel);
+    if (!el) continue;
+    const content = el.getAttribute?.('content');
+    if (content) {
+      const n = parseFloat(content);
+      if (!Number.isNaN(n)) return n;
+    }
+    const text = (el.text || '').replace(/[^0-9.]/g, '');
+    if (text) {
+      const n = parseFloat(text);
+      if (!Number.isNaN(n)) return n;
+    }
+  }
+  return null;
+}
+
+/** Mirrors wmPriceGuardTimeoutMs() — walmart-content.js */
+function wmPriceGuardTimeoutMs(page) {
+  const root = page.documentElement;
+  const override = root?.getAttribute('data-tch-price-guard-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 45 * 60 * 1000;
+}
+
+/**
+ * Mirrors wmWaitForPriceDrop timeout branch — NAV_FAILED only if price still above max after timeout.
+ * @param {ReturnType<typeof makePage>} page
+ * @param {{ walmartMaxPrice?: number|string, productUrl?: string }} settings
+ * @param {string} productUrl
+ * @param {number} [elapsedMs] defaults to wmPriceGuardTimeoutMs(page)
+ */
+function wmPriceGuardTimeoutMessages(page, settings, productUrl, elapsedMs) {
+  const maxPrice = parseFloat(settings.walmartMaxPrice) || 0;
+  if (maxPrice <= 0) return [];
+  const timeoutMs = wmPriceGuardTimeoutMs(page);
+  const elapsed = elapsedMs ?? timeoutMs;
+  if (elapsed < timeoutMs) return [];
+  const currentPrice = wmGetCurrentPrice(page, true);
+  if (currentPrice !== null && currentPrice <= maxPrice) return [];
+  return [{ type: 'WALMART_NAV_FAILED', url: productUrl }];
 }
 
 /** Mirrors wmHasQueueIndicators() — walmart-content.js */
@@ -1370,6 +1425,37 @@ function runWm6PollRecoveryRearmTests() {
     'WM-6 PX block'
   );
   assert.match(WMT_SRC, /wmPxTimeoutMs/, 'WM-6 PX: timeout helper in source');
+
+  const priceGuardUrl = 'https://www.walmart.com/ip/mock-price-guard-timeout/991';
+  const priceGuardPage = makePage({
+    pathname: '/ip/mock-price-guard-timeout/991',
+    docAttrs: { 'data-tch-price-guard-timeout-ms': '750' },
+    elements: [
+      {
+        selectors: ['[itemprop="price"]'],
+        tag: 'span',
+        text: '$99.99',
+        content: '99.99',
+      },
+    ],
+  });
+  const priceGuardMsgs = wmPriceGuardTimeoutMessages(
+    priceGuardPage,
+    { walmartMaxPrice: 50, productUrl: priceGuardUrl },
+    priceGuardUrl,
+    750
+  );
+  assert.equal(priceGuardMsgs.length, 1, 'WM-6 price-guard: timeout sends NAV_FAILED');
+  assertWm6PollRecoveryRearm(
+    priceGuardUrl,
+    priceGuardMsgs[0],
+    'WM-6 price-guard'
+  );
+
+  const checkoutSpaUrl = 'https://www.walmart.com/ip/mock-checkout-spa/992';
+  const checkoutSpaMsg = { type: 'WALMART_NAV_FAILED', url: checkoutSpaUrl };
+  assert.match(WMT_SRC, /wmHandleCheckout timed out/, 'WM-6 checkout SPA: timeout log in source');
+  assertWm6PollRecoveryRearm(checkoutSpaUrl, checkoutSpaMsg, 'WM-6 checkout SPA');
 }
 
 /**
@@ -1530,6 +1616,183 @@ function runWm6CheckoutSpaLivePollCycleTests() {
   assert.ok(
     bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'WM-6: contrast WM-5 — sacred lock would block poll; checkout SPA timeout does not arm it'
+  );
+}
+
+/**
+ * WM-6: price-guard timeout — NAV_FAILED after wait cap, no sacred lock, no queue wait.
+ * Parity with FIX-3 wm6-price-guard-timeout (fixture-e2e has browser coverage).
+ */
+function runWm6PriceGuardTimeoutTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(WMT_SRC, /wmPriceGuardTimeoutMs/, 'WM-6 price-guard: timeout helper in source');
+  assert.match(
+    WMT_SRC,
+    /Price guard wait — no sacred lock/,
+    'WM-6 price-guard: no-sacred-lock log in source'
+  );
+  assert.match(
+    WMT_SRC,
+    /Price guard wait timed out/,
+    'WM-6 price-guard: timeout log in source'
+  );
+
+  const productUrl = 'https://www.walmart.com/ip/mock-price-guard-timeout/991';
+  const normUrl = normalizeProductUrl(productUrl);
+  const settings = { walmartMaxPrice: 50, productUrl, currentPrice: 99.99 };
+  const priceGuardPage = makePage({
+    pathname: '/ip/mock-price-guard-timeout/991',
+    bodyText: 'Listed above max price',
+    docAttrs: {
+      'data-tch-fixture': 'walmart-product-price-guard-timeout',
+      'data-tch-price-guard-timeout-ms': '750',
+    },
+    elements: [
+      {
+        selectors: ['[itemprop="price"]'],
+        tag: 'span',
+        text: '$99.99',
+        content: '99.99',
+      },
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+      },
+    ],
+  });
+
+  const entry = wmDecideProductPageEntry(priceGuardPage, settings);
+  assert.equal(entry.action, 'price_guard_wait', 'WM-6 price-guard: above max enters price guard wait');
+  assert.ok(
+    !entry.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-6 price-guard: must not arm sacred lock on entry'
+  );
+  assert.equal(wmGetCurrentPrice(priceGuardPage, true), 99.99, 'WM-6 price-guard: reads DOM price');
+  assert.equal(wmPriceGuardTimeoutMs(priceGuardPage), 750, 'WM-6 price-guard: reads timeout override');
+
+  assert.deepEqual(
+    wmPriceGuardTimeoutMessages(priceGuardPage, settings, productUrl, 749),
+    [],
+    'WM-6 price-guard: no NAV_FAILED before timeout'
+  );
+  const timeoutMsgs = wmPriceGuardTimeoutMessages(priceGuardPage, settings, productUrl, 750);
+  assert.equal(timeoutMsgs.length, 1, 'WM-6 price-guard: timeout sends NAV_FAILED');
+  assert.equal(timeoutMsgs[0].type, 'WALMART_NAV_FAILED', 'WM-6 price-guard: NAV_FAILED message type');
+  assert.equal(timeoutMsgs[0].url, productUrl, 'WM-6 price-guard: NAV_FAILED uses productUrl');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normUrl]);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, timeoutMsgs[0]);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 price-guard: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'WM-6 price-guard: timeout releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'WM-6 price-guard: poll may retry after timeout when not in queue'
+  );
+
+  const clearedPage = makePage({
+    pathname: '/ip/mock-price-guard-cleared/992',
+    docAttrs: { 'data-tch-price-guard-timeout-ms': '750' },
+    elements: [
+      {
+        selectors: ['[itemprop="price"]'],
+        tag: 'span',
+        text: '$45.00',
+        content: '45.00',
+      },
+    ],
+  });
+  assert.deepEqual(
+    wmPriceGuardTimeoutMessages(clearedPage, settings, productUrl, 750),
+    [],
+    'WM-6 price-guard: no NAV_FAILED when price drops before timeout'
+  );
+}
+
+/**
+ * WM-6: price-guard live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 wm6-live-poll-cycle on price-guard route (fixture-e2e has browser coverage).
+ */
+function runWm6PriceGuardLivePollCycleTests() {
+  const productUrl = 'https://www.walmart.com/ip/mock-price-guard-timeout/991';
+  const normUrl = normalizeProductUrl(productUrl);
+  const settings = { walmartMaxPrice: 50, productUrl };
+  const priceGuardPage = makePage({
+    pathname: '/ip/mock-price-guard-timeout/991',
+    docAttrs: { 'data-tch-price-guard-timeout-ms': '750' },
+    elements: [
+      {
+        selectors: ['[itemprop="price"]'],
+        tag: 'span',
+        text: '$99.99',
+        content: '99.99',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 price-guard live poll: must not arm sacred lock on start');
+
+  let timeoutCycles = 0;
+  const simulatePriceGuardTimeout = () => {
+    timeoutCycles += 1;
+    const msgs = wmPriceGuardTimeoutMessages(priceGuardPage, settings, productUrl, 750);
+    assert.equal(msgs.length, 1, 'WM-6 price-guard live poll: timeout sends NAV_FAILED');
+    return msgs[0];
+  };
+
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulatePriceGuardTimeout());
+  assert.equal(inQueueUrls.size, 0, 'WM-6 price-guard live poll: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'WM-6 price-guard live poll: timeout releases navigationLock');
+
+  navigationLock.add(normUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, simulatePriceGuardTimeout());
+  assert.equal(timeoutCycles, 2, 'WM-6 price-guard live poll: reload must re-trigger timeout');
+  assert.equal(inQueueUrls.size, 0, 'WM-6 price-guard live poll: reload must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'WM-6 price-guard live poll: reload timeout releases navigationLock');
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: productUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `WM-6 price-guard live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normUrl),
+        `WM-6 price-guard live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `WM-6 price-guard live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normUrl);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 price-guard live poll: must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normUrl),
+    'WM-6 price-guard live poll: navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'WM-6 price-guard live poll: contrast WM-5 — sacred lock would block poll; price-guard timeout does not arm it'
   );
 }
 
@@ -2998,14 +3261,16 @@ async function main() {
   runWm6PollRecoveryRearmTests();
   await runWm6CartCheckoutMissingTests();
   await runWm6CartCrossPageCheckoutMissingTests();
-  await   runWm6CartLivePollCycleTests();
+  await runWm6CartLivePollCycleTests();
   runWm6CheckoutSpaLivePollCycleTests();
+  runWm6PriceGuardTimeoutTests();
+  runWm6PriceGuardLivePollCycleTests();
   runWm6PxTimeoutOverrideTests();
   runWm6PxLivePollCycleTests();
   runWm6PxFixtureRoutesLivePollCycleTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, cart live poll cycle, checkout SPA live poll cycle, price-guard timeout, price-guard live poll cycle, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, offerId ready'
   );
 }
 
