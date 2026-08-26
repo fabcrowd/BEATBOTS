@@ -1484,6 +1484,89 @@ function runSc6CheckoutSpaLivePollCycleTests() {
 }
 
 /**
+ * SC-6: cross-page checkout SPA live poll cycle — tab on /checkout/spa-stall-cross,
+ * monitor keys distinct productUrl; reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 sc6-checkout-spa-live-poll-cycle on /checkout/spa-stall-cross (fixture-e2e has browser coverage).
+ */
+function runSc6CheckoutSpaCrossLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout/spa-stall-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cross-page checkout SPA live poll must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'SC-6: cross-page checkout SPA tab URL must not be sacred lock key'
+  );
+
+  let timeoutCycles = 0;
+  const simulateCheckoutSpaTimeout = () => {
+    timeoutCycles += 1;
+    const navFail = { type: 'SAMS_NAV_FAILED', url: monitorProductUrl };
+    assert.equal(navFail.url, monitorProductUrl, 'SC-6: cross-page checkout SPA NAV_FAILED uses monitor productUrl');
+    assert.notEqual(
+      normalizeProductUrl(navFail.url),
+      normCheckoutTabUrl,
+      'SC-6: cross-page checkout SPA NAV_FAILED must not key checkout tab URL'
+    );
+    return navFail;
+  };
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cross-page checkout SPA timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-6: cross-page checkout SPA timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(timeoutCycles, 2, 'SC-6: cross-page checkout SPA reload must re-trigger timeout');
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cross-page checkout SPA reload during live poll must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-6: cross-page checkout SPA reload timeout releases navigationLock');
+  assert.match(SC_SRC, /scHandleCheckout timed out/, 'SC-6: cross-page checkout SPA timeout log in source');
+
+  const navFailTypes = ['SAMS_NAV_FAILED', 'NAV_FAILED', 'SAMS_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-6: cross-page checkout SPA live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-6: cross-page checkout SPA live poll cycle ${i + 1} navigationLock alone must not imply sacred lock`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-6: cross-page checkout SPA live poll cycle ${i + 1} allows poll retry (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-6: cross-page checkout SPA live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-6: cross-page checkout SPA navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-6: contrast WM-5 — sacred lock would block poll; cross-page Sam checkout SPA timeout does not arm it'
+  );
+}
+
+/**
  * SC-6: cart checkout-missing live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 sc6-cart-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -1684,10 +1767,11 @@ function main() {
   runSc4PollRecoveryRearmTests();
   runSc4LivePollCycleTests();
   runSc6CheckoutSpaLivePollCycleTests();
+  runSc6CheckoutSpaCrossLivePollCycleTests();
   runSc6CartLivePollCycleTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-4 poll recovery rearm + live poll cycle, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-4 poll recovery rearm + live poll cycle, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 

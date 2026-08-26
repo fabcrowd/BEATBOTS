@@ -503,6 +503,88 @@ function runTgt4CheckoutSpaLivePollCycleTests() {
   );
 }
 
+/**
+ * TGT-4: cross-page checkout SPA live poll cycle — tab on /checkout/spa-stall-cross,
+ * monitor keys distinct productUrl; reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 tgt4-checkout-spa-live-poll-cycle on /checkout/spa-stall-cross (fixture-e2e has browser coverage).
+ */
+function runTgt4CheckoutSpaCrossLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092';
+  const checkoutTabUrl = 'https://www.target.com/checkout/spa-stall-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page checkout SPA live poll must not arm sacred lock on start');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'TGT-4: cross-page checkout SPA tab URL must not be sacred lock key'
+  );
+
+  let timeoutCycles = 0;
+  const simulateCheckoutSpaTimeout = () => {
+    timeoutCycles += 1;
+    const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+    assert.equal(navFail.url, monitorProductUrl, 'TGT-4: cross-page checkout SPA NAV_FAILED uses monitor productUrl');
+    assert.notEqual(
+      normalizeProductUrl(navFail.url),
+      normCheckoutTabUrl,
+      'TGT-4: cross-page checkout SPA NAV_FAILED must not key checkout tab URL'
+    );
+    return navFail;
+  };
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page checkout SPA timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'TGT-4: cross-page checkout SPA timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateCheckoutSpaTimeout());
+  assert.equal(timeoutCycles, 2, 'TGT-4: cross-page checkout SPA reload must re-trigger timeout');
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page checkout SPA reload during live poll must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'TGT-4: cross-page checkout SPA reload timeout releases navigationLock');
+
+  const navFailTypes = ['NAV_FAILED', 'NAV_FAILED', 'NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-4: cross-page checkout SPA live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `TGT-4: cross-page checkout SPA live poll cycle ${i + 1} navigationLock alone must not imply sacred lock`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `TGT-4: cross-page checkout SPA live poll cycle ${i + 1} allows poll retry (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page checkout SPA live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'TGT-4: cross-page checkout SPA navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4: contrast WM-5 — sacred lock would block poll; cross-page checkout SPA timeout does not arm it'
+  );
+}
+
 /** Mirrors hasCheckoutAuthGate + getCheckoutStep signin branch. */
 function tgtDetectCheckoutStep(page, settings = {}) {
   if (page.querySelector('[data-test="placeOrderButton"]') || tgtFindByText(page, 'place order')) {
@@ -1080,6 +1162,7 @@ function main() {
   testTgt4CheckoutSpaCrossPagePollRecovery();
   runTgt4PollRecoveryRearmTests();
   runTgt4CheckoutSpaLivePollCycleTests();
+  runTgt4CheckoutSpaCrossLivePollCycleTests();
   runTgt4ReviewLivePollCycleTests();
   runTgt4CartLivePollCycleTests();
   runTgt4CartCrossLivePollCycleTests();
@@ -1087,7 +1170,7 @@ function main() {
   runTgt4SigninLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
