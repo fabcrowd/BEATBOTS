@@ -822,6 +822,120 @@ function runTgt4SigninLivePollCycleTests() {
 }
 
 /**
+ * TGT-4: cross-page signin live poll cycle — tab on /checkout/signin-gate-cross,
+ * monitor keys distinct productUrl; reload + repeated NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
+ * Parity with FIX-3 tgt-signin-live-poll-cycle on /checkout/signin-gate-cross (fixture-e2e has browser coverage).
+ */
+function runTgt4SigninCrossLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-signin-cross-monitor/A-880097';
+  const signinTabUrl = 'https://www.target.com/checkout/signin-gate-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normSigninTabUrl = normalizeProductUrl(signinTabUrl);
+
+  const signinPage = makePage({
+    pathname: '/checkout/signin-gate-cross',
+    elements: [
+      {
+        selectors: ['[data-test="authModal"]'],
+        tag: 'div',
+        text: 'Sign in to continue checkout',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page signin live poll must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normSigninTabUrl), 'TGT-4: cross-page signin tab URL must not be sacred lock key');
+
+  let signinDetectCycles = 0;
+  const simulateSigninReload = () => {
+    signinDetectCycles += 1;
+    const step = tgtDetectCheckoutStep(signinPage);
+    assert.equal(step, 'signin', 'TGT-4: cross-page signin reload must re-detect signin gate');
+    const pending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, step);
+    assert.equal(pending.path, 'signin_pending', 'TGT-4: cross-page signin reload must stay on pending step');
+    assert.equal(pending.reachedReview, false, 'TGT-4: cross-page signin reload must not reach review');
+    assert.equal(pending.messages.length, 0, 'TGT-4: cross-page signin reload must not send NAV_FAILED while waiting');
+    return pending;
+  };
+
+  simulateSigninReload();
+  simulateSigninReload();
+  assert.equal(signinDetectCycles, 2, 'TGT-4: cross-page signin reload must re-trigger signin detection');
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+      assert.equal(
+        navFail.url,
+        monitorProductUrl,
+        'TGT-4: cross-page signin live poll NAV_FAILED uses monitor productUrl'
+      );
+      assert.notEqual(
+        normalizeProductUrl(navFail.url),
+        normSigninTabUrl,
+        'TGT-4: cross-page signin live poll NAV_FAILED must not key signin tab URL'
+      );
+      bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `TGT-4: cross-page signin live poll cycle ${i + 1} NAV_FAILED releases navigationLock`
+      );
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-4: cross-page signin live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normSigninTabUrl),
+      `TGT-4: cross-page signin live poll cycle ${i + 1} must not sacred-lock signin tab`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `TGT-4: cross-page signin live poll cycle ${i + 1} navigationLock alone must not imply sacred lock`
+      );
+    }
+    const pending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, 'signin');
+    assert.equal(pending.reachedReview, false, `TGT-4: cross-page signin live poll cycle ${i + 1} must not reach review`);
+    assert.equal(
+      pending.scheduledRetry,
+      false,
+      `TGT-4: cross-page signin live poll cycle ${i + 1} must not schedule checkout retry`
+    );
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `TGT-4: cross-page signin live poll cycle ${i + 1} allows poll retry after NAV_FAILED (no sacred lock)`
+      );
+    }
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page signin live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'TGT-4: cross-page signin navigationLock alone must not imply sacred lock after poll wait'
+  );
+  assert.ok(
+    !inQueueUrls.has(normSigninTabUrl),
+    'TGT-4: cross-page signin live poll signin tab must not be sacred lock key after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4: contrast WM-5 — sacred lock would block poll; cross-page signin gate does not arm it'
+  );
+}
+
+/**
  * TGT-1: product-page live poll cycle — reload + ATC_SUCCESS/NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 tgt-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -1168,9 +1282,10 @@ function main() {
   runTgt4CartCrossLivePollCycleTests();
   testTgt4CheckoutSigninGate();
   runTgt4SigninLivePollCycleTests();
+  runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
