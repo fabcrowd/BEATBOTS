@@ -2111,9 +2111,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     const normMonitorUrl = normalizeProductUrl(monitorUrl);
     const normPageUrl = normalizeProductUrl(pageUrl);
     const isCrossPageSignin = Boolean(
-      route.pollRecoveryProductPath &&
-        route.monitorProductPath &&
-        route.path !== route.monitorProductPath
+      route.monitorProductPath && route.path !== route.monitorProductPath
     );
     const navFailedUrl = isCrossPageSignin ? monitorUrl : pageUrl;
 

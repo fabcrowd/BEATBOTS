@@ -63,6 +63,16 @@ const FIXTURE_MARKERS = {
       'poll recovery',
     ],
   },
+  targetProductSigninRecovery: {
+    fixtureId: 'target-product-signin-recovery',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-signin-recovery"',
+      'data-tch-path="/p/mock-signin-recovery/A-880099"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   targetCheckoutSpaTimeout: {
     fixtureId: 'target-checkout-spa-timeout',
     journeys: ['TGT-4'],

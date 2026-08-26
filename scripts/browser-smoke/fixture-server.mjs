@@ -40,11 +40,22 @@ export const FIXTURE_E2E_ROUTES = [
     initLog: '[TCH] init',
     journey: 'TGT-4',
     invariants: [
+      'no-sacred-lock',
       'tgt-checkout-signin',
       'tgt-signin-live-poll-cycle',
+      'tgt-poll-recovery-rearm',
       'mon2-live-poll-cycle',
     ],
     monitorProductPath: '/p/mock-product',
+    pollRecoveryProductPath: '/p/mock-signin-recovery/A-880099',
+  },
+  {
+    host: 'www.target.com',
+    path: '/p/mock-signin-recovery/A-880099',
+    file: MOCK_URLS.targetProductSigninRecovery,
+    initLog: '[TCH] init',
+    journey: 'TGT-4',
+    invariants: [],
   },
   {
     host: 'www.target.com',
