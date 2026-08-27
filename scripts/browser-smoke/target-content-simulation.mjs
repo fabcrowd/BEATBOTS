@@ -1176,6 +1176,240 @@ function runTgt4ReviewLivePollCycleTests() {
 }
 
 /**
+ * TGT-4: checkout review poll recovery — tab on /checkout, monitor keys /p/mock-product.
+ * Parity with FIX-3 tgt-poll-recovery-rearm on /checkout (fixture-e2e has browser coverage).
+ */
+function testTgt4ReviewPagePollRecovery() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const recoveryProductUrl = 'https://www.target.com/p/mock-review-recovery/A-880100';
+  const reviewTabUrl = 'https://www.target.com/checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normReviewTabUrl = normalizeProductUrl(reviewTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout',
+    elements: [{ selectors: ['[data-test="placeOrderButton"]'], tag: 'button', text: 'Place order' }],
+  });
+  const reviewResult = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+  assert.equal(reviewResult.path, 'review_manual', 'TGT-4 review: manual stop at review step');
+  assert.ok(reviewResult.actions.includes('review_manual_stop'), 'TGT-4 review: must not click Place Order');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review: must not arm sacred lock at review');
+  assert.ok(
+    !inQueueUrls.has(normReviewTabUrl),
+    'TGT-4 review: review tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !navigationLock.has(normReviewTabUrl),
+    'TGT-4 review: review tab URL must not be navigationLock key at review'
+  );
+
+  const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'TGT-4 review: live poll NAV_FAILED uses monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normReviewTabUrl,
+    'TGT-4 review: NAV_FAILED must not key review tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review: NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'TGT-4 review: NAV_FAILED releases navigationLock on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'TGT-4 review: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review: poll recovery must not arm sacred lock');
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'TGT-4 review: NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
+/** TGT-4: cross-page review poll recovery — tab on /checkout/review-cross, monitor keys distinct productUrl. */
+function testTgt4ReviewCrossPagePollRecovery() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-review-cross-monitor/A-880101';
+  const recoveryProductUrl = 'https://www.target.com/p/mock-review-cross-recovery/A-880102';
+  const reviewTabUrl = 'https://www.target.com/checkout/review-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normReviewTabUrl = normalizeProductUrl(reviewTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout/review-cross',
+    elements: [{ selectors: ['[data-test="placeOrderButton"]'], tag: 'button', text: 'Place order' }],
+  });
+  const reviewResult = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+  assert.equal(reviewResult.path, 'review_manual', 'TGT-4 review cross: manual stop at review step');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review cross: must not arm sacred lock at review');
+  assert.ok(
+    !inQueueUrls.has(normReviewTabUrl),
+    'TGT-4 review cross: review tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !navigationLock.has(normReviewTabUrl),
+    'TGT-4 review cross: review tab URL must not be navigationLock key at review'
+  );
+
+  const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'TGT-4 review cross: live poll NAV_FAILED uses monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normReviewTabUrl,
+    'TGT-4 review cross: NAV_FAILED must not key review tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review cross: NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'TGT-4 review cross: NAV_FAILED releases navigationLock on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'TGT-4 review cross: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 review cross: poll recovery must not arm sacred lock');
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'TGT-4 review cross: NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
+/**
+ * TGT-4: cross-page review live poll cycle — tab on /checkout/review-cross,
+ * monitor keys distinct productUrl; reload + repeated NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
+ * Parity with FIX-3 tgt4-live-poll-cycle on /checkout/review-cross (fixture-e2e has browser coverage).
+ */
+function runTgt4ReviewCrossLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-review-cross-monitor/A-880101';
+  const reviewTabUrl = 'https://www.target.com/checkout/review-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normReviewTabUrl = normalizeProductUrl(reviewTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout/review-cross',
+    elements: [
+      {
+        selectors: ['[data-test="placeOrderButton"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page review live poll must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normReviewTabUrl), 'TGT-4: cross-page review tab URL must not be sacred lock key');
+
+  let reviewCycles = 0;
+  const simulateReviewReload = () => {
+    reviewCycles += 1;
+    const result = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(result.path, 'review_manual', 'TGT-4: cross-page review reload must preserve manual stop');
+    assert.ok(result.actions.includes('review_manual_stop'), 'TGT-4: cross-page review reload must not click Place Order');
+    assert.equal(reviewPage.elements[0].clicked, false, 'TGT-4: Place Order must remain unclicked after cross-page review reload');
+    return result;
+  };
+
+  simulateReviewReload();
+  simulateReviewReload();
+  assert.equal(reviewCycles, 2, 'TGT-4: cross-page review reload must re-detect review step');
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'NAV_FAILED') {
+      const navFail = { type: 'NAV_FAILED', url: monitorProductUrl };
+      assert.equal(
+        navFail.url,
+        monitorProductUrl,
+        'TGT-4: cross-page review live poll NAV_FAILED uses monitor productUrl'
+      );
+      assert.notEqual(
+        normalizeProductUrl(navFail.url),
+        normReviewTabUrl,
+        'TGT-4: cross-page review live poll NAV_FAILED must not key review tab URL'
+      );
+      bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `TGT-4: cross-page review live poll cycle ${i + 1} NAV_FAILED releases navigationLock`
+      );
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-4: cross-page review live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normReviewTabUrl),
+      `TGT-4: cross-page review live poll cycle ${i + 1} must not sacred-lock review tab`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `TGT-4: cross-page review live poll cycle ${i + 1} navigationLock alone must not imply sacred lock`
+      );
+    }
+    const reviewResult = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(reviewResult.path, 'review_manual', `TGT-4: cross-page review live poll cycle ${i + 1} preserves manual stop`);
+    assert.equal(
+      reviewPage.elements[0].clicked,
+      false,
+      `TGT-4: cross-page review live poll cycle ${i + 1} must not auto-click Place Order`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4: cross-page review live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'TGT-4: cross-page review navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4: cross-page review — contrast WM-5 — sacred lock would block poll; review step does not arm it'
+  );
+}
+
+/**
  * TGT-4: cart checkout-missing live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 tgt-cart-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -1349,6 +1583,9 @@ function main() {
   runTgt4CheckoutSpaLivePollCycleTests();
   runTgt4CheckoutSpaCrossLivePollCycleTests();
   runTgt4ReviewLivePollCycleTests();
+  testTgt4ReviewPagePollRecovery();
+  runTgt4ReviewCrossLivePollCycleTests();
+  testTgt4ReviewCrossPagePollRecovery();
   runTgt4CartLivePollCycleTests();
   runTgt4CartCrossLivePollCycleTests();
   testTgt4CheckoutSigninGate();
@@ -1357,7 +1594,7 @@ function main() {
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 

@@ -73,6 +73,45 @@ const FIXTURE_MARKERS = {
       'poll recovery',
     ],
   },
+  targetCheckoutReviewCross: {
+    fixtureId: 'target-checkout-review-cross',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-checkout-review-cross"',
+      'data-tch-path="/checkout/review-cross"',
+      'data-test="placeOrderButton"',
+      'monitor keys product',
+    ],
+  },
+  targetProductReviewRecovery: {
+    fixtureId: 'target-product-review-recovery',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-review-recovery"',
+      'data-tch-path="/p/mock-review-recovery/A-880100"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
+  targetProductReviewCrossMonitor: {
+    fixtureId: 'target-product-review-cross-monitor',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-review-cross-monitor"',
+      'data-tch-path="/p/mock-review-cross-monitor/A-880101"',
+      'data-test="shipItButton"',
+    ],
+  },
+  targetProductReviewCrossRecovery: {
+    fixtureId: 'target-product-review-cross-recovery',
+    journeys: ['TGT-4'],
+    markers: [
+      'data-tch-fixture="target-product-review-cross-recovery"',
+      'data-tch-path="/p/mock-review-cross-recovery/A-880102"',
+      'data-tch-atc-wait-ms="750"',
+      'poll recovery',
+    ],
+  },
   targetCheckoutSpaTimeout: {
     fixtureId: 'target-checkout-spa-timeout',
     journeys: ['TGT-4'],
