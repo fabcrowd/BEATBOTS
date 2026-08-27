@@ -310,6 +310,72 @@ function testTgt4CartCrossPageCheckoutMissing() {
 }
 
 /**
+ * TGT-4: cross-page cart poll recovery — tab on /cart/no-checkout-cross, monitor keys distinct productUrl.
+ * Parity with FIX-3 tgt-cart-cross-poll-recovery (fixture-e2e has browser coverage).
+ */
+function testTgt4CartCrossPagePollRecovery() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-cart-cross-monitor/A-880088';
+  const recoveryProductUrl = 'https://www.target.com/p/mock-cart-cross-recovery/A-880089';
+  const cartTabUrl = 'https://www.target.com/cart/no-checkout-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  const cartResult = tgtHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'TGT-4 cart cross: missing checkout path');
+  assert.deepEqual(cartResult.actions, ['checkout_missing'], 'TGT-4 cart cross: checkout_missing action');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 cart cross: must not arm sacred lock at cart');
+  assert.ok(
+    !inQueueUrls.has(normCartTabUrl),
+    'TGT-4 cart cross: cart tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !navigationLock.has(normCartTabUrl),
+    'TGT-4 cart cross: cart tab URL must not be navigationLock key at cart'
+  );
+
+  const navFail = cartResult.messages.find((m) => m.type === 'NAV_FAILED');
+  assert.ok(navFail, 'TGT-4 cart cross: sends NAV_FAILED');
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'TGT-4 cart cross: live poll NAV_FAILED uses monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normCartTabUrl,
+    'TGT-4 cart cross: NAV_FAILED must not key cart tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 cart cross: NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'TGT-4 cart cross: NAV_FAILED releases navigationLock on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'TGT-4 cart cross: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 cart cross: poll recovery must not arm sacred lock');
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'TGT-4 cart cross: NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
+/**
  * TGT-4: cross-page checkout SPA timeout — tab on /checkout/*, NAV_FAILED keys monitor productUrl.
  * Parity with FIX-3 tgt4-checkout-spa-cross-poll-recovery (fixture-e2e has browser coverage).
  */
@@ -1578,6 +1644,7 @@ function main() {
   testTgt4ManualReviewStop();
   testTgt4CartCheckoutMissing();
   testTgt4CartCrossPageCheckoutMissing();
+  testTgt4CartCrossPagePollRecovery();
   testTgt4CheckoutSpaCrossPagePollRecovery();
   runTgt4PollRecoveryRearmTests();
   runTgt4CheckoutSpaLivePollCycleTests();
@@ -1594,7 +1661,7 @@ function main() {
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
