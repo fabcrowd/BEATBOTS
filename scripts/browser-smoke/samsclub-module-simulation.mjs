@@ -1234,6 +1234,105 @@ function runSc3PollRecoveryRearmTests() {
 }
 
 /**
+ * SC-3: disabled-ATC product page live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
+ * Parity with FIX-3 sc5-sc6-live-poll-cycle on /p/mock-fcfs-disabled/792 (fixture-e2e has browser coverage).
+ */
+function runSc3DisabledAtcLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  const disabledPage = makePage({
+    pathname: '/p/mock-fcfs-disabled/792',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-3 disabled-atc live poll: must not arm sacred lock on start');
+  assert.equal(
+    scDecideProductPageEntry(disabledPage).action,
+    'atc_unavailable',
+    'SC-3 disabled-atc live poll: disabled ATC is not immediate queue wait'
+  );
+  assert.equal(
+    scSimulateWaitForDisabledAtc(disabledPage).action,
+    'atc_timeout',
+    'SC-3 disabled-atc live poll: disabled ATC wait ends in timeout'
+  );
+
+  let atcTimeoutCycles = 0;
+  const simulateDisabledAtcTimeout = () => {
+    atcTimeoutCycles += 1;
+    const waitResult = scSimulateWaitForDisabledAtc(disabledPage);
+    const timeoutMsg = waitResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+    assert.ok(timeoutMsg, 'SC-3 disabled-atc live poll: ATC wait timeout sends NAV_FAILED');
+    assert.equal(timeoutMsg.url, monitorProductUrl, 'SC-3 disabled-atc live poll: NAV_FAILED uses monitor productUrl');
+    return timeoutMsg;
+  };
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateDisabledAtcTimeout());
+  assert.equal(inQueueUrls.size, 0, 'SC-3 disabled-atc live poll: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-3 disabled-atc live poll: timeout releases navigationLock');
+  assert.match(SC_SRC, /FCFS restock wait/, 'SC-3 disabled-atc live poll: restock wait log in source');
+  assert.ok(!disabledPage.elements[0].clicked, 'SC-3 disabled-atc live poll: must not click disabled ATC');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, simulateDisabledAtcTimeout());
+  assert.equal(atcTimeoutCycles, 2, 'SC-3 disabled-atc live poll: reload must re-trigger ATC wait timeout');
+  assert.equal(inQueueUrls.size, 0, 'SC-3 disabled-atc live poll: reload must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-3 disabled-atc live poll: reload timeout releases navigationLock');
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: liveSignalTypes[i],
+        url: monitorProductUrl,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-3 disabled-atc live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-3 disabled-atc live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-3 disabled-atc live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-3 disabled-atc live poll: must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-3 disabled-atc live poll: navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-3 disabled-atc live poll: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
  * SC-4: checkout review live poll cycle — reload + SAMS_NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
  * Parity with FIX-3 sc4-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -1916,6 +2015,7 @@ function main() {
   testSc3ProductPageHappyPath();
   testSc3ProductPageNavigateCartFallback();
   runSc3PollRecoveryRearmTests();
+  runSc3DisabledAtcLivePollCycleTests();
   testSc5Source();
   runSc5FcfsNoSacredLockTests();
   runSc5Sc6LivePollCycleTests();
@@ -1938,7 +2038,7 @@ function main() {
   runSc6CartLivePollCycleTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-4 poll recovery rearm + live poll cycle, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, invisible-atc live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, invisible-atc live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
