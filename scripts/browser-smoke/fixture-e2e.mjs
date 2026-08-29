@@ -1138,10 +1138,11 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 ${route.journey}: NAV_FAILED must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
     );
 
-    // SC-4 / SC-6 / WM-2: repeated NAV_FAILED cycles must never arm sacred lock.
+    // SC-4 / SC-6 / WM-2 / WM-6: repeated NAV_FAILED cycles must never arm sacred lock.
     if (
       invariants.includes('sc6-repeated-nav-failed') ||
       invariants.includes('wm2-repeated-nav-failed') ||
+      invariants.includes('wm6-repeated-nav-failed') ||
       invariants.includes('sc4-repeated-nav-failed')
     ) {
       const repeatedNavUrl = route.monitorProductPath

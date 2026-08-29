@@ -463,6 +463,7 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'nav-failed-releases-lock',
       'wm6-missing-atc-element',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],
