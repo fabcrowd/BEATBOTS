@@ -1138,10 +1138,18 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       `FIX-3 ${route.journey}: NAV_FAILED must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(afterNavLock)}`
     );
 
-    // SC-6 / WM-2: repeated NAV_FAILED cycles must never arm sacred lock.
-    if (invariants.includes('sc6-repeated-nav-failed') || invariants.includes('wm2-repeated-nav-failed')) {
+    // SC-4 / SC-6 / WM-2: repeated NAV_FAILED cycles must never arm sacred lock.
+    if (
+      invariants.includes('sc6-repeated-nav-failed') ||
+      invariants.includes('wm2-repeated-nav-failed') ||
+      invariants.includes('sc4-repeated-nav-failed')
+    ) {
+      const repeatedNavUrl = route.monitorProductPath
+        ? `http://${route.host}:${port}${route.monitorProductPath}`
+        : pageUrl;
+      const normRepeatedNavUrl = normalizeProductUrl(repeatedNavUrl);
       for (let i = 0; i < 2; i++) {
-        await sendBg(popup, { type: 'NAV_FAILED', url: pageUrl });
+        await sendBg(popup, { type: 'NAV_FAILED', url: repeatedNavUrl });
         const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
         const cycleInQueue = cycle?.inQueueUrls || [];
         const cycleNavLock = cycle?.navigationLock || [];
@@ -1151,8 +1159,8 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
           `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(cycleInQueue)}`
         );
         assert.ok(
-          !cycleNavLock.some((u) => normalizeProductUrl(u) === normPageUrl),
-          `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must clear navigationLock for ${normPageUrl}, got ${JSON.stringify(cycleNavLock)}`
+          !cycleNavLock.some((u) => normalizeProductUrl(u) === normRepeatedNavUrl),
+          `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must clear navigationLock for ${normRepeatedNavUrl}, got ${JSON.stringify(cycleNavLock)}`
         );
       }
     }
