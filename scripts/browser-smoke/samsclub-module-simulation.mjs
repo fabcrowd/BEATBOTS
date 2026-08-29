@@ -1636,6 +1636,101 @@ function runSc6PollRecoveryRearmTests() {
 }
 
 /**
+ * SC-6: repeated SAMS_NAV_FAILED cycles must never arm sacred lock (FCFS error path).
+ * Parity with FIX-3 sc6-repeated-nav-failed on /p/mock-fcfs-restock/790 + invisible-atc/791.
+ */
+function runSc6RepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(productUrl, getInitialMsg, label) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'SAMS_NAV_FAILED', `${label}: message type is SAMS_NAV_FAILED`);
+
+    navigationLock.add(normUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normUrl);
+      bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: productUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 does not arm it`
+    );
+  }
+
+  const restockUrl = 'https://www.samsclub.com/p/mock-fcfs-restock/790';
+  const restockPage = makePage({
+    pathname: '/p/mock-fcfs-restock/790',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+  assertRepeatedNavFailedScenario(
+    restockUrl,
+    () => {
+      const result = scSimulateWaitForDisabledAtc(restockPage);
+      assert.equal(result.action, 'atc_timeout', 'SC-6 repeated NAV_FAILED restock: disabled ATC wait ends in timeout');
+      return result.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+    },
+    'SC-6 restock'
+  );
+  assert.match(SC_SRC, /FCFS restock wait/, 'SC-6 repeated NAV_FAILED: restock wait log in source');
+  assert.match(
+    SC_SRC,
+    /ATC button not found or disabled/,
+    'SC-6 repeated NAV_FAILED: disabled ATC timeout user-facing log in source'
+  );
+
+  const invisibleUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
+  const invisiblePage = makePage({
+    pathname: '/p/mock-fcfs-invisible-atc/791',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: false,
+        visible: false,
+      },
+    ],
+  });
+  assertRepeatedNavFailedScenario(
+    invisibleUrl,
+    () => {
+      const result = scDecideProductPageInvisibleAtc(invisiblePage);
+      assert.equal(result.action, 'atc_unavailable', 'SC-6 repeated NAV_FAILED invisible: hidden ATC is nav_failed');
+      return result.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+    },
+    'SC-6 invisible-atc'
+  );
+  assert.match(SC_SRC, /scIsVisible/, 'SC-6 repeated NAV_FAILED: visibility check in source');
+}
+
+/**
  * SC-6: invisible-ATC product page live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 sc5-sc6-live-poll-cycle on /p/mock-fcfs-invisible-atc/791 (fixture-e2e has browser coverage).
  */
@@ -2185,6 +2280,7 @@ function main() {
   testSc6Source();
   runSc6ErrorPathHardeningTests();
   runSc6PollRecoveryRearmTests();
+  runSc6RepeatedNavFailedTests();
   runSc6InvisibleAtcLivePollCycleTests();
   runSc6RestockLivePollCycleTests();
   testSc6ProductToCartCheckoutMissingChain();
@@ -2202,7 +2298,7 @@ function main() {
   runSc6CartLivePollCycleTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, invisible-atc live poll cycle, restock live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
