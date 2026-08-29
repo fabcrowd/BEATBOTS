@@ -561,6 +561,64 @@ function runSc5FcfsNoSacredLockTests() {
 }
 
 /**
+ * SC-5: repeated ATC_SUCCESS cycles must never arm sacred lock (FCFS race).
+ * Parity with FIX-3 sc5-repeated-atc-success on /p/mock-fcfs/789 (fixture-e2e has browser coverage).
+ */
+function runSc5RepeatedAtcSuccessTests() {
+  const productUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const normUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  const page = makePage({
+    pathname: '/p/mock-fcfs/789',
+    elements: [
+      {
+        selectors: ['button[data-testid="add-to-cart"]'],
+        text: 'Add to cart',
+        disabled: false,
+      },
+      {
+        tag: 'a',
+        selectors: ['a[href="/cart"]'],
+        text: 'View cart',
+        href: '/cart',
+      },
+    ],
+  });
+  const happyResult = scHandleProductPageSim(page, { productUrl });
+  assert.ok(
+    happyResult.actions.includes('click_atc'),
+    'SC-5 repeated ATC: FCFS happy path clicks ATC'
+  );
+  assert.match(SC_SRC, /\[SC\] Clicking ATC button/, 'SC-5 repeated ATC: ATC click log in source');
+
+  for (let i = 0; i < 3; i++) {
+    navigationLock.add(normUrl);
+    bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: productUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-5 repeated ATC cycle ${i + 1} must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normUrl),
+      `SC-5 repeated ATC cycle ${i + 1} must clear navigationLock`
+    );
+    assert.ok(
+      !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `SC-5 repeated ATC cycle ${i + 1} allows poll retry (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'SC-5 repeated ATC: contrast WM-5 — sacred lock would block poll; FCFS does not arm it'
+  );
+}
+
+/**
  * Parity with FIX-3 sc5-sc6-live-poll-cycle (fixture-e2e has browser coverage).
  */
 function runSc5Sc6LivePollCycleTests() {
@@ -2122,6 +2180,7 @@ function main() {
   runSc3DisabledAtcLivePollCycleTests();
   testSc5Source();
   runSc5FcfsNoSacredLockTests();
+  runSc5RepeatedAtcSuccessTests();
   runSc5Sc6LivePollCycleTests();
   testSc6Source();
   runSc6ErrorPathHardeningTests();
@@ -2143,7 +2202,7 @@ function main() {
   runSc6CartLivePollCycleTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, invisible-atc live poll cycle, restock live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, invisible-atc live poll cycle, restock live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
