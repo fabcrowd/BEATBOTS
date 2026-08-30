@@ -1143,7 +1143,8 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       invariants.includes('sc6-repeated-nav-failed') ||
       invariants.includes('wm2-repeated-nav-failed') ||
       invariants.includes('wm6-repeated-nav-failed') ||
-      invariants.includes('sc4-repeated-nav-failed')
+      invariants.includes('sc4-repeated-nav-failed') ||
+      invariants.includes('tgt-repeated-nav-failed')
     ) {
       const repeatedNavUrl = route.monitorProductPath
         ? `http://${route.host}:${port}${route.monitorProductPath}`

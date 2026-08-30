@@ -188,6 +188,75 @@ function testTgt1MissingAtcElement() {
 }
 
 /**
+ * TGT-1: repeated NAV_FAILED cycles must never arm sacred lock (missing ATC element).
+ * Parity with FIX-3 tgt-repeated-nav-failed on /p/-/A-66666666 (fixture-e2e has browser coverage).
+ */
+function runTgtRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(productUrl, getInitialMsg, label) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'NAV_FAILED', `${label}: message type is NAV_FAILED`);
+
+    navigationLock.add(normUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, { ...initialMsg, url: productUrl });
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normUrl);
+      bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: productUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; TGT-1 missing ATC does not arm it`
+    );
+  }
+
+  const noAtcUrl = 'https://www.target.com/p/-/A-66666666';
+  const noAtcPage = makePage({ pathname: '/p/-/A-66666666', elements: [] });
+  assert.equal(
+    tgtDecideMissingAtc(noAtcPage, noAtcUrl).action,
+    'atc_unavailable',
+    'TGT-1 repeated NAV_FAILED: missing ATC element is nav_failed'
+  );
+  assertRepeatedNavFailedScenario(
+    noAtcUrl,
+    () => {
+      const result = tgtDecideMissingAtc(noAtcPage, noAtcUrl);
+      assert.equal(result.messages.length, 1, 'TGT-1 repeated NAV_FAILED: missing ATC sends NAV_FAILED');
+      assert.equal(result.messages[0].url, noAtcUrl, 'TGT-1 repeated NAV_FAILED: NAV_FAILED uses monitor productUrl');
+      return result.messages[0];
+    },
+    'TGT-1 missing-atc'
+  );
+  assert.match(TGT_SRC, /productAtcWaitMs/, 'TGT-1 repeated NAV_FAILED: ATC wait helper in source');
+  assert.match(
+    TGT_SRC,
+    /ATC button not found or disabled/,
+    'TGT-1 repeated NAV_FAILED: missing ATC user-facing log in source'
+  );
+}
+
+/**
  * TGT-1: cross-page missing ATC — tab on distinct product path, NAV_FAILED keys monitor productUrl.
  * Parity with FIX-3 tgt-missing-atc-cross-poll-recovery (fixture-e2e has browser coverage).
  */
@@ -1639,6 +1708,7 @@ function main() {
   testTgt1Source();
   testTgt4Source();
   testTgt1MissingAtcElement();
+  runTgtRepeatedNavFailedTests();
   testTgt1MissingAtcCrossPagePollRecovery();
   runTgt1LivePollCycleTests();
   testTgt4ManualReviewStop();
@@ -1661,7 +1731,7 @@ function main() {
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, cross-page missing ATC poll recovery, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
