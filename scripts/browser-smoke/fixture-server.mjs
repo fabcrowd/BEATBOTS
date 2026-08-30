@@ -287,6 +287,7 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'nav-failed-releases-lock',
       'tgt-missing-atc-element',
+      'tgt-repeated-nav-failed',
       'tgt-live-poll-cycle',
       'tgt-poll-recovery-rearm',
     ],
