@@ -2254,6 +2254,87 @@ function runSc6CartLivePollCycleTests() {
 }
 
 /**
+ * SC-6: cross-page repeated SAMS_NAV_FAILED cycles must never arm sacred lock (cart checkout-missing).
+ * Parity with FIX-3 sc6-repeated-nav-failed on /cart/no-checkout-cross (fixture-e2e has browser coverage).
+ */
+function runSc6CartCrossRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(monitorProductUrl, cartTabUrl, getInitialMsg, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'SAMS_NAV_FAILED', `${label}: message type is SAMS_NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normMonitorUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+    assert.notEqual(
+      normalizeProductUrl(initialMsg.url),
+      normCartTabUrl,
+      `${label}: NAV_FAILED must not key cart tab URL`
+    );
+
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normMonitorUrl);
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: 'SAMS_NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 cross-page cart checkout-missing does not arm it`
+    );
+  }
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794';
+  const cartTabUrl = 'https://www.samsclub.com/cart/no-checkout-cross';
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  assertRepeatedNavFailedScenario(
+    monitorProductUrl,
+    cartTabUrl,
+    () => {
+      const cartResult = scHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+      assert.equal(cartResult.path, 'checkout_not_found', 'SC-6 cart cross repeated NAV_FAILED: checkout-missing path');
+      const navFail = cartResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+      assert.ok(navFail, 'SC-6 cart cross repeated NAV_FAILED: sends SAMS_NAV_FAILED');
+      assert.equal(
+        navFail.url,
+        monitorProductUrl,
+        'SC-6 cart cross repeated NAV_FAILED: NAV_FAILED uses monitor productUrl'
+      );
+      return navFail;
+    },
+    'SC-6 cross-page cart checkout-missing'
+  );
+  assert.match(SC_SRC, /Checkout button not found/, 'SC-6 cart cross repeated NAV_FAILED: checkout-missing log in source');
+}
+
+/**
  * SC-6: cross-page cart checkout-missing live poll cycle — tab on /cart/no-checkout-cross,
  * monitor keys distinct productUrl; reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 sc6-cart-live-poll-cycle on /cart/no-checkout-cross (fixture-e2e has browser coverage).
@@ -2365,6 +2446,7 @@ function main() {
   testSc6ProductToCartCheckoutMissingChain();
   testSc6CartCrossPageCheckoutMissingChain();
   testSc6CartCrossPagePollRecovery();
+  runSc6CartCrossRepeatedNavFailedTests();
   testSc6CheckoutSpaCrossPagePollRecovery();
   testSc4Source();
   testSc4ManualReviewStop();
@@ -2378,7 +2460,7 @@ function main() {
   runSc6CartLivePollCycleTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle + repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cross-page cart poll recovery, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle + repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cross-page cart poll recovery, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
