@@ -186,7 +186,7 @@ async function handleSignInPage(settings, opts = {}) {
   }
   try {
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
-  const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
+  let { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
   if (getPageType() === 'checkout') {
     if (isCheckoutSignedInConfirm()) {
@@ -215,12 +215,14 @@ async function handleSignInPage(settings, opts = {}) {
   try { emailStepDone = sessionStorage.getItem(SIGNIN_EMAIL_STEP_KEY) === '1'; } catch {}
 
   if (!emailInput && getPageType() === 'checkout') {
-    const root = getCheckoutAuthRoot() || document;
-    emailInput = Array.from(root.querySelectorAll('input')).find((el) => {
-      if (!isVisible(el)) return false;
-      const t = (el.type || 'text').toLowerCase();
-      return t !== 'hidden' && t !== 'checkbox' && t !== 'submit' && t !== 'password';
-    }) || null;
+    const root = getCheckoutAuthRoot();
+    if (root) {
+      emailInput = Array.from(root.querySelectorAll('input')).find((el) => {
+        if (!isVisible(el)) return false;
+        const t = (el.type || 'text').toLowerCase();
+        return t !== 'hidden' && t !== 'checkbox' && t !== 'submit' && t !== 'password';
+      }) || null;
+    }
   }
 
   if (emailStepDone && !passInput && emailInput && !String(emailInput.value || '').trim()) {
@@ -309,7 +311,10 @@ async function signInCdpClick(el) {
 
 // Waits for the password field or a 2FA/OTP prompt after the email step (SPA transition).
 async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
+  let passwordStepDispatching = false;
+  let settled = false;
   const handlePasswordOrOtp = async (observer) => {
+    if (settled) return false;
     const otpInput = document.querySelector(
       'input[autocomplete="one-time-code"],input[inputmode="numeric"][maxlength="6"],' +
       'input[name*="otp"],input[name*="code"],input[id*="otp"],input[id*="verif"]'
@@ -341,12 +346,16 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
       return true;
     }
 
-    const passInput = Array.from((getCheckoutAuthRoot() || document).querySelectorAll('input[id="password"],input[type="password"]'))
+    const authRoot = getCheckoutAuthRoot();
+    const passScope = (getPageType() === 'checkout' && authRoot) ? authRoot : document;
+    const passInput = Array.from(passScope.querySelectorAll('input[id="password"],input[type="password"]'))
       .find((el) => isVisible(el));
     if (passInput) {
+      if (passwordStepDispatching) return true;
+      passwordStepDispatching = true;
       if (observer) observer.disconnect();
       await sleep(400);
-      await handleSignInPage(settings, { nested: true });
+      if (!settled) await handleSignInPage(settings, { nested: true });
       return true;
     }
     return false;
@@ -355,8 +364,13 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
   if (await handlePasswordOrOtp(null)) return;
 
   return new Promise((resolve) => {
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
     const obs = new MutationObserver(async (_, observer) => {
-      if (await handlePasswordOrOtp(observer)) resolve();
+      if (await handlePasswordOrOtp(observer)) finish();
     });
     obs.observe(document.body, { childList: true, subtree: true });
     setTimeout(() => {
@@ -365,7 +379,7 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
       if (getPageType() === 'checkout' && (looksLoggedInOnTarget() || isCheckoutSignedInConfirm())) {
         try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
       }
-      resolve();
+      finish();
     }, timeoutMs);
   });
 }
@@ -544,7 +558,13 @@ async function tryCheckoutSignedInContinue() {
 }
 
 function findVisibleSignInInputs() {
-  const root = getPageType() === 'checkout' ? (getCheckoutAuthRoot() || document) : document;
+  const isCheckout = getPageType() === 'checkout';
+  const authRoot = isCheckout ? getCheckoutAuthRoot() : null;
+  // Never search document on checkout without an auth modal — shipping tel/Continue would match.
+  if (isCheckout && !authRoot) {
+    return { emailInput: null, passInput: null, submitBtn: null };
+  }
+  const root = isCheckout ? authRoot : document;
   const emailSels = [
     'input[id="username"]', 'input[autocomplete="username"]', 'input[type="email"]',
     'input[type="tel"]', 'input[inputmode="email"]',
