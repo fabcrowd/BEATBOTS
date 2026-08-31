@@ -94,6 +94,27 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+// Regression: checkout sign-in must not fall back to document (shipping tel / Continue).
+const contentPath = path.join(__dirname, '../target-checkout-helper/content.js');
+const contentSrc = fs.readFileSync(contentPath, 'utf8');
+assert(
+  /if\s*\(\s*isCheckout\s*&&\s*!authRoot\s*\)/.test(contentSrc),
+  'findVisibleSignInInputs returns early on checkout without auth modal'
+);
+assert(
+  !/getCheckoutAuthRoot\(\)\s*\|\|\s*document/.test(contentSrc) ||
+    !/findVisibleSignInInputs/.test(contentSrc.split('function findVisibleSignInInputs')[1]?.split('function ')[0] || ''),
+  'findVisibleSignInInputs must not use document fallback on checkout'
+);
+assert(
+  /let\s*\{\s*emailInput,\s*passInput,\s*submitBtn\s*\}\s*=\s*findVisibleSignInInputs\(\)/.test(contentSrc),
+  'handleSignInPage uses let destructuring for checkout email fallback'
+);
+assert(
+  /passwordStepDispatching/.test(contentSrc),
+  'waitForSignInPasswordStep guards duplicate password-step dispatch'
+);
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);
