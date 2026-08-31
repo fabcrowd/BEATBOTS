@@ -804,6 +804,77 @@ function runTgt4CheckoutSpaCrossLivePollCycleTests() {
 }
 
 /**
+ * TGT-4: repeated NAV_FAILED cycles must never arm sacred lock (checkout SPA timeout).
+ * Parity with FIX-3 tgt-repeated-nav-failed on /checkout/spa-stall (fixture-e2e has browser coverage).
+ */
+function runTgt4CheckoutSpaRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(monitorProductUrl, checkoutTabUrl, getInitialMsg, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'NAV_FAILED', `${label}: message type is NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normMonitorUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+    assert.notEqual(
+      normalizeProductUrl(initialMsg.url),
+      normCheckoutTabUrl,
+      `${label}: NAV_FAILED must not key checkout tab URL`
+    );
+
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normMonitorUrl);
+      bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; TGT-4 checkout SPA timeout does not arm it`
+    );
+  }
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-checkout-spa-stall/794';
+  const checkoutTabUrl = 'https://www.target.com/checkout/spa-stall';
+  assertRepeatedNavFailedScenario(
+    monitorProductUrl,
+    checkoutTabUrl,
+    () => ({ type: 'NAV_FAILED', url: monitorProductUrl }),
+    'TGT-4 checkout SPA timeout'
+  );
+  assert.match(TGT_SRC, /handleCheckoutStall timed out/, 'TGT-4 repeated NAV_FAILED: timeout log in source');
+  assert.match(
+    TGT_SRC,
+    /signalNavFailed\(settings\.productUrl \|\| getRememberedProductUrl\(\) \|\| location\.href\)/,
+    'TGT-4 repeated NAV_FAILED: checkout SPA timeout uses settings.productUrl before location.href'
+  );
+}
+
+/**
  * TGT-4: cross-page repeated NAV_FAILED cycles must never arm sacred lock (checkout SPA timeout).
  * Parity with FIX-3 tgt-repeated-nav-failed on /checkout/spa-stall-cross (fixture-e2e has browser coverage).
  */
@@ -1873,6 +1944,7 @@ function main() {
   testTgt4CheckoutSpaCrossPagePollRecovery();
   runTgt4PollRecoveryRearmTests();
   runTgt4CheckoutSpaLivePollCycleTests();
+  runTgt4CheckoutSpaRepeatedNavFailedTests();
   runTgt4CheckoutSpaCrossLivePollCycleTests();
   runTgt4CheckoutSpaCrossRepeatedNavFailedTests();
   runTgt4ReviewLivePollCycleTests();
@@ -1887,7 +1959,7 @@ function main() {
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
