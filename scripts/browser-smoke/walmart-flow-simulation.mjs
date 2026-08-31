@@ -1330,6 +1330,28 @@ function runWm6QueueErrorPathTests() {
     'WM-6: poll may retry after PX timeout when not in queue'
   );
 
+  // WM-6 + WM-5: PX timeout while sacred lock active — NAV_FAILED releases nav lock only.
+  const queuePxUrl = 'https://www.walmart.com/ip/wm6-px-sacred-lock/107';
+  const queuePxNorm = normalizeProductUrl(queuePxUrl);
+  const queuePxPage = makePage({
+    pathname: '/ip/wm6-px-sacred-lock/107',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+  });
+  inQueueUrls.clear();
+  navigationLock.clear();
+  bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: queuePxUrl });
+  navigationLock.add(queuePxNorm);
+  const queuePxTimeoutMsgs = wmPxTimeoutMessages(queuePxPage, 120000);
+  assert.equal(queuePxTimeoutMsgs.length, 1, 'WM-6: PX timeout fires while sacred lock active');
+  assert.equal(queuePxTimeoutMsgs[0].type, 'WALMART_NAV_FAILED', 'WM-6: sacred-lock PX timeout is NAV_FAILED');
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, queuePxTimeoutMsgs[0]);
+  assert.ok(inQueueUrls.has(queuePxNorm), 'WM-6: PX timeout must not clear sacred lock');
+  assert.ok(!navigationLock.has(queuePxNorm), 'WM-6: PX timeout releases navigationLock during queue');
+  assert.ok(
+    bgPollWouldSkipNavigation(queuePxNorm, inQueueUrls, navigationLock),
+    'WM-6: poll still blocked after PX timeout while sacred lock active'
+  );
+
   // PX cleared before timeout — no NAV_FAILED (redirect succeeded).
   const clearedPxPage = makePage({
     pathname: '/ip/wm6-px-cleared/105',
