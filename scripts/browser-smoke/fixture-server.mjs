@@ -172,6 +172,7 @@ export const FIXTURE_E2E_ROUTES = [
       'tgt4-checkout-spa-timeout',
       'tgt4-checkout-spa-live-poll-cycle',
       'tgt-poll-recovery-rearm',
+      'tgt-repeated-nav-failed',
     ],
     monitorProductPath: '/p/mock-checkout-spa-cross-monitor/A-880092',
     pollRecoveryProductPath: '/p/mock-checkout-spa-cross-recovery/A-880093',
