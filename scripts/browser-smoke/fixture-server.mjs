@@ -528,6 +528,7 @@ export const FIXTURE_E2E_ROUTES = [
       'wm6-cart-checkout-missing',
       'wm6-cart-live-poll-cycle',
       'wm6-poll-recovery-rearm',
+      'wm6-repeated-nav-failed',
       'nav-failed-releases-lock',
     ],
     monitorProductPath: '/ip/mock-cart-cross-monitor/890',
