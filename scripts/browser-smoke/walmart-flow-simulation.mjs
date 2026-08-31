@@ -2067,6 +2067,84 @@ async function runWm6CartCrossRepeatedNavFailedTests() {
 }
 
 /**
+ * WM-6: repeated WALMART_NAV_FAILED cycles must never arm sacred lock (checkout SPA timeout).
+ * Parity with FIX-3 wm6-repeated-nav-failed on /checkout/spa-stall (fixture-e2e has browser coverage).
+ */
+function runWm6CheckoutSpaRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(monitorProductUrl, checkoutTabUrl, getInitialMsg, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'WALMART_NAV_FAILED', `${label}: message type is WALMART_NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normMonitorUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+    assert.notEqual(
+      normalizeProductUrl(initialMsg.url),
+      normCheckoutTabUrl,
+      `${label}: NAV_FAILED must not key checkout tab URL`
+    );
+
+    navigationLock.add(normMonitorUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normMonitorUrl);
+      bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 checkout SPA timeout does not arm it`
+    );
+  }
+
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-checkout-spa/992';
+  const checkoutTabUrl = 'https://www.walmart.com/checkout/spa-stall';
+  assertRepeatedNavFailedScenario(
+    monitorProductUrl,
+    checkoutTabUrl,
+    () => ({ type: 'WALMART_NAV_FAILED', url: monitorProductUrl }),
+    'WM-6 checkout SPA timeout'
+  );
+  assert.match(WMT_SRC, /wmHandleCheckout timed out/, 'WM-6 repeated NAV_FAILED: timeout log in source');
+  assert.match(
+    WMT_SRC,
+    /wmSignalQueueTimeout\(settings\.productUrl\)/,
+    'WM-6 repeated NAV_FAILED: checkout SPA timeout uses settings.productUrl for poll recovery'
+  );
+}
+
+/**
  * WM-6: checkout SPA live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 wm6-live-poll-cycle on checkout SPA (fixture-e2e has browser coverage).
  */
@@ -3883,6 +3961,7 @@ async function main() {
   await runWm6CartLivePollCycleTests();
   await runWm6CartCrossLivePollCycleTests();
   await runWm6CartCrossRepeatedNavFailedTests();
+  runWm6CheckoutSpaRepeatedNavFailedTests();
   runWm6CheckoutSpaLivePollCycleTests();
   runWm6PriceGuardTimeoutTests();
   runWm6PriceGuardLivePollCycleTests();

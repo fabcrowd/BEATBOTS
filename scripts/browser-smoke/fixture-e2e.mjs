@@ -1120,7 +1120,10 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   }
 
   if (invariants.includes('nav-failed-releases-lock')) {
-    const releasingLog = logs.some((l) => l.includes('releasing navigation lock'));
+    const releasingLog =
+      logs.some((l) => l.includes('releasing navigation lock')) ||
+      (invariants.includes('wm6-checkout-spa-timeout') &&
+        logs.some((l) => l.includes('releasing sacred lock for poll recovery')));
     assert.ok(
       releasingLog,
       `FIX-3 ${route.journey}: expected NAV_FAILED release log on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`

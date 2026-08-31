@@ -679,7 +679,9 @@ export const FIXTURE_E2E_ROUTES = [
     journey: 'WM-6',
     invariants: [
       'no-sacred-lock',
+      'nav-failed-releases-lock',
       'wm6-checkout-spa-timeout',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],
