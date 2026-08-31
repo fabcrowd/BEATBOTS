@@ -1778,6 +1778,7 @@ function wmStartClock() {
 wmStartClock();
 
 loadMonitorData();
+setActiveTab('main');
 
 // ─── SETTINGS EXPORT / IMPORT ────────────────────────────────────────────────
 
