@@ -1243,10 +1243,16 @@ async function _wmInit() {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
     const pxTimeoutMs = wmPxTimeoutMs();
+    const allProducts = data.monitor?.products || [];
+    const walmartProducts = allProducts.filter(p => /walmart\.com(?::\d+)?\/ip\//i.test(p.url));
+    const pxMatched = walmartProducts.find(p => {
+      try { return new URL(p.url).pathname === location.pathname; } catch { return false; }
+    }) || (walmartProducts.length === 1 ? walmartProducts[0] : null) || walmartProducts[0] || null;
+    const pxLockUrl = pxMatched?.url || location.href;
     setTimeout(() => {
       if (wmIsPxPage()) {
         console.log('[WMT] PX page still showing — releasing nav lock');
-        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
+        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: pxLockUrl }); } catch (_) {}
       }
     }, pxTimeoutMs);
     return;
