@@ -578,6 +578,36 @@ const FIXTURE_MARKERS = {
       'itemprop="price"',
     ],
   },
+  walmartProductPriceGuardCross: {
+    fixtureId: 'walmart-product-price-guard-cross',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-price-guard-cross"',
+      'data-tch-price-guard-timeout-ms="750"',
+      'data-tch-path="/ip/mock-price-guard-cross/993"',
+      'monitor keys product',
+      'itemprop="price"',
+      'data-tch-atc-wait-ms="750"',
+    ],
+  },
+  walmartProductPriceGuardCrossMonitor: {
+    fixtureId: 'walmart-product-price-guard-cross-monitor',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-price-guard-cross-monitor"',
+      'data-tch-path="/ip/mock-price-guard-cross-monitor/992"',
+      'data-automation-id="add-to-cart-btn"',
+    ],
+  },
+  walmartProductPriceGuardCrossRecovery: {
+    fixtureId: 'walmart-product-price-guard-cross-recovery',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-price-guard-cross-recovery"',
+      'data-tch-path="/ip/mock-price-guard-cross-recovery/994"',
+      'data-tch-atc-wait-ms="750"',
+    ],
+  },
   walmartCheckoutSpaTimeout: {
     fixtureId: 'walmart-checkout-spa-timeout',
     journeys: ['WM-6'],
