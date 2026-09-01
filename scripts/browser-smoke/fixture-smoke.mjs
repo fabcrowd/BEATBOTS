@@ -587,6 +587,35 @@ const FIXTURE_MARKERS = {
       'data-tch-path="/checkout/spa-stall"',
     ],
   },
+  walmartCheckoutSpaCross: {
+    fixtureId: 'walmart-checkout-spa-cross',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-checkout-spa-cross"',
+      'data-tch-checkout-timeout-ms="750"',
+      'data-tch-path="/checkout/spa-stall-cross"',
+      'monitor keys product',
+    ],
+  },
+  walmartProductCheckoutSpaCrossMonitor: {
+    fixtureId: 'walmart-product-checkout-spa-cross-monitor',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-checkout-spa-cross-monitor"',
+      'data-tch-path="/ip/mock-checkout-spa-cross-monitor/1003"',
+      'data-automation-id="add-to-cart-btn"',
+      'href="/checkout/spa-stall-cross"',
+    ],
+  },
+  walmartProductCheckoutSpaCrossRecovery: {
+    fixtureId: 'walmart-product-checkout-spa-cross-recovery',
+    journeys: ['WM-6'],
+    markers: [
+      'data-tch-fixture="walmart-product-checkout-spa-cross-recovery"',
+      'data-tch-path="/ip/mock-checkout-spa-cross-recovery/1005"',
+      'data-tch-atc-wait-ms="750"',
+    ],
+  },
   walmartCheckoutSpaSacred: {
     fixtureId: 'walmart-checkout-spa-sacred',
     journeys: ['WM-5'],
