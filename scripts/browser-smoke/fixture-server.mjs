@@ -699,6 +699,8 @@ export const FIXTURE_E2E_ROUTES = [
       'nav-failed-releases-lock',
       'wm6-checkout-spa-timeout',
       'wm6-repeated-nav-failed',
+      'wm6-live-poll-cycle',
+      'wm6-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-checkout-spa-cross-monitor/1003',
     pollRecoveryProductPath: '/ip/mock-checkout-spa-cross-recovery/1005',

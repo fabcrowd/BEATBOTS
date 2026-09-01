@@ -614,6 +614,7 @@ const FIXTURE_MARKERS = {
       'data-tch-fixture="walmart-product-checkout-spa-cross-recovery"',
       'data-tch-path="/ip/mock-checkout-spa-cross-recovery/1005"',
       'data-tch-atc-wait-ms="750"',
+      'poll recovery',
     ],
   },
   walmartCheckoutSpaSacred: {
