@@ -2,14 +2,14 @@
   "manifest_version": 3,
   "name": "Target Checkout Helper",
   "version": "2.0.0",
-  "description": "Automates Target.com and Walmart.com checkout steps — Add to Cart through Order Review. You place the final order.",
+  "description": "Automates Target.com, Walmart.com, and SamsClub.com checkout steps — Add to Cart through Order Review. You place the final order.",
   "permissions": ["storage", "tabs", "alarms", "debugger", "declarativeNetRequest", "nativeMessaging"],
   "declarative_net_request": {
     "rule_resources": [
       { "id": "blocking", "enabled": true, "path": "rules/blocking.json" }
     ]
   },
-  "host_permissions": ["*://*.target.com/*", "*://*.walmart.com/*"],
+  "host_permissions": ["*://*.target.com/*", "*://*.walmart.com/*", "*://*.samsclub.com/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -34,6 +34,11 @@
     {
       "matches": ["*://*.walmart.com/*"],
       "js": ["dropPollingTiming.js", "core/hosts.js", "core/jigAddress.js", "core/signinStep.js", "walmart-content.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["*://*.samsclub.com/*"],
+      "js": ["dropPollingTiming.js", "core/hosts.js", "core/jigAddress.js", "samsclub-content.js"],
       "run_at": "document_end"
     }
   ],

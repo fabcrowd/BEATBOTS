@@ -94,6 +94,23 @@ function wmFillSelect(select, value) {
 
 const wmSleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** WM-6: ATC wait cap — optional data-tch-atc-wait-ms for fixture e2e. */
+function wmAtcWaitTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-atc-wait-ms');
+  if (override != null && override !== '') {
+    const n = Number(override);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 8000;
+}
+
+/** Faster poll when ATC-wait override is set so fixture e2e can finish quickly. */
+function wmAtcWaitPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-atc-wait-ms')) return 200;
+  return 100;
+}
+
 function wmPlayBeep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -115,6 +132,18 @@ function wmPlayBeep() {
 function wmSignalAtcSuccess(productUrl) {
   const url = productUrl || location.href;
   try { chrome.runtime.sendMessage({ type: 'ATC_SUCCESS', url }); } catch (_) {}
+}
+
+/** WM-4/WM-5: queue wait exceeded — release sacred lock so background poll can recover. */
+function wmSignalQueueTimeout(lockUrl) {
+  const url = lockUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_QUEUE_TIMEOUT', url }); } catch (_) {}
+}
+
+/** WM-6: release background poll lock on error paths — does not clear sacred lock (WM-5). */
+function wmSignalNavFailed(lockUrl) {
+  const url = lockUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url }); } catch (_) {}
 }
 
 /** Same telemetry path as Target review — drives Discord webhooks + endless mode. */
@@ -171,6 +200,18 @@ function wmIsVisible(el) {
   return true;
 }
 
+/** Read Next.js payload — script#id tag (page + fixtures); window fallback when shared. */
+function wmReadNextData() {
+  try {
+    const el = document.getElementById('__NEXT_DATA__');
+    if (el?.textContent) return JSON.parse(el.textContent);
+  } catch (_) {}
+  try {
+    if (window.__NEXT_DATA__) return window.__NEXT_DATA__;
+  } catch (_) {}
+  return null;
+}
+
 /**
  * @param {boolean} [liveOnly=false] Skip __NEXT_DATA__ and read DOM only.
  *   Use this inside polling loops: __NEXT_DATA__ is frozen at page load and will
@@ -179,7 +220,7 @@ function wmIsVisible(el) {
 function wmGetCurrentPrice(liveOnly = false) {
   if (!liveOnly) {
     try {
-      const nd = window.__NEXT_DATA__;
+      const nd = wmReadNextData();
       const p = nd?.props?.pageProps?.initialData?.data?.product?.priceInfo?.currentPrice?.price;
       if (typeof p === 'number' && p > 0) return p;
     } catch (_) {}
@@ -228,13 +269,13 @@ function wmShowToast(message, type = 'info') {
   }
 }
 
-/** Polls selectorFn every 100ms until it returns a truthy value, or timeout. */
-async function wmWaitFor(selectorFn, timeoutMs = 8000) {
+/** Polls selectorFn until it returns a truthy value, or timeout. */
+async function wmWaitFor(selectorFn, timeoutMs = 8000, intervalMs = 100) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = selectorFn();
     if (result) return result;
-    await wmSleep(100);
+    await wmSleep(intervalMs);
   }
   return null;
 }
@@ -286,6 +327,91 @@ function wmIsProductQueued() {
   const atc = wmFindAtcLikeButton();
   if (!atc) return false;
   return atc.disabled || atc.getAttribute('aria-disabled') === 'true';
+}
+
+/** WM-2/WM-4: sacred lock only when queue is confirmed — not disabled ATC alone. */
+function wmShouldEnterSacredQueueWait() {
+  return wmHasQueueIndicators();
+}
+
+/** WM-6: PX hang-tight guard duration — fixture default, prod 2min, optional test override. */
+function wmPxTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-px-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  if (root?.hasAttribute('data-tch-fixture')) return 2000;
+  return 2 * 60 * 1000;
+}
+
+/** WM-4/WM-6: /qp + checkout queue wait cap — optional data-tch-queue-timeout-ms for fixture e2e. */
+function wmQueueWaitTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-queue-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 45 * 60 * 1000;
+}
+
+/** Faster poll when queue-timeout override is set so fixture e2e can finish quickly. */
+function wmQueuePollMs(queueRoom = false) {
+  if (document.documentElement?.getAttribute('data-tch-queue-timeout-ms')) return 200;
+  return queueRoom ? 5000 : 2000;
+}
+
+/** WM-6: price-guard wait cap — optional data-tch-price-guard-timeout-ms for fixture e2e. */
+function wmPriceGuardTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-price-guard-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 45 * 60 * 1000;
+}
+
+/** Faster poll when price-guard timeout override is set so fixture e2e can finish quickly. */
+function wmPriceGuardPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-price-guard-timeout-ms')) return 200;
+  return 1000;
+}
+
+/** WM-6: checkout SPA stall cap — optional data-tch-checkout-timeout-ms for fixture e2e. */
+function wmCheckoutTotalTimeoutMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-checkout-timeout-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 10 * 60 * 1000;
+}
+
+/** Faster poll when checkout-timeout override is set so fixture e2e can finish quickly. */
+function wmCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-checkout-timeout-ms')) return 200;
+  return 500;
+}
+
+/** WM-6: cart checkout-button wait cap — optional data-tch-cart-checkout-wait-ms for fixture e2e. */
+function wmCartCheckoutWaitMs() {
+  const root = document.documentElement;
+  const override = root?.getAttribute('data-tch-cart-checkout-wait-ms');
+  if (override != null && override !== '') {
+    const ms = parseInt(override, 10);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 8000;
+}
+
+/** Faster poll when cart-checkout-wait override is set so fixture e2e can finish quickly. */
+function wmCartCheckoutPollMs() {
+  if (document.documentElement?.getAttribute('data-tch-cart-checkout-wait-ms')) return 200;
+  return 100;
 }
 
 /**
@@ -348,7 +474,7 @@ async function wmDirectAtc(oid, settings, opts = {}) {
   // the vidUserId cookie for guest sessions.
   const cid = (() => {
     try {
-      const nd = window.__NEXT_DATA__;
+      const nd = wmReadNextData();
       return nd?.props?.pageProps?.customerId || null;
     } catch { return null; }
   })() || (() => {
@@ -447,10 +573,12 @@ async function wmWaitInProductQueue(settings, oid) {
   wmShowToast('In queue — waiting for your turn…', 'persistent');
   console.log('[WMT] Product-page queue detected — passive wait, DO NOT navigate');
 
-  // Lock the tab in background poll so it doesn't re-navigate while we wait.
-  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: location.href }); } catch (_) {}
+  // Lock MUST use settings.productUrl when monitored — poll keys inQueueUrls by normalized
+  // product URL. Fall back to location.href on unmonitored product-page queue.
+  const lockUrl = settings?.productUrl || location.href;
+  try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
   let queuePassedSignal = false;
   const onQueuePassed = () => { queuePassedSignal = true; };
@@ -459,7 +587,7 @@ async function wmWaitInProductQueue(settings, oid) {
 
   try {
   while (Date.now() - started < maxWaitMs) {
-    if (!queuePassedSignal) await wmSleep(1000);
+    if (!queuePassedSignal) await wmSleep(wmQueuePollMs());
 
     // Price guard — use DOM-only (liveOnly=true): __NEXT_DATA__ is frozen at
     // page load and won't update when Walmart flips the drop price at go-time.
@@ -516,10 +644,38 @@ async function wmWaitInProductQueue(settings, oid) {
   }
 
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
-  console.warn('[WMT] Product-page queue wait timed out after 45 min');
+  console.warn('[WMT] Product-page queue wait timed out');
+  wmSignalQueueTimeout(lockUrl);
   } finally {
     docEl.removeEventListener('TCH_QUEUE_PASSED', onQueuePassed);
   }
+}
+
+/**
+ * Pre-drop price guard — poll until live DOM price drops; does NOT arm sacred lock (WM-2).
+ */
+async function wmWaitForPriceDrop(settings) {
+  const maxPrice = parseFloat(settings.walmartMaxPrice) || 0;
+  if (maxPrice <= 0) return;
+
+  wmShowToast(`Price above max $${maxPrice.toFixed(2)} — waiting for drop price`, 'persistent');
+  console.log(`[WMT] Price guard wait — no sacred lock until queue confirmed`);
+
+  const maxWaitMs = wmPriceGuardTimeoutMs();
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    await wmSleep(wmPriceGuardPollMs());
+    const currentPrice = wmGetCurrentPrice(true);
+    if (currentPrice === null || currentPrice <= maxPrice) {
+      wmShowToast('Drop price reached — continuing', 'success');
+      console.log(`[WMT] Price guard cleared at $${currentPrice ?? 'unknown'}`);
+      return;
+    }
+  }
+
+  wmShowToast('Price wait exceeded 45 min — take over manually', 'error');
+  console.warn('[WMT] Price guard wait timed out after 45 min');
+  wmSignalNavFailed(settings?.productUrl || location.href);
 }
 
 /**
@@ -541,11 +697,11 @@ async function wmHandleQueueRoom(settings) {
     console.warn('[WMT] wmHandleQueueRoom: no productUrl in settings — background nav lock NOT set');
   }
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
 
   while (Date.now() - started < maxWaitMs) {
-    await wmSleep(5000);
+    await wmSleep(wmQueuePollMs(true));
     // When the waiting room clears, Walmart redirects away from /qp automatically.
     // The SPA watcher fires wmInit() on URL change — no extra action needed here.
     if (!location.pathname.startsWith('/qp')) return;
@@ -557,6 +713,12 @@ async function wmHandleQueueRoom(settings) {
 
   wmShowToast('Waiting room exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] /qp waiting room timeout after 45 min');
+  if (settings?.productUrl) {
+    wmSignalQueueTimeout(settings.productUrl);
+  } else {
+    console.warn('[WMT] /qp waiting room timeout — no productUrl — releasing navigation lock');
+    wmSignalNavFailed(location.href);
+  }
 }
 
 async function wmHandleProductPage(settings, oid) {
@@ -569,18 +731,16 @@ async function wmHandleProductPage(settings, oid) {
     const currentPrice = wmGetCurrentPrice();
     if (currentPrice !== null && currentPrice > maxPrice) {
       wmShowToast(`Price $${currentPrice.toFixed(2)} > max $${maxPrice.toFixed(2)} — holding position`, 'persistent');
-      console.log(`[WMT] Price guard: $${currentPrice} > max $${maxPrice} — entering queue wait`);
-      // Don't ATC yet, but DO hold position via queue wait (handles both queue + pre-drop price)
-      await wmWaitInProductQueue(settings, oid);
-      return;
+      console.log(`[WMT] Price guard: $${currentPrice} > max $${maxPrice} — waiting for drop price (no sacred lock)`);
+      await wmWaitForPriceDrop(settings);
     }
   }
 
   // ── Check for product-page queue ─────────────────────────────────────────
   // During drops, Walmart's queue appears on the /ip/... product page itself.
-  // The ATC button exists but is disabled until your queue position clears.
-  // Navigating away loses your spot — we must wait here.
-  if (wmHasQueueIndicators() || wmIsProductQueued()) {
+  // Sacred lock only when queue indicators are present (WM-2/WM-4) — disabled
+  // ATC alone before drop is not queue.
+  if (wmShouldEnterSacredQueueWait()) {
     await wmWaitInProductQueue(settings, oid);
     return;
   }
@@ -604,17 +764,17 @@ async function wmHandleProductPage(settings, oid) {
     const el = wmFindAtcLikeButton();
     if (el && !el.disabled && wmIsVisible(el)) return el;
     return null;
-  }, 8000);
+  }, wmAtcWaitTimeoutMs(), wmAtcWaitPollMs());
 
   if (!atcBtn) {
     // Re-check: did the queue load while we were waiting?
-    if (wmHasQueueIndicators() || wmIsProductQueued()) {
+    if (wmShouldEnterSacredQueueWait()) {
       await wmWaitInProductQueue(settings, oid);
       return;
     }
     wmShowToast('ATC not available — waiting for restock', 'persistent');
     console.log('[WMT] ATC button not found or disabled — releasing navigation lock');
-    try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
+    wmSignalNavFailed(settings?.productUrl || location.href);
     return;
   }
 
@@ -654,11 +814,12 @@ async function wmHandleCart(settings) {
       const text = el.textContent.trim().toLowerCase();
       return (text === 'checkout' || text === 'proceed to checkout') && wmIsVisible(el);
     }) || null;
-  }, 8000);
+  }, wmCartCheckoutWaitMs(), wmCartCheckoutPollMs());
 
   if (!checkoutBtn) {
     wmShowToast('Checkout button not found — take over manually', 'error');
-    console.warn('[WMT] Checkout button not found on cart page');
+    console.warn('[WMT] Checkout button not found on cart page — releasing navigation lock');
+    wmSignalNavFailed(settings?.productUrl || location.href);
     return;
   }
   console.log('[WMT] Clicking checkout button');
@@ -669,18 +830,20 @@ async function wmHandleQueue(settings) {
   wmShowToast('In queue — waiting…', 'persistent');
   console.log('[WMT] Queue detected — passive wait started');
 
-  // Send the monitored product URL (not location.href which is /checkout) so
-  // background.js can match it against the normalised product URL in inQueueUrls.
-  const lockUrl = settings.productUrl || location.href;
-  try {
-    chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl });
-  } catch (_) {}
+  // Lock MUST use the monitored product URL — poll keys inQueueUrls by normalized
+  // /ip/... URL. location.href is /checkout and would never match (WM-4).
+  const lockUrl = settings?.productUrl;
+  if (lockUrl) {
+    try { chrome.runtime.sendMessage({ type: 'WALMART_IN_QUEUE', url: lockUrl }); } catch (_) {}
+  } else {
+    console.warn('[WMT] wmHandleQueue: no productUrl in settings — background nav lock NOT set');
+  }
 
-  const maxWaitMs = 45 * 60 * 1000;
+  const maxWaitMs = wmQueueWaitTimeoutMs();
   const started = Date.now();
 
   while (Date.now() - started < maxWaitMs) {
-    await wmSleep(2000);
+    await wmSleep(wmQueuePollMs(false));
     if (!wmIsQueuePage()) {
       console.log('[WMT] Queue cleared');
       wmShowToast('Queue cleared — continuing checkout', 'success');
@@ -695,6 +858,12 @@ async function wmHandleQueue(settings) {
   }
   wmShowToast('Queue wait exceeded 45 min — take over manually', 'error');
   console.warn('[WMT] Queue wait timed out after 45 min');
+  if (settings?.productUrl) {
+    wmSignalQueueTimeout(settings.productUrl);
+  } else {
+    console.warn('[WMT] Queue timeout — no productUrl — releasing navigation lock');
+    wmSignalNavFailed(location.href);
+  }
 }
 
 /**
@@ -907,8 +1076,10 @@ async function wmHandleCheckout(settings) {
   const STEP_MIN_INTERVAL_MS = 5000;
   const stepHandledAt = {};
   const started = Date.now();
+  const maxWaitMs = wmCheckoutTotalTimeoutMs();
+  const pollMs = wmCheckoutPollMs();
 
-  while (Date.now() - started < 10 * 60 * 1000) {
+  while (Date.now() - started < maxWaitMs) {
     if (wmIsQueuePage()) {
       await wmHandleQueue(settings);
       return;
@@ -942,10 +1113,17 @@ async function wmHandleCheckout(settings) {
     }
 
     // No recognizable form yet — page still loading or transitioning.
-    await wmSleep(500);
+    await wmSleep(pollMs);
   }
 
-  console.warn('[WMT] wmHandleCheckout timed out after 10 min');
+  wmShowToast('Checkout step timeout — take over manually', 'error');
+  if (settings?.productUrl) {
+    console.warn('[WMT] wmHandleCheckout timed out — releasing sacred lock for poll recovery');
+    wmSignalQueueTimeout(settings.productUrl);
+  } else {
+    console.warn('[WMT] wmHandleCheckout timed out — releasing navigation lock');
+    wmSignalNavFailed(location.href);
+  }
 }
 
 // ─── WALMART LOGIN / 2FA (IMAP via native host) ────────────────────────────────
@@ -1077,12 +1255,19 @@ async function _wmInit() {
   if (wmIsPxPage()) {
     wmShowToast('Walmart traffic page — waiting for redirect…', 'persistent');
     console.log('[WMT] PX/loading page detected — waiting for auto-redirect, not retrying');
+    const pxTimeoutMs = wmPxTimeoutMs();
+    const allProducts = data.monitor?.products || [];
+    const walmartProducts = allProducts.filter(p => /walmart\.com(?::\d+)?\/ip\//i.test(p.url));
+    const pxMatched = walmartProducts.find(p => {
+      try { return new URL(p.url).pathname === location.pathname; } catch { return false; }
+    }) || (walmartProducts.length === 1 ? walmartProducts[0] : null) || walmartProducts[0] || null;
+    const pxLockUrl = pxMatched?.url || location.href;
     setTimeout(() => {
       if (wmIsPxPage()) {
-        console.log('[WMT] PX page still showing after 2min — releasing nav lock');
-        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: location.href }); } catch (_) {}
+        console.log('[WMT] PX page still showing — releasing nav lock');
+        try { chrome.runtime.sendMessage({ type: 'WALMART_NAV_FAILED', url: pxLockUrl }); } catch (_) {}
       }
-    }, 2 * 60 * 1000);
+    }, pxTimeoutMs);
     return;
   }
 
@@ -1093,7 +1278,8 @@ async function _wmInit() {
   // On product pages match by pathname; on cart/checkout use any Walmart product
   // in the monitor list (the background navigated us here, so there's at least one).
   const allProducts = data.monitor?.products || [];
-  const walmartProducts = allProducts.filter(p => /walmart\.com\/ip\//i.test(p.url));
+  // Optional :port supports local fixture e2e (host-resolver-rules + explicit port).
+  const walmartProducts = allProducts.filter(p => /walmart\.com(?::\d+)?\/ip\//i.test(p.url));
   const matchedProduct = page === 'product'
     ? walmartProducts.find(p => {
         try { return new URL(p.url).pathname === location.pathname; } catch { return false; }
@@ -1133,7 +1319,7 @@ async function _wmInit() {
     // mode where background fires ATC immediately at dropExpectedAt without poll delay.
     const pageOid = (() => {
       try {
-        const nd = window.__NEXT_DATA__;
+        const nd = wmReadNextData();
         return nd?.props?.pageProps?.initialData?.data?.product?.primaryOffer?.offerId || null;
       } catch { return null; }
     })();
