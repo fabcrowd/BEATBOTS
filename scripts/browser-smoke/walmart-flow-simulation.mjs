@@ -2914,6 +2914,86 @@ function runWm6PriceGuardTimeoutTests() {
 }
 
 /**
+ * WM-6: repeated WALMART_NAV_FAILED cycles must never arm sacred lock (price-guard timeout).
+ * Parity with FIX-3 wm6-repeated-nav-failed on /ip/mock-price-guard-timeout/991 (fixture-e2e has browser coverage).
+ */
+function runWm6PriceGuardRepeatedNavFailedTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+
+  function assertRepeatedNavFailedScenario(productUrl, getInitialMsg, label) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'WALMART_NAV_FAILED', `${label}: message type is WALMART_NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+
+    navigationLock.add(normUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normUrl);
+      bgApplyWalmartNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: productUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 price-guard timeout does not arm it`
+    );
+  }
+
+  const productUrl = 'https://www.walmart.com/ip/mock-price-guard-timeout/991';
+  const priceGuardPage = makePage({
+    pathname: '/ip/mock-price-guard-timeout/991',
+    docAttrs: { 'data-tch-price-guard-timeout-ms': '750' },
+    elements: [
+      {
+        selectors: ['[itemprop="price"]'],
+        tag: 'span',
+        text: '$99.99',
+        content: '99.99',
+      },
+    ],
+  });
+  const settings = { walmartMaxPrice: 50, productUrl };
+  assertRepeatedNavFailedScenario(
+    productUrl,
+    () => {
+      const msgs = wmPriceGuardTimeoutMessages(priceGuardPage, settings, productUrl, 750);
+      assert.equal(msgs.length, 1, 'WM-6 price-guard repeated NAV_FAILED: timeout sends NAV_FAILED');
+      return msgs[0];
+    },
+    'WM-6 price-guard timeout'
+  );
+  assert.match(WMT_SRC, /Price guard wait timed out/, 'WM-6 price-guard repeated NAV_FAILED: timeout log in source');
+}
+
+/**
  * WM-6: price-guard live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 wm6-live-poll-cycle on price-guard route (fixture-e2e has browser coverage).
  */
@@ -5086,6 +5166,7 @@ async function main() {
   runWm6CheckoutSpaCrossPollRecoveryTests();
   runWm6CheckoutSpaLivePollCycleTests();
   runWm6PriceGuardTimeoutTests();
+  runWm6PriceGuardRepeatedNavFailedTests();
   runWm6PriceGuardLivePollCycleTests();
   runWm6PriceGuardCrossRepeatedNavFailedTests();
   runWm6PriceGuardCrossLivePollCycleTests();
