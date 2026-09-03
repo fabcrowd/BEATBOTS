@@ -979,6 +979,7 @@ export const FIXTURE_E2E_ROUTES = [
       'sc2-cart-checkout-missing',
       'sc6-cart-live-poll-cycle',
       'sc6-poll-recovery-rearm',
+      'sc6-repeated-nav-failed',
       'nav-failed-releases-lock',
     ],
     monitorProductPath: '/p/mock-fcfs-cart-missing/792',
