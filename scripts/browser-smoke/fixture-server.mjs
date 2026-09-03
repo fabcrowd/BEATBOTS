@@ -654,13 +654,14 @@ export const FIXTURE_E2E_ROUTES = [
     initLog: '[WMT] init',
     journey: 'WM-5',
     invariants: [
+      'wm5-pre-timeout-live-poll-cycle',
       'wm5-product-queue-timeout',
       'wm5-queue-timeout-clears-sacred-lock',
       'wm5-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-product-queue-timeout/458',
     pollRecoveryProductPath: '/ip/mock-product-queue-timeout-recovery/459',
-    queueTimeoutMs: 750,
+    queueTimeoutMs: 5000,
   },
   {
     host: 'www.walmart.com',
