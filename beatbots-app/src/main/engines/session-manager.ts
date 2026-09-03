@@ -2,7 +2,7 @@
 //
 // Target auth flow:
 //   1. POST /guests/v3/tokens  →  { access_token, token_type, expires_in }
-//   2. If MFA required: Target emails a 6-digit OTP → read from IMAP → POST /guests/v3/tokens again with otp field
+//   2. If MFA required: Target emails a 6-digit OTP → read from IMAP → POST /guests/v3/tokens again with otp + otp_id/login_id from the 449 body
 //   3. Token is a JWT, store in Account record, re-use for all API calls
 //   4. On 401 from any cart/checkout endpoint: re-login
 
@@ -208,6 +208,11 @@ export class SessionManager extends EventEmitter {
         // 449 = MFA required by Target
         if (resp.status === 449) {
           const otpLoginId = body?.otp_id || body?.login_id || ''
+          const otpLoginIdKey: 'otp_id' | 'login_id' | '' = body?.otp_id
+            ? 'otp_id'
+            : body?.login_id
+              ? 'login_id'
+              : ''
           this.emit('status', { accountId: account.id, status: 'logging_in', text: 'OTP required...' })
 
           // Try to read OTP from IMAP
@@ -217,8 +222,14 @@ export class SessionManager extends EventEmitter {
             return { ok: false, error: 'OTP required but IMAP not configured or timed out' }
           }
 
-          // Step 2: re-login with OTP
-          const otpResp = await this.doLoginRequest(account.email, account.password, otp)
+          // Step 2: re-login with OTP correlated to the pending MFA challenge
+          const otpResp = await this.doLoginRequest(
+            account.email,
+            account.password,
+            otp,
+            otpLoginId,
+            otpLoginIdKey
+          )
           if (!otpResp.ok) {
             upsert('accounts', { ...account, status: 'error' })
             return { ok: false, error: `OTP login failed: HTTP ${otpResp.status}` }
@@ -258,13 +269,20 @@ export class SessionManager extends EventEmitter {
     }
   }
 
-  private async doLoginRequest(email: string, password: string, otp?: string): Promise<Response> {
+  private async doLoginRequest(
+    email: string,
+    password: string,
+    otp?: string,
+    otpLoginId?: string,
+    otpLoginIdKey?: 'otp_id' | 'login_id' | ''
+  ): Promise<Response> {
     const body: Record<string, any> = {
       username: email,
       password,
       keep_me_signed_in: true,
     }
     if (otp) body.otp = otp
+    if (otpLoginId && otpLoginIdKey) body[otpLoginIdKey] = otpLoginId
 
     return fetch(`${TARGET_API_BASE}/guests/v3/tokens`, {
       method: 'POST',

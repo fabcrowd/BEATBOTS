@@ -610,6 +610,24 @@ await test('Session manager — visitor ID format', () => {
   assert.notEqual(id, id2, 'Two generated IDs should differ');
 });
 
+await test('Session manager — MFA OTP retry body includes otp_id/login_id', () => {
+  function buildLoginBody(email, password, otp, otpLoginId, otpLoginIdKey) {
+    const body = { username: email, password, keep_me_signed_in: true };
+    if (otp) body.otp = otp;
+    if (otpLoginId && otpLoginIdKey) body[otpLoginIdKey] = otpLoginId;
+    return body;
+  }
+
+  const withOtpId = buildLoginBody('e@test.com', 'pw', '123456', 'challenge-abc', 'otp_id');
+  assert.equal(withOtpId.otp, '123456');
+  assert.equal(withOtpId.otp_id, 'challenge-abc');
+  assert.equal(withOtpId.login_id, undefined);
+
+  const withLoginId = buildLoginBody('e@test.com', 'pw', '654321', 'challenge-def', 'login_id');
+  assert.equal(withLoginId.login_id, 'challenge-def');
+  assert.equal(withLoginId.otp_id, undefined);
+});
+
 await test('Session manager — token cache expiry with 60s early guard', () => {
   const tokenCache = new Map();
 
