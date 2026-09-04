@@ -4417,6 +4417,10 @@ function runWm5PreTimeoutLivePollCycleTests() {
       label: 'product-page queue pretimeout',
       productUrl: 'https://www.walmart.com/ip/mock-product-queue-pretimeout/460',
     },
+    {
+      label: 'product-page queue timeout',
+      productUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458',
+    },
   ];
 
   for (const { label, productUrl } of scenarios) {
