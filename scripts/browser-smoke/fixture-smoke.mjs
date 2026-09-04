@@ -575,6 +575,7 @@ const FIXTURE_MARKERS = {
     markers: [
       'data-tch-fixture="walmart-product-price-guard-timeout"',
       'data-tch-price-guard-timeout-ms="750"',
+      'data-tch-atc-wait-ms="750"',
       'itemprop="price"',
     ],
   },
