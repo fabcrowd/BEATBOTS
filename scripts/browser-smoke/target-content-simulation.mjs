@@ -2098,6 +2098,165 @@ function runTgt4CartCrossLivePollCycleTests() {
   );
 }
 
+/**
+ * TGT-4: repeated NAV_FAILED cycles must never arm sacred lock (cart checkout-missing).
+ * Parity with FIX-3 tgt-repeated-nav-failed on /cart/no-checkout (fixture-e2e has browser coverage).
+ */
+function runTgt4CartRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(monitorProductUrl, cartTabUrl, getInitialMsg, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'NAV_FAILED', `${label}: message type is NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normMonitorUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+    assert.notEqual(
+      normalizeProductUrl(initialMsg.url),
+      normCartTabUrl,
+      `${label}: NAV_FAILED must not key cart tab URL`
+    );
+
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normMonitorUrl);
+      bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; TGT-4 cart checkout-missing does not arm it`
+    );
+  }
+
+  const monitorProductUrl = 'https://www.target.com/p/-/A-88888888';
+  const cartTabUrl = 'https://www.target.com/cart/no-checkout';
+  const cartPage = makePage({ pathname: '/cart/no-checkout', elements: [] });
+  assertRepeatedNavFailedScenario(
+    monitorProductUrl,
+    cartTabUrl,
+    () => {
+      const cartResult = tgtHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+      assert.equal(cartResult.path, 'checkout_not_found', 'TGT-4 cart repeated NAV_FAILED: checkout-missing path');
+      const navFail = cartResult.messages.find((m) => m.type === 'NAV_FAILED');
+      assert.ok(navFail, 'TGT-4 cart repeated NAV_FAILED: sends NAV_FAILED');
+      assert.equal(
+        navFail.url,
+        monitorProductUrl,
+        'TGT-4 cart repeated NAV_FAILED: NAV_FAILED uses monitor productUrl'
+      );
+      return navFail;
+    },
+    'TGT-4 cart checkout-missing'
+  );
+  assert.match(TGT_SRC, /Checkout button not found/, 'TGT-4 cart repeated NAV_FAILED: checkout-missing log in source');
+}
+
+/**
+ * TGT-4: cross-page repeated NAV_FAILED cycles must never arm sacred lock (cart checkout-missing).
+ * Parity with FIX-3 tgt-repeated-nav-failed on /cart/no-checkout-cross (fixture-e2e has browser coverage).
+ */
+function runTgt4CartCrossRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(monitorProductUrl, cartTabUrl, getInitialMsg, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'NAV_FAILED', `${label}: message type is NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normMonitorUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+    assert.notEqual(
+      normalizeProductUrl(initialMsg.url),
+      normCartTabUrl,
+      `${label}: NAV_FAILED must not key cart tab URL`
+    );
+
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normMonitorUrl);
+      bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; TGT-4 cross-page cart checkout-missing does not arm it`
+    );
+  }
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-cart-cross-monitor/A-880088';
+  const cartTabUrl = 'https://www.target.com/cart/no-checkout-cross';
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  assertRepeatedNavFailedScenario(
+    monitorProductUrl,
+    cartTabUrl,
+    () => {
+      const cartResult = tgtHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+      assert.equal(
+        cartResult.path,
+        'checkout_not_found',
+        'TGT-4 cross-page cart repeated NAV_FAILED: checkout-missing path'
+      );
+      const navFail = cartResult.messages.find((m) => m.type === 'NAV_FAILED');
+      assert.ok(navFail, 'TGT-4 cross-page cart repeated NAV_FAILED: sends NAV_FAILED');
+      assert.equal(
+        navFail.url,
+        monitorProductUrl,
+        'TGT-4 cross-page cart repeated NAV_FAILED: NAV_FAILED uses monitor productUrl'
+      );
+      return navFail;
+    },
+    'TGT-4 cross-page cart checkout-missing'
+  );
+}
+
 function main() {
   testTgt1Source();
   testTgt4Source();
@@ -2124,13 +2283,15 @@ function main() {
   testTgt4ReviewCrossPagePollRecovery();
   runTgt4CartLivePollCycleTests();
   runTgt4CartCrossLivePollCycleTests();
+  runTgt4CartRepeatedNavFailedTests();
+  runTgt4CartCrossRepeatedNavFailedTests();
   testTgt4CheckoutSigninGate();
   testTgt4SigninPagePollRecovery();
   runTgt4SigninLivePollCycleTests();
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
