@@ -671,6 +671,7 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'no-sacred-lock',
       'wm6-price-guard-timeout',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],
