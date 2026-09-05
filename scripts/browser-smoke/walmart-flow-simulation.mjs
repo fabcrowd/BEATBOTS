@@ -1581,6 +1581,75 @@ async function runWm6CartCrossPagePollRecoveryTests() {
 }
 
 /**
+ * WM-6: cart poll recovery — tab on /cart/no-checkout, monitor keys /ip/mock-cart-missing/888.
+ * Parity with FIX-3 wm6-poll-recovery-rearm on cart (fixture-e2e has browser coverage).
+ */
+async function runWm6CartPollRecoveryTests() {
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-cart-missing/888';
+  const recoveryProductUrl = 'https://www.walmart.com/ip/mock-no-atc/559';
+  const cartTabUrl = 'https://www.walmart.com/cart/no-checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+
+  const cartPage = makePage({ pathname: '/cart/no-checkout', elements: [] });
+  const cartResult = await wmHandleCartSim(cartPage, { productUrl: monitorProductUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'WM-6 cart: missing checkout path');
+  assert.deepEqual(cartResult.actions, ['checkout_missing'], 'WM-6 cart: checkout_missing action');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  assert.equal(inQueueUrls.size, 0, 'WM-6 cart: must not arm sacred lock at cart');
+  assert.ok(
+    !inQueueUrls.has(normCartTabUrl),
+    'WM-6 cart: cart tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !navigationLock.has(normCartTabUrl),
+    'WM-6 cart: cart tab URL must not be navigationLock key at cart'
+  );
+
+  const navFail = cartResult.messages?.find((m) => m.type === 'WALMART_NAV_FAILED');
+  assert.ok(navFail, 'WM-6 cart: sends WALMART_NAV_FAILED');
+  assert.equal(
+    navFail.url,
+    monitorProductUrl,
+    'WM-6 cart: live poll NAV_FAILED uses monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFail.url),
+    normCartTabUrl,
+    'WM-6 cart: NAV_FAILED must not key cart tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'WM-6 cart: NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'WM-6 cart: NAV_FAILED releases navigationLock on monitor product'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'WM-6 cart: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'WM-6 cart: poll recovery must not arm sacred lock');
+
+  bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: recoveryProductUrl,
+  });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'WM-6 cart: NAV_FAILED during poll recovery releases recovery lock'
+  );
+}
+
+/**
  * WM-6: pre-drop + missing-atc + PX timeout NAV_FAILED → poll recovery rearm — no sacred lock.
  * Parity with FIX-3 wm6-poll-recovery-rearm (fixture-e2e has browser coverage).
  */
@@ -5076,6 +5145,7 @@ async function main() {
   await runWm6CartCheckoutMissingTests();
   await runWm6CartCrossPageCheckoutMissingTests();
   await runWm6CartCrossPagePollRecoveryTests();
+  await runWm6CartPollRecoveryTests();
   await runWm6CartLivePollCycleTests();
   await runWm6CartRepeatedNavFailedTests();
   await runWm6CartCrossLivePollCycleTests();
@@ -5098,7 +5168,7 @@ async function main() {
   runWm6PxCrossPollRecoveryTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 repeated NAV_FAILED, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 cross-page checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, WM-6 repeated NAV_FAILED, missing-atc live poll cycle, cross-page missing-atc live poll cycle, cross-page missing-atc poll recovery, cross-page missing-atc repeated NAV_FAILED, cart live poll cycle, cart repeated NAV_FAILED, cross-page cart poll recovery, cross-page cart live poll cycle, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA poll recovery, cross-page checkout SPA repeated NAV_FAILED, price-guard timeout, price-guard live poll cycle, cross-page price-guard live poll cycle, cross-page price-guard poll recovery, cross-page price-guard repeated NAV_FAILED, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, cross-page PX live poll cycle, cross-page PX poll recovery, cross-page PX repeated NAV_FAILED, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 repeated NAV_FAILED, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 checkout SPA live poll cycle, WM-5 cross-page checkout SPA live poll cycle, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, WM-6 repeated NAV_FAILED, missing-atc live poll cycle, cross-page missing-atc live poll cycle, cross-page missing-atc poll recovery, cross-page missing-atc repeated NAV_FAILED, cart poll recovery, cart live poll cycle, cart repeated NAV_FAILED, cross-page cart poll recovery, cross-page cart live poll cycle, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA poll recovery, cross-page checkout SPA repeated NAV_FAILED, price-guard timeout, price-guard live poll cycle, cross-page price-guard live poll cycle, cross-page price-guard poll recovery, cross-page price-guard repeated NAV_FAILED, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, cross-page PX live poll cycle, cross-page PX poll recovery, cross-page PX repeated NAV_FAILED, offerId ready'
   );
 }
 
