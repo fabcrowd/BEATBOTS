@@ -1347,6 +1347,7 @@ async function handleProductPage(settings) {
     if (buyNowBtn && !buyNowBtn.disabled) {
       console.log('[TCH] clicking Buy It Now (saved payment mode)');
       markCheckoutStart('saved');
+      await maybeApplyHarvestedSession(settings);
       await debuggerClick(buyNowBtn);
       showToast('Buy It Now → checkout…');
       setNavigationMark('product_to_checkout');
@@ -1423,6 +1424,7 @@ async function handleProductPage(settings) {
       const viewCartBtn = await waitForAny([{ sel: SEL.viewCart }], 2500);
       markCartReady(); // modal confirmed — item is in cart
       setNavigationMark('product_to_checkout');
+      await maybeApplyHarvestedSession(settings);
       await debuggerClick(viewCartBtn);
       return;
     } catch {
