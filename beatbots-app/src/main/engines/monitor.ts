@@ -230,7 +230,8 @@ export class MonitorEngine extends EventEmitter {
       const BLOCKED = /^(OUT_OF_STOCK|UNAVAILABLE|NOT_AVAILABLE|SOLD_OUT)$/i
 
       const shippingStatus = shippingOpts?.availability_status ?? ''
-      const inStock = SELLABLE.test(shippingStatus) && !BLOCKED.test(shippingStatus)
+      const soldOut = fulfillment.sold_out === true
+      const inStock = SELLABLE.test(shippingStatus) && !BLOCKED.test(shippingStatus) && !soldOut
 
       const qty = shippingOpts?.available_to_promise_quantity ?? null
       const price = data?.data?.product?.price?.current_retail ?? null

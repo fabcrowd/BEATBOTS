@@ -422,7 +422,8 @@ await test('Monitor — parseStockStatus handles all fulfillment shapes', () => 
       if (!fulfillment) return { inStock: false };
       const shippingOpts = fulfillment.shipping_options;
       const shippingStatus = shippingOpts?.availability_status ?? '';
-      const inStock = SELLABLE.test(shippingStatus);
+      const soldOut = fulfillment.sold_out === true;
+      const inStock = SELLABLE.test(shippingStatus) && !soldOut;
       const qty = shippingOpts?.available_to_promise_quantity ?? null;
       const price = data?.data?.product?.price?.current_retail ?? null;
       return { inStock, availableQty: qty, price };
@@ -449,6 +450,12 @@ await test('Monitor — parseStockStatus handles all fulfillment shapes', () => 
     data: { product: { fulfillment: { shipping_options: { availability_status: 'OUT_OF_STOCK', available_to_promise_quantity: 0 } } } }
   });
   assert.equal(oos.inStock, false);
+
+  // sold_out flag overrides sellable-looking availability_status (extension parity)
+  const soldOutFlag = parseStockStatus({
+    data: { product: { fulfillment: { sold_out: true, shipping_options: { availability_status: 'IN_STOCK', available_to_promise_quantity: 10 } } } }
+  });
+  assert.equal(soldOutFlag.inStock, false, 'fulfillment.sold_out blocks false in-stock signal');
 
   // Missing fulfillment
   assert.equal(parseStockStatus({}).inStock, false);
