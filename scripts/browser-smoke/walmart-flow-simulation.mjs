@@ -4996,6 +4996,101 @@ function runWm5LivePollCycleTests() {
 }
 
 /**
+ * WM-4: unmonitored /qp and /checkout without productUrl — warn, detect queue, no sacred lock.
+ * Parity with FIX-3 wm4-qp-no-producturl and wm4-checkout-no-producturl (fixture-e2e has browser coverage).
+ */
+function runWm4NoProductUrlTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    WMT_SRC,
+    /wmHandleQueueRoom: no productUrl in settings — background nav lock NOT set/,
+    'WM-4 wm4-qp-no-producturl: missing productUrl warning in source'
+  );
+  assert.match(
+    WMT_SRC,
+    /\/qp waiting room detected — passive hold, DO NOT navigate/,
+    'WM-4 wm4-qp-no-producturl: /qp detection log in source'
+  );
+  assert.match(
+    WMT_SRC,
+    /wmHandleQueue: no productUrl in settings — background nav lock NOT set/,
+    'WM-4 wm4-checkout-no-producturl: missing productUrl warning in source'
+  );
+  assert.match(
+    WMT_SRC,
+    /Queue detected — passive wait started/,
+    'WM-4 wm4-checkout-no-producturl: checkout queue detection log in source'
+  );
+
+  const scenarios = [
+    {
+      invariant: 'wm4-qp-no-producturl',
+      label: '/qp waiting room without monitor',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room',
+      lockMessages: () => wmQueueRoomSacredLockMessages({}),
+    },
+    {
+      invariant: 'wm4-checkout-no-producturl',
+      label: '/checkout queue without monitor',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored',
+      lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
+    },
+  ];
+
+  for (const { invariant, label, pageUrl, lockMessages } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.deepEqual(
+      lockMessages(),
+      [],
+      `${label} (${invariant}): no productUrl must not send WALMART_IN_QUEUE`
+    );
+
+    for (const msg of lockMessages()) {
+      bgApplyWalmartInQueue(inQueueUrls, msg);
+    }
+    assert.equal(inQueueUrls.size, 0, `${label} (${invariant}): must not arm inQueueUrls`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label} (${invariant}): queue tab URL must not be sacred lock key`
+    );
+
+    navigationLock.add(normPageUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: pageUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label} (${invariant}): NAV_FAILED must not arm sacred lock without productUrl`
+    );
+    assert.ok(
+      !bgPollWouldSkipNavigation(normPageUrl, inQueueUrls, navigationLock),
+      `${label} (${invariant}): poll may retry on unmonitored queue page (no sacred lock)`
+    );
+
+    const monitoredProduct = 'https://www.walmart.com/ip/mock-wm4-contrast/888';
+    const normMonitored = normalizeProductUrl(monitoredProduct);
+    bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitoredProduct });
+    assert.ok(
+      inQueueUrls.has(normMonitored),
+      `${label} (${invariant}): contrast — monitored productUrl arms sacred lock`
+    );
+    assert.ok(
+      bgPollWouldSkipNavigation(normMonitored, inQueueUrls, new Set()),
+      `${label} (${invariant}): contrast WM-5 — sacred lock blocks poll when productUrl set`
+    );
+    inQueueUrls.clear();
+  }
+}
+
+/**
  * WM-4: unmonitored queue live poll cycle — reload + NAV_FAILED must not arm sacred lock.
  * Parity with FIX-3 wm4-live-poll-cycle on unmonitored /qp + /checkout (Target-only monitor).
  */
@@ -5400,6 +5495,7 @@ async function main() {
   await runWm2FlowTests();
   runWm3MainWorldQueueTests();
   runWm4SacredLockTests();
+  runWm4NoProductUrlTests();
   runWm5SacredLockNavTests();
   runWm5ProductQueuePollCrossPagePollRecoveryTests();
   runWm5CheckoutSpaCrossPageSacredPollRecoveryTests();
@@ -5446,7 +5542,7 @@ async function main() {
   runWm6PxCrossPollRecoveryTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 repeated NAV_FAILED, WebSocket sniff, sacred lock, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 queue timeout clears sacred lock, WM-5 checkout SPA timeout clears sacred lock, WM-5 checkout SPA live poll cycle, WM-5 cross-page checkout SPA live poll cycle, WM-5 sacred survives NAV_FAILED, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, WM-6 repeated NAV_FAILED, missing-atc live poll cycle, cross-page missing-atc live poll cycle, cross-page missing-atc poll recovery, cross-page missing-atc repeated NAV_FAILED, cart poll recovery, cart live poll cycle, cart repeated NAV_FAILED, cross-page cart poll recovery, cross-page cart live poll cycle, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA poll recovery, cross-page checkout SPA repeated NAV_FAILED, price-guard timeout, price-guard live poll cycle, cross-page price-guard live poll cycle, cross-page price-guard poll recovery, cross-page price-guard repeated NAV_FAILED, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, cross-page PX live poll cycle, cross-page PX poll recovery, cross-page PX repeated NAV_FAILED, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 repeated NAV_FAILED, WebSocket sniff, sacred lock, WM-4 no-producturl queue paths, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 queue timeout clears sacred lock, WM-5 checkout SPA timeout clears sacred lock, WM-5 checkout SPA live poll cycle, WM-5 cross-page checkout SPA live poll cycle, WM-5 sacred survives NAV_FAILED, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-6 poll recovery rearm, WM-6 repeated NAV_FAILED, missing-atc live poll cycle, cross-page missing-atc live poll cycle, cross-page missing-atc poll recovery, cross-page missing-atc repeated NAV_FAILED, cart poll recovery, cart live poll cycle, cart repeated NAV_FAILED, cross-page cart poll recovery, cross-page cart live poll cycle, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA poll recovery, cross-page checkout SPA repeated NAV_FAILED, price-guard timeout, price-guard live poll cycle, cross-page price-guard live poll cycle, cross-page price-guard poll recovery, cross-page price-guard repeated NAV_FAILED, PX timeout override, PX live poll cycle, PX fixture routes live poll cycle, cross-page PX live poll cycle, cross-page PX poll recovery, cross-page PX repeated NAV_FAILED, offerId ready'
   );
 }
 
