@@ -96,9 +96,15 @@ export class CheckoutEngine {
     // ── Step 0: Clear any open cart to avoid "cart in use" errors ─────────
 
     onStatus('Clearing cart...')
-    await this.clearCart(session, abortSignal).catch(() => {
-      // Non-fatal — if there's no cart or clearing fails, proceed anyway
-    })
+    const cartReady = await this.ensureCartCleared(session, abortSignal)
+    if (!cartReady.ok) {
+      return {
+        ok: false,
+        error: cartReady.error || 'Could not clear existing cart before checkout',
+        retryable: true,
+        durationMs: Date.now() - startMs,
+      }
+    }
 
     // ── Step 1: Wait for / consume Shape cookie ────────────────────────────
 
@@ -197,12 +203,47 @@ export class CheckoutEngine {
 
   // ─── Clear Cart ───────────────────────────────────────────────────────────
 
-  private async clearCart(session: SessionContext, signal: AbortSignal): Promise<void> {
-    await this.fetch(`${CHECKOUT_BASE}/cart`, {
-      method: 'DELETE',
-      session,
-      signal,
-    })
+  /** Abort checkout when DELETE fails but GET still shows line items (stale cart → multi-item charge). */
+  private async ensureCartCleared(
+    session: SessionContext,
+    signal: AbortSignal,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const cleared = await this.clearCart(session, signal)
+    if (cleared.ok) return { ok: true }
+    if (await this.cartHasNoItems(session, signal)) return { ok: true }
+    return { ok: false, error: 'Existing cart could not be cleared before checkout' }
+  }
+
+  private async clearCart(session: SessionContext, signal: AbortSignal): Promise<{ ok: boolean }> {
+    try {
+      const resp = await this.fetch(`${CHECKOUT_BASE}/cart`, {
+        method: 'DELETE',
+        session,
+        signal,
+      })
+      if (resp.ok || resp.status === 404) return { ok: true }
+      return { ok: false }
+    } catch {
+      return { ok: false }
+    }
+  }
+
+  private async cartHasNoItems(session: SessionContext, signal: AbortSignal): Promise<boolean> {
+    try {
+      const resp = await this.fetch(`${CHECKOUT_BASE}/cart`, {
+        method: 'GET',
+        session,
+        signal,
+      })
+      if (resp.status === 404) return true
+      if (!resp.ok) return false
+      const data = await resp.json().catch(() => ({})) as any
+      const items = data?.cart?.cart_items ?? data?.cart_items
+      if (!Array.isArray(items)) return true
+      return items.length === 0
+    } catch {
+      return false
+    }
   }
 
   // ─── ATC ──────────────────────────────────────────────────────────────────

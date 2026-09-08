@@ -528,6 +528,19 @@ await test('Checkout engine — OOS detection on ATC response', () => {
   assert.ok(!detectOOS(200, {}).outOfStock);
 });
 
+await test('Checkout engine — cart empty check after failed clear', () => {
+  function cartHasNoItems(data) {
+    const items = data?.cart?.cart_items ?? data?.cart_items;
+    if (!Array.isArray(items)) return true;
+    return items.length === 0;
+  }
+
+  assert.ok(cartHasNoItems({}), 'missing items treated as empty');
+  assert.ok(cartHasNoItems({ cart: { cart_items: [] } }), 'empty cart_items');
+  assert.ok(!cartHasNoItems({ cart: { cart_items: [{ tcin: '123' }] } }), 'line item blocks checkout');
+  assert.ok(!cartHasNoItems({ cart_items: [{ tcin: '456' }] }), 'flat cart_items form');
+});
+
 await test('Checkout engine — order ID & total parsing from place_order response', () => {
   function parseOrderResponse(data) {
     const orderId = data?.order?.id || data?.order_id || '';
