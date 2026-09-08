@@ -1299,6 +1299,64 @@ function testSc4CheckoutTimeoutNavFailed() {
 }
 
 /**
+ * SC-4: checkout SPA timeout — NAV_FAILED clears navigationLock, no sacred lock.
+ * Parity with FIX-3 sc4-checkout-spa-timeout on /checkout/spa-stall (fixture-e2e has browser coverage).
+ */
+function runSc4CheckoutSpaTimeoutTests() {
+  assert.match(SC_SRC, /scHandleCheckout timed out/, 'SC-4 checkout SPA timeout: timeout log in source');
+  assert.match(
+    SC_SRC,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'SC-4 checkout SPA timeout: uses settings.productUrl before location.href'
+  );
+  assert.match(
+    SC_SRC,
+    /Checkout step timeout — take over manually/,
+    'SC-4 checkout SPA timeout: user-facing toast in source'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout/spa-stall';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'SC-4 checkout SPA timeout: must not arm sacred lock on checkout stall');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'SC-4 checkout SPA timeout: checkout tab URL must not be sacred lock key'
+  );
+
+  const navFailMsg = { type: 'SAMS_NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    normalizeProductUrl(navFailMsg.url),
+    normMonitorUrl,
+    'SC-4 checkout SPA timeout: NAV_FAILED must key monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFailMsg.url),
+    normCheckoutTabUrl,
+    'SC-4 checkout SPA timeout: NAV_FAILED must not key checkout tab URL'
+  );
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFailMsg);
+  assert.equal(inQueueUrls.size, 0, 'SC-4 checkout SPA timeout: SAMS_NAV_FAILED must not arm inQueueUrls');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-4 checkout SPA timeout: SAMS_NAV_FAILED clears navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'SC-4 checkout SPA timeout: poll may retry monitor product after timeout'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-4 checkout SPA timeout: contrast WM-5 — sacred lock would block poll; checkout stall without queue does not arm it'
+  );
+}
+
+/**
  * SC-4: repeated SAMS_NAV_FAILED cycles must never arm sacred lock (checkout SPA timeout).
  * Parity with FIX-3 sc4-repeated-nav-failed on /checkout/spa-stall (fixture-e2e has browser coverage).
  */
@@ -2682,6 +2740,7 @@ function main() {
   testSc4ManualReviewStop();
   testSc4CheckoutReviewPath();
   testSc4CheckoutTimeoutNavFailed();
+  runSc4CheckoutSpaTimeoutTests();
   runSc4RepeatedNavFailedTests();
   runSc4CheckoutSpaCrossRepeatedNavFailedTests();
   runSc4PollRecoveryRearmTests();
@@ -2692,7 +2751,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
