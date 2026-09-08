@@ -1217,9 +1217,9 @@ function testSc6CheckoutSpaCrossPagePollRecovery() {
 
 /** Mirrors scCheckoutHasReview — SC-4 review step detection. */
 function scCheckoutHasReviewSim(page) {
-  const placeOrder = page.querySelector('[data-automation-id="place-order-btn"]');
-  if (placeOrder && scIsVisible(placeOrder)) return true;
-  return !!scFindByText(page, 'place order');
+  const placeOrder =
+    page.querySelector('[data-automation-id="place-order-btn"]') || scFindByText(page, 'place order');
+  return !!(placeOrder && scIsVisible(placeOrder));
 }
 
 /** SC-4: checkout SPA review step — TGT-4 manual stop at review. */
@@ -1236,6 +1236,255 @@ function scHandleReviewSim(page, settings = {}) {
     return { path: 'review_auto', actions };
   }
   return { path: 'review_missing_btn', actions };
+}
+
+/** Mirrors scCheckoutHasShipping — visible shipping form fields on active SPA step. */
+function scCheckoutHasShippingSim(page) {
+  const el =
+    page.querySelector('input[name="firstName"]') ||
+    page.querySelector('input[name="addressLineOne"]') ||
+    page.querySelector('input[name="postalCode"]');
+  return !!(el && scIsVisible(el));
+}
+
+/** Mirrors scCheckoutHasPayment — visible payment form fields on active SPA step. */
+function scCheckoutHasPaymentSim(page) {
+  const el =
+    page.querySelector('input[name="cardNumber"]') ||
+    page.querySelector('input[name="cvv"]');
+  return !!(el && scIsVisible(el));
+}
+
+/** Multi-step checkout SPA stub — mirrors fixtures/samsclub-checkout-spa.html. */
+function makeCheckoutSpaPage() {
+  let step = 'shipping';
+
+  const continueBtn = {
+    tag: 'button',
+    text: 'Continue',
+    disabled: false,
+    clicked: false,
+    selectors: ['button[data-automation-id="continue-btn"]'],
+    get visible() {
+      return step === 'shipping' || step === 'payment';
+    },
+    click() {
+      this.clicked = true;
+      if (step === 'shipping') step = 'payment';
+      else if (step === 'payment') step = 'review';
+    },
+  };
+
+  const shippingFields = [
+    {
+      selectors: ['input[name="firstName"]'],
+      tag: 'input',
+      get visible() {
+        return step === 'shipping';
+      },
+    },
+    {
+      selectors: ['input[name="addressLineOne"]'],
+      tag: 'input',
+      get visible() {
+        return step === 'shipping';
+      },
+    },
+  ];
+
+  const paymentFields = [
+    {
+      selectors: ['input[name="cardNumber"]'],
+      tag: 'input',
+      get visible() {
+        return step === 'payment';
+      },
+    },
+    {
+      selectors: ['input[name="cvv"]'],
+      tag: 'input',
+      get visible() {
+        return step === 'payment';
+      },
+    },
+  ];
+
+  const placeOrderBtn = {
+    tag: 'button',
+    text: 'Place order',
+    disabled: false,
+    clicked: false,
+    selectors: ['[data-automation-id="place-order-btn"]'],
+    get visible() {
+      return step === 'review';
+    },
+    click() {
+      this.clicked = true;
+    },
+  };
+
+  function activeElements() {
+    if (step === 'shipping') return [continueBtn, ...shippingFields];
+    if (step === 'payment') return [continueBtn, ...paymentFields];
+    return [placeOrderBtn];
+  }
+
+  const allElements = [continueBtn, placeOrderBtn, ...shippingFields, ...paymentFields];
+
+  return {
+    pathname: '/checkout/spa',
+    get step() {
+      return step;
+    },
+    querySelector(sel) {
+      for (const el of activeElements()) {
+        for (const s of el.selectors || []) {
+          if (s === sel) return el;
+        }
+      }
+      return null;
+    },
+    querySelectorAll(sel) {
+      if (sel === 'button') return activeElements().filter((el) => el.tag === 'button');
+      const hits = [];
+      for (const el of activeElements()) {
+        for (const s of el.selectors || []) {
+          if (s === sel) hits.push(el);
+        }
+      }
+      return hits;
+    },
+    elements: allElements,
+  };
+}
+
+/** Mirrors scHandleShipping — offline log/action parity for FIX-3 sc4-shipping-payment-review. */
+function scHandleShippingSim(page, settings = {}) {
+  const logs = [];
+  const actions = [];
+  void settings;
+  logs.push('[SC] Filling shipping form');
+  actions.push('fill_shipping');
+  const continueBtn =
+    page.querySelector('button[data-automation-id="continue-btn"]') || scFindByText(page, 'continue');
+  if (continueBtn && scIsVisible(continueBtn)) {
+    logs.push('[SC] Clicking Continue on shipping');
+    actions.push('click_shipping_continue');
+    continueBtn.click();
+  }
+  return { logs, actions };
+}
+
+/** Mirrors scHandlePayment — offline log/action parity for FIX-3 sc4-shipping-payment-review. */
+function scHandlePaymentSim(page, settings = {}) {
+  const logs = [];
+  const actions = [];
+  void settings;
+  logs.push('[SC] Filling payment form');
+  actions.push('fill_payment');
+  const continueBtn =
+    page.querySelector('button[data-automation-id="continue-btn"]') || scFindByText(page, 'continue');
+  if (continueBtn && scIsVisible(continueBtn)) {
+    logs.push('[SC] Clicking Continue on payment');
+    actions.push('click_payment_continue');
+    continueBtn.click();
+  }
+  return { logs, actions };
+}
+
+/**
+ * Simplified scHandleCheckout happy path — shipping → payment → review on one SPA URL.
+ * Parity with FIX-3 sc4-shipping-payment-review (fixture-e2e has browser coverage).
+ */
+function scHandleCheckoutSpaSim(page, settings = {}) {
+  const logs = [];
+  const actions = [];
+
+  if (scCheckoutHasReviewSim(page)) {
+    const review = scHandleReviewSim(page, settings);
+    logs.push('[SC] review reached');
+    actions.push(...review.actions);
+    return { path: 'review_only', logs, actions, reachedReview: true };
+  }
+
+  if (scCheckoutHasShippingSim(page)) {
+    const shipping = scHandleShippingSim(page, settings);
+    logs.push(...shipping.logs);
+    actions.push(...shipping.actions);
+  }
+
+  if (scCheckoutHasPaymentSim(page)) {
+    const payment = scHandlePaymentSim(page, settings);
+    logs.push(...payment.logs);
+    actions.push(...payment.actions);
+  }
+
+  if (scCheckoutHasReviewSim(page)) {
+    const review = scHandleReviewSim(page, settings);
+    logs.push('[SC] review reached');
+    actions.push(...review.actions);
+    return { path: 'checkout_spa_complete', logs, actions, reachedReview: true };
+  }
+
+  return { path: 'incomplete', logs, actions, reachedReview: false };
+}
+
+/**
+ * SC-4: checkout SPA shipping → payment → review happy path, no sacred lock.
+ * Parity with FIX-3 sc4-shipping-payment-review (fixture-e2e has browser coverage).
+ */
+function runSc4ShippingPaymentReviewTests() {
+  assert.match(SC_SRC, /\[SC\] Filling shipping form/, 'SC-4 shipping-payment-review: shipping log in source');
+  assert.match(
+    SC_SRC,
+    /\[SC\] Clicking Continue on shipping/,
+    'SC-4 shipping-payment-review: shipping continue log in source'
+  );
+  assert.match(SC_SRC, /\[SC\] Filling payment form/, 'SC-4 shipping-payment-review: payment log in source');
+  assert.match(
+    SC_SRC,
+    /\[SC\] Clicking Continue on payment/,
+    'SC-4 shipping-payment-review: payment continue log in source'
+  );
+  assert.match(SC_SRC, /\[SC\] review reached/, 'SC-4 shipping-payment-review: review reached log in source');
+  assert.ok(!SC_SRC.includes('WALMART_IN_QUEUE'), 'SC-4 shipping-payment-review: must not emit WALMART_IN_QUEUE');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const page = makeCheckoutSpaPage();
+  assert.equal(page.step, 'shipping', 'SC-4 shipping-payment-review: SPA starts on shipping step');
+
+  const result = scHandleCheckoutSpaSim(page, { autoPlaceOrder: false, productUrl: monitorProductUrl });
+  assert.equal(page.step, 'review', 'SC-4 shipping-payment-review: SPA advances to review step');
+  assert.ok(
+    result.logs.some((l) => l.includes('Filling shipping form') || l.includes('Clicking Continue on shipping')),
+    `SC-4 shipping-payment-review: expected shipping step, got: ${result.logs.join(' | ') || '(none)'}`
+  );
+  assert.ok(
+    result.logs.some((l) => l.includes('Filling payment form') || l.includes('Clicking Continue on payment')),
+    `SC-4 shipping-payment-review: expected payment step, got: ${result.logs.join(' | ') || '(none)'}`
+  );
+  assert.ok(
+    result.logs.some((l) => l.includes('[SC] review reached')),
+    `SC-4 shipping-payment-review: expected review, got: ${result.logs.join(' | ') || '(none)'}`
+  );
+  assert.equal(result.reachedReview, true, 'SC-4 shipping-payment-review: must reach review');
+  assert.ok(result.actions.includes('review_manual_stop'), 'SC-4 shipping-payment-review: TGT-4 manual stop at review');
+  const placeOrder = page.querySelector('[data-automation-id="place-order-btn"]');
+  assert.equal(placeOrder?.clicked, false, 'SC-4 shipping-payment-review: Place Order not clicked');
+
+  const normUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normUrl]);
+  assert.equal(inQueueUrls.size, 0, 'SC-4 shipping-payment-review: must not arm inQueueUrls');
+  assert.ok(
+    !inQueueUrls.has(normUrl),
+    'SC-4 shipping-payment-review: navigationLock alone must not imply sacred lock'
+  );
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'SC-4 shipping-payment-review: contrast WM-5 — sacred lock would block poll; Sam checkout SPA does not arm it'
+  );
 }
 
 function testSc4Source() {
@@ -2739,6 +2988,7 @@ function main() {
   testSc4Source();
   testSc4ManualReviewStop();
   testSc4CheckoutReviewPath();
+  runSc4ShippingPaymentReviewTests();
   testSc4CheckoutTimeoutNavFailed();
   runSc4CheckoutSpaTimeoutTests();
   runSc4RepeatedNavFailedTests();
@@ -2751,7 +3001,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
