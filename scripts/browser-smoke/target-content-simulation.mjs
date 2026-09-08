@@ -817,6 +817,64 @@ function runTgt4PollRecoveryRearmTests() {
 }
 
 /**
+ * TGT-4: checkout SPA stall timeout → NAV_FAILED clears navigationLock, no sacred lock.
+ * Parity with FIX-3 tgt4-checkout-spa-timeout (fixture-e2e has browser coverage).
+ */
+function runTgt4CheckoutSpaTimeoutTests() {
+  assert.match(TGT_SRC, /handleCheckoutStall timed out/, 'TGT-4 checkout SPA timeout: timeout log in source');
+  assert.match(
+    TGT_SRC,
+    /signalNavFailed\(settings\.productUrl \|\| getRememberedProductUrl\(\) \|\| location\.href\)/,
+    'TGT-4 checkout SPA timeout: uses settings.productUrl before location.href'
+  );
+  assert.match(
+    TGT_SRC,
+    /Checkout step timeout — take over manually/,
+    'TGT-4 checkout SPA timeout: user-facing toast in source'
+  );
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-checkout-spa-stall/794';
+  const checkoutTabUrl = 'https://www.target.com/checkout/spa-stall';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 checkout SPA timeout: must not arm sacred lock on checkout stall');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'TGT-4 checkout SPA timeout: checkout tab URL must not be sacred lock key'
+  );
+
+  const navFailMsg = { type: 'NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    normalizeProductUrl(navFailMsg.url),
+    normMonitorUrl,
+    'TGT-4 checkout SPA timeout: NAV_FAILED must key monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFailMsg.url),
+    normCheckoutTabUrl,
+    'TGT-4 checkout SPA timeout: NAV_FAILED must not key checkout tab URL'
+  );
+
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFailMsg);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 checkout SPA timeout: NAV_FAILED must not arm inQueueUrls');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'TGT-4 checkout SPA timeout: NAV_FAILED clears navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'TGT-4 checkout SPA timeout: poll may retry monitor product after timeout'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4 checkout SPA timeout: contrast WM-5 — sacred lock would block poll; checkout stall without queue does not arm it'
+  );
+}
+
+/**
  * TGT-4: checkout SPA live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 tgt4-checkout-spa-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -2114,6 +2172,7 @@ function main() {
   testTgt4CartCrossPagePollRecovery();
   testTgt4CheckoutSpaCrossPagePollRecovery();
   runTgt4PollRecoveryRearmTests();
+  runTgt4CheckoutSpaTimeoutTests();
   runTgt4CheckoutSpaLivePollCycleTests();
   runTgt4CheckoutSpaRepeatedNavFailedTests();
   runTgt4CheckoutSpaCrossLivePollCycleTests();
@@ -2130,7 +2189,7 @@ function main() {
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, manual review stop, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA timeout, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, signin gate pending, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 
