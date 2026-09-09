@@ -186,7 +186,7 @@ async function handleSignInPage(settings, opts = {}) {
   }
   try {
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
-  const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
+  let { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
   if (getPageType() === 'checkout') {
     if (isCheckoutSignedInConfirm()) {
@@ -237,8 +237,12 @@ async function handleSignInPage(settings, opts = {}) {
   // Step 1: email field only visible — Target's two-step login flow.
   if (emailInput && !passInput) {
     if (getPageType() === 'checkout' && (isCheckoutSignedInConfirm() || looksLoggedInOnTarget())) {
-      try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      if (await tryCheckoutSignedInContinue()) return;
+      if (await tryCheckoutSignedInContinue()) {
+        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
+        return;
+      }
+      console.log('[TCH] auto sign-in: session looks logged in but continue not found — waiting');
+      return;
     }
     console.log('[TCH] auto sign-in: step 1 — filling email via CDP');
     showToast('Auto sign-in: entering email…', 'persistent');
@@ -362,9 +366,6 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
     setTimeout(() => {
       obs.disconnect();
       console.log('[TCH] auto sign-in: timed out waiting for password step');
-      if (getPageType() === 'checkout' && (looksLoggedInOnTarget() || isCheckoutSignedInConfirm())) {
-        try { sessionStorage.removeItem(SIGNIN_EMAIL_STEP_KEY); } catch {}
-      }
       resolve();
     }, timeoutMs);
   });
