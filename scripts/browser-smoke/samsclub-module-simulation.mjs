@@ -2265,6 +2265,74 @@ function runSc6RepeatedNavFailedTests() {
 }
 
 /**
+ * SC-6: invisible enabled ATC element — wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
+ * Parity with FIX-3 sc6-invisible-atc on /p/mock-fcfs-invisible-atc/791 (fixture-e2e has browser coverage).
+ */
+function runSc6InvisibleAtcElementTests() {
+  assert.match(SC_SRC, /ATC button not found or disabled/, 'SC-6 invisible-atc: timeout log in source');
+  assert.match(SC_SRC, /scAtcWaitTimeoutMs/, 'SC-6 invisible-atc: ATC wait helper in source');
+  assert.match(SC_SRC, /scIsVisible/, 'SC-6 invisible-atc: visibility check in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
+  const invisiblePage = makePage({
+    pathname: '/p/mock-fcfs-invisible-atc/791',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: false,
+        visible: false,
+      },
+    ],
+    docAttrs: {
+      'data-tch-fixture': 'samsclub-product-fcfs-invisible-atc',
+      'data-tch-atc-wait-ms': '750',
+    },
+  });
+
+  const entryDecision = scDecideProductPageEntry(invisiblePage);
+  assert.equal(entryDecision.action, 'atc_unavailable', 'SC-6 invisible-atc: invisible ATC is nav_failed');
+  assert.ok(
+    !entryDecision.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'SC-6 invisible-atc: must not enter Walmart queue semantics on entry'
+  );
+
+  const handleResult = scHandleProductPageSim(invisiblePage);
+  assert.equal(handleResult.path, 'atc_unavailable', 'SC-6 invisible-atc: must not proceed to cart');
+  assert.ok(
+    !handleResult.actions.includes('click_atc'),
+    'SC-6 invisible-atc: must not click invisible ATC button'
+  );
+
+  assert.equal(
+    scSimulateWaitForDisabledAtc(invisiblePage).action,
+    'atc_timeout',
+    'SC-6 invisible-atc: invisible ATC wait ends in timeout'
+  );
+
+  const timeoutMsgs = scInvisibleAtcTimeoutMessages(invisiblePage, monitorProductUrl);
+  assert.equal(timeoutMsgs.length, 1, 'SC-6 invisible-atc: ATC wait timeout sends NAV_FAILED');
+  assert.equal(timeoutMsgs[0].type, 'SAMS_NAV_FAILED', 'SC-6 invisible-atc: message type is SAMS_NAV_FAILED');
+  assert.equal(timeoutMsgs[0].url, monitorProductUrl, 'SC-6 invisible-atc: NAV_FAILED uses monitor productUrl');
+
+  const normUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, timeoutMsgs[0]);
+  assert.equal(inQueueUrls.size, 0, 'SC-6 invisible-atc: must not arm sacred lock');
+  assert.ok(!navigationLock.has(normUrl), 'SC-6 invisible-atc: releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    'SC-6 invisible-atc: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'SC-6 invisible-atc: contrast WM-5 — sacred lock would block poll; invisible ATC does not arm it'
+  );
+}
+
+/**
  * SC-6: invisible-ATC product page live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 sc5-sc6-live-poll-cycle on /p/mock-fcfs-invisible-atc/791 (fixture-e2e has browser coverage).
  */
@@ -2977,6 +3045,7 @@ function main() {
   runSc6ErrorPathHardeningTests();
   runSc6PollRecoveryRearmTests();
   runSc6RepeatedNavFailedTests();
+  runSc6InvisibleAtcElementTests();
   runSc6InvisibleAtcLivePollCycleTests();
   runSc6RestockLivePollCycleTests();
   testSc6ProductToCartCheckoutMissingChain();
@@ -3001,7 +3070,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
