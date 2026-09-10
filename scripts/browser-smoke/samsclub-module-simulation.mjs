@@ -278,6 +278,59 @@ function testSc2Source() {
   assert.match(SC_SRC, /scCartCheckoutWaitMs/, 'SC-2: cart checkout wait helper');
 }
 
+/**
+ * SC-2: FCFS cart happy-path element — fixture DOM on /cart → checkout click, no sacred lock.
+ * Parity with FIX-3 sc2-cart-checkout on /cart (fixture-e2e has browser coverage).
+ */
+function runSc2CartElementTests() {
+  assert.match(SC_SRC, /Clicking checkout button/, 'SC-2 cart element: checkout click log in source');
+  assert.match(SC_SRC, /scHandleCartPage/, 'SC-2 cart element: scHandleCartPage in source');
+  assert.match(SC_SRC, /scCartCheckoutWaitMs/, 'SC-2 cart element: cart checkout wait helper in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const normUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+
+  const cartPage = makePage({
+    pathname: '/cart',
+    docAttrs: {
+      'data-tch-fixture': 'samsclub-cart',
+      'data-tch-path': '/cart',
+    },
+    elements: [
+      {
+        selectors: ['button[data-automation-id="checkout-btn"]'],
+        text: 'Checkout',
+        tag: 'button',
+      },
+    ],
+  });
+
+  assert.equal(scGetPageTypeSim('/cart'), 'cart', 'SC-2 cart element: /cart → cart page type');
+
+  const handleResult = scHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+  assert.equal(handleResult.path, 'cart_to_checkout', 'SC-2 cart element: happy path proceeds to checkout');
+  assert.ok(handleResult.actions.includes('click_checkout'), 'SC-2 cart element: must click checkout button');
+  assert.ok(cartPage.elements[0].clicked, 'SC-2 cart element: checkout button must be clicked');
+  assert.ok(
+    !handleResult.messages.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'SC-2 cart element: must not arm sacred lock'
+  );
+  assert.ok(
+    !handleResult.messages.some((m) => m.type === 'SAMS_NAV_FAILED'),
+    'SC-2 cart element: happy path must not signal NAV_FAILED'
+  );
+
+  assert.equal(inQueueUrls.size, 0, 'SC-2 cart element: cart checkout must not populate inQueueUrls');
+  assert.ok(!inQueueUrls.has(normUrl), 'SC-2 cart element: monitor productUrl must stay out of inQueueUrls');
+
+  const wmSacredLock = new Set([normUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+    'SC-2 cart element: contrast WM-4 — sacred lock would block poll; FCFS cart checkout does not arm it'
+  );
+}
+
 function testSc1Hosts() {
   const hosts = loadHosts();
   assert.ok(hosts.SAMSCLUB, 'SC-1: TCH_HOSTS.SAMSCLUB defined');
@@ -3224,6 +3277,7 @@ function main() {
   testSc2CartHappyPath();
   testSc2CartCheckoutMissing();
   testSc2ProductToCartChain();
+  runSc2CartElementTests();
   testSc3Source();
   testSc3DisabledAtcNotQueue();
   testSc3ProductPageHappyPath();
@@ -3266,7 +3320,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
