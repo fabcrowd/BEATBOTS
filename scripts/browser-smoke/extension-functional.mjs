@@ -4,7 +4,12 @@
  * Runs from extension popup context (chrome.runtime.sendMessage).
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchWithExtension, rmProfileDir } from './launch-util.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let browser;
 let userDataDir;
@@ -51,11 +56,15 @@ function filterProductsByRetailer(products, retailerFilter) {
   return retailerFilter ? products.filter((p) => retailerFilter.test(p.url)) : products;
 }
 
-/** Mirrors background.js WALMART_NAV_FAILED handler — releases navigationLock only. */
-function applyWalmartNavFailed(navigationLock, inQueueUrls, message) {
+/** Mirrors background.js NAV_FAILED / WALMART_NAV_FAILED / SAMS_NAV_FAILED — releases navigationLock only. */
+function applyNavFailed(navigationLock, inQueueUrls, message) {
   const normFailUrl = normalizeProductUrl(message.url || '');
   if (normFailUrl) navigationLock.delete(normFailUrl);
   return normFailUrl;
+}
+
+function applyWalmartNavFailed(navigationLock, inQueueUrls, message) {
+  return applyNavFailed(navigationLock, inQueueUrls, message);
 }
 
 /** Mirrors background.js ATC_SUCCESS handler — releases navigationLock and clears inQueueUrls. */
@@ -66,6 +75,124 @@ function applyAtcSuccess(navigationLock, inQueueUrls, message) {
     inQueueUrls.delete(normUrl);
   }
   return normUrl;
+}
+
+/**
+ * FIX-3 parity for nav-failed-releases-lock generic invariant tag.
+ * Unified background handler + content-script release logs across Target, Walmart, Sam's Club.
+ */
+function runNavFailedReleasesLockOfflineTests() {
+  const bgSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/background.js'),
+    'utf8'
+  );
+  assert.match(bgSrc, /case 'NAV_FAILED':/, 'nav-failed-releases-lock: Target NAV_FAILED handler');
+  assert.match(bgSrc, /case 'WALMART_NAV_FAILED':/, 'nav-failed-releases-lock: Walmart handler');
+  assert.match(bgSrc, /case 'SAMS_NAV_FAILED':/, 'nav-failed-releases-lock: Sam\'s handler');
+  assert.match(
+    bgSrc,
+    /Navigation lock released \(failed\)/,
+    'nav-failed-releases-lock: background release log'
+  );
+  const navFailedBlock = bgSrc.slice(
+    bgSrc.indexOf("case 'NAV_FAILED'"),
+    bgSrc.indexOf("case 'WALMART_QUEUE_TIMEOUT'")
+  );
+  assert.ok(
+    !navFailedBlock.includes('inQueueUrls.delete'),
+    'nav-failed-releases-lock: must not clear inQueueUrls (WM-5)'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /releasing navigation lock/,
+    'nav-failed-releases-lock: Target content release log'
+  );
+  assert.match(
+    walmartSrc,
+    /releasing navigation lock/,
+    'nav-failed-releases-lock: Walmart content release log'
+  );
+  assert.match(
+    samsSrc,
+    /releasing navigation lock/,
+    'nav-failed-releases-lock: Sam\'s content release log'
+  );
+
+  const fixtureCases = [
+    {
+      type: 'NAV_FAILED',
+      url: 'https://www.target.com/p/-/A-66666666',
+      label: 'Target missing ATC (tgt-missing-atc-element)',
+    },
+    {
+      type: 'WALMART_NAV_FAILED',
+      url: 'https://www.walmart.com/ip/mock-predrop/123',
+      label: 'Walmart pre-drop (WM-2)',
+    },
+    {
+      type: 'WALMART_NAV_FAILED',
+      url: 'https://www.walmart.com/ip/mock-no-atc/559',
+      label: 'Walmart missing ATC (wm6-missing-atc-element)',
+    },
+    {
+      type: 'SAMS_NAV_FAILED',
+      url: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+      label: 'Sam\'s restock (sc6-repeated-nav-failed)',
+    },
+    {
+      type: 'SAMS_NAV_FAILED',
+      url: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+      label: 'Sam\'s invisible ATC (sc6-invisible-atc)',
+    },
+  ];
+
+  for (const { type, url, label } of fixtureCases) {
+    const normUrl = normalizeProductUrl(url);
+    const navigationLock = new Set([normUrl]);
+    const inQueueUrls = new Set();
+    applyNavFailed(navigationLock, inQueueUrls, { type, url });
+    assert.ok(!navigationLock.has(normUrl), `${label}: releases navigationLock`);
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after NAV_FAILED (no sacred lock)`
+    );
+  }
+
+  const sacredUrl = 'https://www.walmart.com/ip/mock-queue/456';
+  const normSacred = normalizeProductUrl(sacredUrl);
+  const sacredNavLock = new Set([normSacred]);
+  const sacredInQueue = new Set([normSacred]);
+  applyNavFailed(sacredNavLock, sacredInQueue, { type: 'WALMART_NAV_FAILED', url: sacredUrl });
+  assert.ok(!sacredNavLock.has(normSacred), 'WM-5: NAV_FAILED releases navigationLock on sacred URL');
+  assert.ok(sacredInQueue.has(normSacred), 'WM-5: sacred lock survives NAV_FAILED');
+  assert.ok(
+    pollWouldSkipNavigation(normSacred, sacredInQueue, sacredNavLock),
+    'WM-5: poll still blocked by sacred lock after NAV_FAILED'
+  );
+
+  for (let i = 0; i < 2; i++) {
+    const repeatUrl = 'https://www.walmart.com/ip/mock-no-atc/559';
+    const normRepeat = normalizeProductUrl(repeatUrl);
+    const repeatNavLock = new Set([normRepeat]);
+    const repeatInQueue = new Set();
+    applyNavFailed(repeatNavLock, repeatInQueue, { type: 'WALMART_NAV_FAILED', url: repeatUrl });
+    assert.equal(repeatInQueue.size, 0, `repeated NAV_FAILED cycle ${i + 1}: no sacred lock`);
+    assert.ok(!repeatNavLock.has(normRepeat), `repeated NAV_FAILED cycle ${i + 1}: releases navigationLock`);
+  }
 }
 
 /**
@@ -282,6 +409,7 @@ async function sendBg(page, msg) {
 }
 
 async function main() {
+  runNavFailedReleasesLockOfflineTests();
   runMon2LivePollCycleOfflineTests();
   runMon2SamsclubLivePollCycleOfflineTests();
 
@@ -633,7 +761,9 @@ async function main() {
   await new Promise((r) => setTimeout(r, 8000));
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
-  console.log('FUNCTIONAL PASS: background messages + popup toggle/save + Target content script');
+  console.log(
+    'FUNCTIONAL PASS: nav-failed-releases-lock + background messages + popup toggle/save + Target content script'
+  );
 }
 
 main()
