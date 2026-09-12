@@ -94,6 +94,10 @@ assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 
 assert(!S.shouldRetryCheckoutPending({ step: 'shipping', lastAttemptMs: 0, nowMs: 5000, retryCount: 0 }), 'no retry on shipping');
 assert(!S.shouldRetryCheckoutPending({ step: 'signin', lastAttemptMs: 0, nowMs: 5000, retryCount: 0, signInInFlight: true }), 'no retry while sign-in in flight');
 
+assert(S.shouldWaitForPasswordAfterEmailStep({ emailStepDone: true, passInputPresent: false }), 'wait when email done, no password yet');
+assert(!S.shouldWaitForPasswordAfterEmailStep({ emailStepDone: true, passInputPresent: true }), 'no wait when password visible');
+assert(!S.shouldWaitForPasswordAfterEmailStep({ emailStepDone: false, passInputPresent: false }), 'no wait before email step');
+
 if (process.exitCode === 1) {
   console.error('\nSign-in step tests failed.');
   process.exit(1);
