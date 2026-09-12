@@ -35,7 +35,7 @@ const WM_SEL = {
 };
 
 /** Minimal DOM stub for offline wmGetPageType / handler simulations. */
-function makePage({ pathname, bodyText = '', elements = [], docAttrs = {} }) {
+function makePage({ pathname, bodyText = '', elements = [], docAttrs = {}, nextData = null }) {
   const bySelector = new Map();
   for (const el of elements) {
     for (const sel of el.selectors || []) {
@@ -60,10 +60,21 @@ function makePage({ pathname, bodyText = '', elements = [], docAttrs = {} }) {
     },
   }));
 
+  const nextDataEl =
+    nextData != null
+      ? {
+          textContent: typeof nextData === 'string' ? nextData : JSON.stringify(nextData),
+        }
+      : null;
+
   return {
     pathname,
     bodyText,
     navigatedTo: null,
+    getElementById(id) {
+      if (id === '__NEXT_DATA__' && nextDataEl) return nextDataEl;
+      return null;
+    },
     documentElement: {
       getAttribute(name) {
         const v = docAttrs[name];
@@ -4240,6 +4251,35 @@ function wmExtractPageOidFromNextData(nextData) {
   }
 }
 
+/** Mirrors wmReadNextData() — walmart-content.js */
+function wmReadNextDataFromPage(page) {
+  try {
+    const el = page.getElementById?.('__NEXT_DATA__');
+    if (el?.textContent) return JSON.parse(el.textContent);
+  } catch {
+    /* fall through */
+  }
+  try {
+    if (page.windowNextData) return page.windowNextData;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+/**
+ * Mirrors _wmInit product-page branch — WM_OFFER_ID_READY when page OID differs from stored.
+ * @param {ReturnType<typeof makePage>} page
+ * @param {string|null} storedOid
+ * @param {string} [productUrl]
+ */
+function wmProductInitOfferIdMessages(page, storedOid, productUrl) {
+  const pageOid = wmExtractPageOidFromNextData(wmReadNextDataFromPage(page));
+  const url = productUrl || `https://www.walmart.com${page.pathname}`;
+  const msg = wmDecideOfferIdReadyMessage({ pageOid, storedOid, url });
+  return msg ? [msg] : [];
+}
+
 /**
  * Mirrors _wmInit product-page branch — send WM_OFFER_ID_READY when page OID differs.
  * @param {{ pageOid: string|null, storedOid: string|null, url: string }} opts
@@ -4265,6 +4305,119 @@ function bgApplyWalmartOfferIdReady(monitor, message) {
     }
   }
   return { updated, monitor: mon };
+}
+
+/**
+ * WM-7: FIX-3 parity for wm7-offer-id-ready fixture route.
+ * Parity with fixture-e2e on /ip/mock-oid/777 (walmart-product-oid).
+ */
+function runWm7OfferIdReadyElementTests() {
+  const WMT_SRC = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(WMT_SRC, /WM_OFFER_ID_READY/, 'WM-7 offer-id-ready element: message type in source');
+  assert.match(WMT_SRC, /wmReadNextData/, 'WM-7 offer-id-ready element: wmReadNextData in source');
+  assert.match(WMT_SRC, /__NEXT_DATA__/, 'WM-7 offer-id-ready element: __NEXT_DATA__ in source');
+  assert.match(
+    WMT_SRC,
+    /primaryOffer.*offerId/,
+    'WM-7 offer-id-ready element: primaryOffer.offerId path in source'
+  );
+
+  const fixtureNextData = {
+    props: {
+      pageProps: {
+        initialData: {
+          data: {
+            product: {
+              primaryOffer: { offerId: 'FIXTURE-OID-WM7-777' },
+            },
+          },
+        },
+      },
+    },
+  };
+  const productUrl = 'https://www.walmart.com/ip/mock-oid/777';
+  const normProductUrl = normalizeProductUrl(productUrl);
+  const oidPage = makePage({
+    pathname: '/ip/mock-oid/777',
+    elements: [
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        tag: 'button',
+        disabled: true,
+        ariaDisabled: 'true',
+        visible: true,
+      },
+    ],
+    docAttrs: {
+      'data-tch-fixture': 'walmart-product-oid',
+      'data-tch-path': '/ip/mock-oid/777',
+    },
+    nextData: fixtureNextData,
+  });
+
+  assert.equal(wmGetPageType(oidPage), 'product', 'WM-7 offer-id-ready element: page type');
+  assert.equal(
+    wmInitDispatch(wmGetPageType(oidPage)),
+    'wmHandleProductPage',
+    'WM-7 offer-id-ready element: handler dispatch'
+  );
+  assert.equal(
+    wmExtractPageOidFromNextData(wmReadNextDataFromPage(oidPage)),
+    'FIXTURE-OID-WM7-777',
+    'WM-7 offer-id-ready element: extracts fixture offerId from __NEXT_DATA__'
+  );
+
+  const readyMsgs = wmProductInitOfferIdMessages(oidPage, null, productUrl);
+  assert.equal(readyMsgs.length, 1, 'WM-7 offer-id-ready element: sends WM_OFFER_ID_READY when oid missing');
+  assert.equal(readyMsgs[0].type, 'WM_OFFER_ID_READY', 'WM-7 offer-id-ready element: message type');
+  assert.equal(readyMsgs[0].offerId, 'FIXTURE-OID-WM7-777', 'WM-7 offer-id-ready element: offerId');
+  assert.equal(
+    normalizeProductUrl(readyMsgs[0].url),
+    normProductUrl,
+    'WM-7 offer-id-ready element: url keys monitor product'
+  );
+
+  assert.deepEqual(
+    wmProductInitOfferIdMessages(oidPage, 'FIXTURE-OID-WM7-777', productUrl),
+    [],
+    'WM-7 offer-id-ready element: no message when stored oid matches'
+  );
+
+  const noNextDataPage = makePage({
+    pathname: '/ip/mock-oid/777',
+    docAttrs: { 'data-tch-fixture': 'walmart-product-oid', 'data-tch-path': '/ip/mock-oid/777' },
+  });
+  assert.deepEqual(
+    wmProductInitOfferIdMessages(noNextDataPage, null, productUrl),
+    [],
+    'WM-7 offer-id-ready element: no message when __NEXT_DATA__ missing'
+  );
+
+  const monitor = {
+    active: true,
+    products: [{ url: productUrl, oid: null, qty: 1 }],
+  };
+  const apply = bgApplyWalmartOfferIdReady(monitor, readyMsgs[0]);
+  assert.ok(apply.updated, 'WM-7 offer-id-ready element: background updates monitor oid');
+  assert.equal(
+    apply.monitor.products[0].oid,
+    'FIXTURE-OID-WM7-777',
+    'WM-7 offer-id-ready element: monitor.products[].oid set'
+  );
+
+  assert.ok(
+    !readyMsgs.some((m) => m.type === 'WALMART_IN_QUEUE'),
+    'WM-7 offer-id-ready element: must not send WALMART_IN_QUEUE'
+  );
+  const inQueueUrls = new Set();
+  assert.equal(inQueueUrls.size, 0, 'WM-7 offer-id-ready element: must not arm sacred lock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normProductUrl, inQueueUrls, new Set()),
+    'WM-7 offer-id-ready element: poll not blocked by offerId ready (no sacred lock)'
+  );
 }
 
 function runWm7OfferIdReadyTests() {
@@ -5989,9 +6142,10 @@ async function main() {
   runWm6PxCrossRepeatedNavFailedTests();
   runWm6PxCrossLivePollCycleTests();
   runWm6PxCrossPollRecoveryTests();
+  runWm7OfferIdReadyElementTests();
   runWm7OfferIdReadyTests();
   console.log(
-    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 repeated NAV_FAILED, WebSocket sniff, sacred lock, sacred-lock-qp/checkout element, WM-4 no-producturl queue paths, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 queue timeout clears sacred lock, WM-5 checkout SPA timeout clears sacred lock, WM-5 checkout SPA live poll cycle, WM-5 cross-page checkout SPA live poll cycle, WM-5 sacred survives NAV_FAILED, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-4 poll recovery rearm, WM-6 poll recovery rearm, WM-6 repeated NAV_FAILED, missing-atc element, missing-atc live poll cycle, cross-page missing-atc live poll cycle, cross-page missing-atc poll recovery, cross-page missing-atc repeated NAV_FAILED, cart checkout-missing element, cart poll recovery, cart live poll cycle, cart repeated NAV_FAILED, cross-page cart poll recovery, cross-page cart live poll cycle, checkout SPA timeout, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA poll recovery, cross-page checkout SPA repeated NAV_FAILED, price-guard timeout, price-guard live poll cycle, cross-page price-guard live poll cycle, cross-page price-guard poll recovery, cross-page price-guard repeated NAV_FAILED, PX timeout override, px-timeout-nav-failed element, PX live poll cycle, PX fixture routes live poll cycle, cross-page PX live poll cycle, cross-page PX poll recovery, cross-page PX repeated NAV_FAILED, offerId ready'
+    'walmart-flow-simulation PASS (WM-1 + WM-2 + WM-3 + WM-4 + WM-5 + WM-6 + WM-7): page type, flow, pre-drop queue, WM-2 repeated NAV_FAILED, WebSocket sniff, sacred lock, sacred-lock-qp/checkout element, WM-4 no-producturl queue paths, nav guard, queue error paths, WM-5 product queue cross-page poll recovery, WM-5 pre-timeout live poll cycle, WM-5 poll recovery rearm, WM-5 queue timeout clears sacred lock, WM-5 checkout SPA timeout clears sacred lock, WM-5 checkout SPA live poll cycle, WM-5 cross-page checkout SPA live poll cycle, WM-5 sacred survives NAV_FAILED, WM-5 live poll cycle, WM-4 live poll cycle, WM-4 unmonitored queue timeout, WM-4 poll recovery rearm, WM-6 poll recovery rearm, WM-6 repeated NAV_FAILED, missing-atc element, missing-atc live poll cycle, cross-page missing-atc live poll cycle, cross-page missing-atc poll recovery, cross-page missing-atc repeated NAV_FAILED, cart checkout-missing element, cart poll recovery, cart live poll cycle, cart repeated NAV_FAILED, cross-page cart poll recovery, cross-page cart live poll cycle, checkout SPA timeout, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cross-page checkout SPA poll recovery, cross-page checkout SPA repeated NAV_FAILED, price-guard timeout, price-guard live poll cycle, cross-page price-guard live poll cycle, cross-page price-guard poll recovery, cross-page price-guard repeated NAV_FAILED, PX timeout override, px-timeout-nav-failed element, PX live poll cycle, PX fixture routes live poll cycle, cross-page PX live poll cycle, cross-page PX poll recovery, cross-page PX repeated NAV_FAILED, wm7-offer-id-ready element, offerId ready'
   );
 }
 
