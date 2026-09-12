@@ -122,6 +122,16 @@
   }
 
   /**
+   * After email submit, Target often hides Continue before the password field appears.
+   * @param {{ emailStepDone?: boolean, passInputPresent?: boolean }} opts
+   * @returns {boolean}
+   */
+  function shouldWaitForPasswordAfterEmailStep(opts) {
+    opts = opts || {};
+    return !!opts.emailStepDone && !opts.passInputPresent;
+  }
+
+  /**
    * Throttled retry while checkout watcher stays on sign-in or loading shell.
    * @param {{
    *   step?: string,
@@ -170,6 +180,7 @@
     shouldAutoSignInOnCheckoutPending: shouldAutoSignInOnCheckoutPending,
     normalizeButtonText: normalizeButtonText,
     shouldAttemptGuest: shouldAttemptGuest,
+    shouldWaitForPasswordAfterEmailStep: shouldWaitForPasswordAfterEmailStep,
     shouldRetryCheckoutPending: shouldRetryCheckoutPending,
     formatLoginStatusLabel: formatLoginStatusLabel,
     LOGIN_STATUS_LABELS: LOGIN_STATUS_LABELS,

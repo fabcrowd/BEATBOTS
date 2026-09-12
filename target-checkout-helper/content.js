@@ -206,11 +206,6 @@ async function handleSignInPage(settings, opts = {}) {
     }
   }
 
-  if (!submitBtn) {
-    console.log('[TCH] auto sign-in: no submit button found — will wait for DOM');
-    return;
-  }
-
   let emailStepDone = false;
   try { emailStepDone = sessionStorage.getItem(SIGNIN_EMAIL_STEP_KEY) === '1'; } catch {}
 
@@ -231,6 +226,11 @@ async function handleSignInPage(settings, opts = {}) {
   if (emailStepDone && !passInput) {
     console.log('[TCH] auto sign-in: email already submitted — waiting for password step');
     await waitForSignInPasswordStep(settings, 25000);
+    return;
+  }
+
+  if (!submitBtn && !passInput) {
+    console.log('[TCH] auto sign-in: no submit button found — will wait for DOM');
     return;
   }
 
