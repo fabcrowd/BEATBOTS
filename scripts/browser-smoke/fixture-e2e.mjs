@@ -17,6 +17,8 @@ import {
 let browser;
 let userDataDir;
 let fixtureServer;
+/** Set in main() — used to recover popup extension context if chrome.runtime is lost mid-run. */
+let extensionContext = { extensionId: null, timeout: 60000 };
 
 function normalizeProductUrl(url) {
   try {
@@ -34,7 +36,29 @@ function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
   return false;
 }
 
+async function ensurePopupExtensionContext(popup) {
+  const hasChrome = await popup.evaluate(
+    () => typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function'
+  );
+  if (hasChrome) return;
+  if (!extensionContext.extensionId) {
+    throw new Error('popup lost extension context and extensionId is unavailable for recovery');
+  }
+  await popup.goto(`chrome-extension://${extensionContext.extensionId}/popup.html`, {
+    waitUntil: 'domcontentloaded',
+    timeout: extensionContext.timeout,
+  });
+  await popup.waitForSelector('#enableToggle', { timeout: 15000 });
+  const recovered = await popup.evaluate(
+    () => typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function'
+  );
+  if (!recovered) {
+    throw new Error('failed to recover popup extension context after re-navigation');
+  }
+}
+
 async function sendBg(page, msg) {
+  await ensurePopupExtensionContext(page);
   return page.evaluate(
     (m) =>
       new Promise((resolve, reject) => {
@@ -63,6 +87,7 @@ async function sendBgFireAndForget(page, msg) {
 }
 
 async function setStorage(popup, data) {
+  await ensurePopupExtensionContext(popup);
   await popup.evaluate(
     (d) =>
       new Promise((resolve, reject) => {
@@ -2647,6 +2672,7 @@ async function main() {
   browser = launched.browser;
   userDataDir = launched.userDataDir;
   const { extensionId, TIMEOUT } = launched;
+  extensionContext = { extensionId, timeout: TIMEOUT };
 
   const popup = await browser.newPage();
   await enableExtension(popup, extensionId, TIMEOUT);
@@ -2724,13 +2750,16 @@ async function main() {
   );
 }
 
+let fixtureE2eFailed = false;
+
 main()
   .catch((err) => {
     console.error('fixture-e2e FAIL:', err);
-    process.exit(1);
+    fixtureE2eFailed = true;
   })
   .finally(async () => {
     if (browser) await browser.close().catch(() => {});
     if (fixtureServer) await fixtureServer.close().catch(() => {});
     await rmProfileDir(userDataDir);
+    if (fixtureE2eFailed) process.exit(1);
   });
