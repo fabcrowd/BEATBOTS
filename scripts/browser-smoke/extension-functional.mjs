@@ -333,6 +333,139 @@ function runNoSacredLockOfflineTests() {
   }
 }
 
+/** Mirrors wmHandleQueueRoom lock message — uses settings.productUrl, not /qp href. */
+function wmQueueRoomSacredLockMessages(settings) {
+  const lockUrl = settings?.productUrl;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/** Mirrors wmHandleQueue lock message — product URL for poll matching. */
+function wmCheckoutQueueSacredLockMessages(settings) {
+  const lockUrl = settings?.productUrl;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/** Mirrors product-page queue lock — prefers settings.productUrl, falls back to location.href. */
+function wmProductQueueSacredLockMessages(settings, locationHref) {
+  const lockUrl = settings?.productUrl || locationHref;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/**
+ * FIX-3 parity for sacred-lock, sacred-lock-qp, and sacred-lock-checkout generic tags.
+ * Confirmed queue arms inQueueUrls on product URL (not page URL); WM-5 survives NAV_FAILED.
+ */
+function runSacredLockOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /Product-page queue detected/,
+    'sacred-lock: product-page queue log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room detected/,
+    'sacred-lock-qp: /qp waiting room log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue detected/,
+    'sacred-lock-checkout: checkout queue log in source'
+  );
+  assert.match(walmartSrc, /wmHandleQueueRoom/, 'sacred-lock-qp: wmHandleQueueRoom in source');
+  assert.match(walmartSrc, /wmHandleQueue/, 'sacred-lock-checkout: wmHandleQueue in source');
+  assert.match(
+    walmartSrc,
+    /wmHandleQueueRoom: no productUrl in settings/,
+    'sacred-lock-qp: missing productUrl warning in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueue: no productUrl in settings/,
+    'sacred-lock-checkout: missing productUrl warning in source'
+  );
+
+  function assertSacredLockOnProductUrl({
+    lockProductUrl,
+    pageUrl,
+    label,
+    lockMessagesFn,
+    samePageAndProduct = false,
+  }) {
+    const normProductUrl = normalizeProductUrl(lockProductUrl);
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+
+    const messages = lockMessagesFn({ productUrl: lockProductUrl });
+    assert.equal(messages.length, 1, `${label}: sends one WALMART_IN_QUEUE`);
+    assert.equal(messages[0].type, 'WALMART_IN_QUEUE', `${label}: message type`);
+    assert.equal(normalizeProductUrl(messages[0].url), normProductUrl, `${label}: lock keys productUrl`);
+    if (samePageAndProduct) {
+      assert.equal(normProductUrl, normPageUrl, `${label}: product-page queue keys page URL (location.href)`);
+    } else {
+      assert.notEqual(normProductUrl, normPageUrl, `${label}: lock must not key page URL`);
+    }
+
+    applyWalmartInQueue(inQueueUrls, messages[0]);
+    assert.ok(inQueueUrls.has(normProductUrl), `${label}: arms inQueueUrls on product URL`);
+    if (!samePageAndProduct) {
+      assert.ok(!inQueueUrls.has(normPageUrl), `${label}: page URL must not be sacred lock key`);
+    }
+    assert.ok(
+      pollWouldSkipNavigation(normProductUrl, inQueueUrls, new Set()),
+      `${label}: poll skips while sacred lock active`
+    );
+
+    const navigationLock = new Set([normProductUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: lockProductUrl });
+    assert.ok(!navigationLock.has(normProductUrl), `${label}: NAV_FAILED releases navigationLock`);
+    assert.ok(inQueueUrls.has(normProductUrl), `${label}: NAV_FAILED must not clear sacred lock (WM-5)`);
+    assert.ok(
+      pollWouldSkipNavigation(normProductUrl, inQueueUrls, navigationLock),
+      `${label}: poll still blocked after NAV_FAILED while sacred lock active`
+    );
+  }
+
+  assertSacredLockOnProductUrl({
+    lockProductUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    pageUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    label: 'sacred-lock product-page queue',
+    samePageAndProduct: true,
+    lockMessagesFn: (settings) =>
+      wmProductQueueSacredLockMessages(settings, 'https://www.walmart.com/ip/mock-queue/456'),
+  });
+
+  assertSacredLockOnProductUrl({
+    lockProductUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
+    pageUrl: 'https://www.walmart.com/qp/waiting-room-monitored',
+    label: 'sacred-lock-qp',
+    lockMessagesFn: wmQueueRoomSacredLockMessages,
+  });
+  assert.deepEqual(
+    wmQueueRoomSacredLockMessages({}),
+    [],
+    'sacred-lock-qp: no productUrl → no WALMART_IN_QUEUE'
+  );
+
+  assertSacredLockOnProductUrl({
+    lockProductUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
+    pageUrl: 'https://www.walmart.com/checkout',
+    label: 'sacred-lock-checkout',
+    lockMessagesFn: wmCheckoutQueueSacredLockMessages,
+  });
+  assert.deepEqual(
+    wmCheckoutQueueSacredLockMessages({}),
+    [],
+    'sacred-lock-checkout: no productUrl → no WALMART_IN_QUEUE'
+  );
+}
+
 /**
  * MON-2 offline parity: walmart-only monitor during live poll on Target tab.
  * Parity with FIX-3 mon2-live-poll-cycle (fixture-e2e has browser coverage).
@@ -549,6 +682,7 @@ async function sendBg(page, msg) {
 async function main() {
   runNavFailedReleasesLockOfflineTests();
   runNoSacredLockOfflineTests();
+  runSacredLockOfflineTests();
   runMon2LivePollCycleOfflineTests();
   runMon2SamsclubLivePollCycleOfflineTests();
 
@@ -901,7 +1035,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + background messages + popup toggle/save + Target content script'
   );
 }
 
