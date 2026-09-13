@@ -591,6 +591,248 @@ function runWm5SacredSurvivesNavFailedOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for wm5-live-poll-cycle named tag.
+ * Sacred lock survives page reload + repeated NAV_FAILED during live poll (no QUEUE_TIMEOUT).
+ */
+function runWm5LivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /Product-page queue detected/,
+    'wm5-live-poll-cycle: product-page queue detection log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room detected/,
+    'wm5-live-poll-cycle: /qp queue detection log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue detected/,
+    'wm5-live-poll-cycle: checkout queue detection log in source'
+  );
+
+  const scenarios = [
+    {
+      label: 'wm5-live-poll-cycle product-page queue',
+      lockUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    },
+    {
+      label: 'wm5-live-poll-cycle /qp monitored',
+      lockUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
+    },
+    {
+      label: 'wm5-live-poll-cycle /checkout sacred',
+      lockUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
+    },
+  ];
+
+  for (const { label, lockUrl } of scenarios) {
+    const normUrl = normalizeProductUrl(lockUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before live poll`);
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll must skip while sacred lock holds`
+    );
+
+    // Simulated page reload — background inQueueUrls persists (no QUEUE_TIMEOUT follows).
+    assert.ok(inQueueUrls.has(normUrl), `${label}: reload preserves sacred lock during live poll`);
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
+      `${label}: poll must skip after reload while sacred lock holds`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: lockUrl });
+      assert.ok(
+        inQueueUrls.has(normUrl),
+        `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label}: poll still blocked after ${navFailTypes[i]} during live poll`
+      );
+    }
+
+    assert.ok(
+      inQueueUrls.has(normUrl),
+      `${label}: sacred lock must persist at end of live poll (no QUEUE_TIMEOUT)`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll must still skip navigate while sacred lock holds at end of live poll`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm4-live-poll-cycle named tag.
+ * Unmonitored /qp + /checkout reload + NAV_FAILED must not arm sacred lock (Target-only monitor).
+ */
+function runWm4LivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueueRoom: no productUrl in settings/,
+    'wm4-live-poll-cycle: /qp warns when productUrl missing'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueue: no productUrl in settings/,
+    'wm4-live-poll-cycle: checkout queue warns when productUrl missing'
+  );
+
+  const scenarios = [
+    {
+      label: 'wm4-live-poll-cycle /qp unmonitored',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-qp-live/111',
+    },
+    {
+      label: 'wm4-live-poll-cycle /checkout unmonitored',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-checkout-live/222',
+    },
+  ];
+
+  for (const { label, pageUrl, walmartProbeUrl } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: unmonitored queue must not arm sacred lock on start`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label}: queue page URL must not be sacred lock key on start`
+    );
+
+    // Simulated reload during live poll — still no sacred lock (WM-4).
+    assert.equal(inQueueUrls.size, 0, `${label}: reload during live poll must not arm inQueueUrls`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label}: queue page URL must not be sacred lock key after reload`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normWalmartProbeUrl);
+      applyNavFailed(navigationLock, inQueueUrls, {
+        type: navFailTypes[i],
+        url: walmartProbeUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normPageUrl),
+        `${label}: live poll cycle ${i + 1} must not sacred-lock queue page ${normPageUrl} after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normWalmartProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normWalmartProbeUrl),
+          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normPageUrl, inQueueUrls, navigationLock),
+        `${label}: live poll cycle ${i + 1} must allow poll retry on unmonitored queue page (no sacred lock)`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: live poll must not arm inQueueUrls on unmonitored queue page`
+    );
+
+    const wmSacredLock = new Set([normWalmartProbeUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normWalmartProbeUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; unmonitored WM-4 does not arm it`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm4-qp-timeout-no-producturl and wm4-checkout-timeout-no-producturl.
+ * Unmonitored queue timeout → NAV_FAILED without arming sacred lock.
+ */
+function runWm4UnmonitoredQueueTimeoutOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room timeout — no productUrl — releasing navigation lock/,
+    'wm4-qp-timeout-no-producturl: unmonitored /qp timeout NAV_FAILED path in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue timeout — no productUrl — releasing navigation lock/,
+    'wm4-checkout-timeout-no-producturl: unmonitored checkout timeout NAV_FAILED path in source'
+  );
+
+  const scenarios = [
+    {
+      invariant: 'wm4-qp-timeout-no-producturl',
+      label: '/qp unmonitored timeout',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
+      lockMessages: () => wmQueueRoomSacredLockMessages({}),
+    },
+    {
+      invariant: 'wm4-checkout-timeout-no-producturl',
+      label: '/checkout unmonitored timeout',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
+      lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
+    },
+  ];
+
+  for (const { invariant, label, pageUrl, lockMessages } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.deepEqual(
+      lockMessages(),
+      [],
+      `${label} (${invariant}): no productUrl must not send WALMART_IN_QUEUE on queue entry`
+    );
+
+    navigationLock.add(normPageUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: pageUrl });
+    assert.ok(
+      !navigationLock.has(normPageUrl),
+      `${label} (${invariant}): timeout NAV_FAILED releases navigationLock on queue page`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label} (${invariant}): timeout must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normPageUrl, inQueueUrls, navigationLock),
+      `${label} (${invariant}): poll may retry after unmonitored timeout (no sacred lock)`
+    );
+  }
+}
+
+/**
  * MON-2 offline parity: walmart-only monitor during live poll on Target tab.
  * Parity with FIX-3 mon2-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -809,6 +1051,9 @@ async function main() {
   runSacredLockOfflineTests();
   runWm4NoProductUrlOfflineTests();
   runWm5SacredSurvivesNavFailedOfflineTests();
+  runWm5LivePollCycleOfflineTests();
+  runWm4LivePollCycleOfflineTests();
+  runWm4UnmonitoredQueueTimeoutOfflineTests();
   runMon2LivePollCycleOfflineTests();
   runMon2SamsclubLivePollCycleOfflineTests();
 
