@@ -1149,9 +1149,36 @@ function runWm5PollRecoveryRearmOfflineTests() {
           'https://www.walmart.com/ip/mock-product-queue-timeout/458'
         ),
     },
+    {
+      label: 'checkout SPA sacred (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred-recovery/997',
+      lockMessages: () => [{ type: 'WALMART_IN_QUEUE', url: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996' }],
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+    },
+    {
+      label: 'cross-page checkout SPA sacred (wm5-checkout-spa-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-recovery/1004',
+      lockMessages: () => [
+        { type: 'WALMART_IN_QUEUE', url: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002' },
+      ],
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
+    },
+    {
+      label: 'cross-page product queue poll (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-queue/456',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-queue-poll-recovery/461',
+      lockMessages: () =>
+        wmProductQueueSacredLockMessages(
+          { productUrl: 'https://www.walmart.com/ip/mock-queue/456' },
+          'https://www.walmart.com/ip/mock-queue-poll/457'
+        ),
+      queueTabUrl: 'https://www.walmart.com/ip/mock-queue-poll/457',
+    },
   ];
 
-  for (const { label, monitorProductUrl, recoveryProductUrl, lockMessages } of scenarios) {
+  for (const { label, monitorProductUrl, recoveryProductUrl, lockMessages, checkoutTabUrl, queueTabUrl } of scenarios) {
     const lockMsg = lockMessages()[0];
     assert.ok(lockMsg, `${label}: queue entry emits WALMART_IN_QUEUE with monitor productUrl`);
     assert.equal(
@@ -1159,6 +1186,33 @@ function runWm5PollRecoveryRearmOfflineTests() {
       monitorProductUrl,
       `${label}: sacred lock keys monitor productUrl not queue tab URL`
     );
+    if (checkoutTabUrl) {
+      const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+      const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+      assert.notEqual(
+        normCheckoutTabUrl,
+        normMonitorUrl,
+        `${label}: checkout SPA tab URL must differ from monitor productUrl`
+      );
+      assert.ok(
+        !normalizeProductUrl(lockMsg.url).includes('/checkout/'),
+        `${label}: sacred lock must key monitor productUrl not checkout tab URL`
+      );
+    }
+    if (queueTabUrl) {
+      const normQueueTabUrl = normalizeProductUrl(queueTabUrl);
+      const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+      assert.notEqual(
+        normalizeProductUrl(lockMsg.url),
+        normQueueTabUrl,
+        `${label}: sacred lock must not key queue tab URL`
+      );
+      assert.equal(
+        normalizeProductUrl(lockMsg.url),
+        normMonitorUrl,
+        `${label}: cross-page product queue lock keys monitor productUrl`
+      );
+    }
     assertWm5PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label);
   }
 }
@@ -2039,7 +2093,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + background messages + popup toggle/save + Target content script'
   );
 }
 
