@@ -2215,6 +2215,190 @@ function runTgtPollRecoveryRearmOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc3-poll-recovery-rearm named tag.
+ * Sam's Club SC-3: disabled ATC wait timeout → poll recovery rearm, no sacred lock.
+ */
+function runSc3PollRecoveryRearmOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc3-poll-recovery-rearm: disabled ATC restock wait log in source');
+  assert.match(
+    samsSrc,
+    /ATC button not found or disabled/,
+    'sc3-poll-recovery-rearm: disabled ATC timeout user-facing log in source'
+  );
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc3-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc3-poll-recovery-rearm: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-poll-recovery-rearm: disabled ATC timeout releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, 'sc3-poll-recovery-rearm: disabled ATC timeout must not arm sacred lock');
+
+  navigationLock.add(normMonitorUrl);
+  assert.ok(
+    navigationLock.has(normMonitorUrl),
+    'sc3-poll-recovery-rearm: poll recovery re-arms navigationLock after disabled ATC NAV_FAILED'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc3-poll-recovery-rearm: poll recovery must not arm sacred lock');
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'sc3-poll-recovery-rearm: repeated NAV_FAILED during poll recovery releases lock for retry'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc3-poll-recovery-rearm: poll may retry after disabled ATC poll recovery (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc3-poll-recovery-rearm: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc5-sc6-live-poll-cycle on /p/mock-fcfs-disabled/792 named tag.
+ * Sam's Club SC-3: disabled-ATC product page reload + repeated NAV_FAILED during live poll, no sacred lock.
+ */
+function runSc3DisabledAtcLivePollCycleOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc3-disabled-atc live poll: ATC wait helper in source');
+  assert.match(samsSrc, /FCFS restock wait/, 'sc3-disabled-atc live poll: restock wait log in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc live poll: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc live poll: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc live poll: timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc live poll: reload must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc live poll: reload timeout releases navigationLock');
+
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc3-disabled-atc live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `sc3-disabled-atc live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `sc3-disabled-atc live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc3-disabled-atc live poll: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc4-live-poll-cycle named tag.
+ * Sam's Club SC-4: checkout review reload + SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
+ */
+function runSc4LivePollCycleOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-live-poll-cycle: review reached log in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc4-live-poll-cycle: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-live-poll-cycle: must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'sc4-live-poll-cycle: checkout tab URL must not be sacred lock key');
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, 'sc4-live-poll-cycle: monitor productUrl must differ from checkout tab URL');
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'sc4-live-poll-cycle: reload during live poll must not arm inQueueUrls');
+
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc4-live-poll-cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `sc4-live-poll-cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `sc4-live-poll-cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCheckoutTabUrl),
+      `sc4-live-poll-cycle ${i + 1}: checkout tab URL must not become sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-live-poll-cycle: contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc6-repeated-nav-failed named tag.
  * Sam's Club FCFS error paths: repeated SAMS_NAV_FAILED must never arm sacred lock.
  */
@@ -2742,6 +2926,9 @@ async function main() {
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
+  runSc3PollRecoveryRearmOfflineTests();
+  runSc3DisabledAtcLivePollCycleOfflineTests();
+  runSc4LivePollCycleOfflineTests();
   runSc6RepeatedNavFailedOfflineTests();
   runSc6LivePollCycleOfflineTests();
   runSc6PollRecoveryRearmOfflineTests();
@@ -3097,7 +3284,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
