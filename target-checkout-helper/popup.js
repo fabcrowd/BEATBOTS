@@ -990,6 +990,8 @@ tabForms.addEventListener('click',   () => setActiveTab('forms'));
 tabAccounts?.addEventListener('click', () => setActiveTab('accounts'));
 tabGuide.addEventListener('click',   () => setActiveTab('guide'));
 
+setActiveTab('main');
+
 document.addEventListener('click', (e) => {
   const link = e.target.closest('.guide-setting-link');
   if (!link) return;
@@ -1592,7 +1594,7 @@ function updateMonitorUI() {
   renderProducts();
 }
 
-monitorBtn.addEventListener('click', toggleMonitor);
+monitorBtn.addEventListener('click', () => toggleMonitor(/target\.com/i));
 
 async function pollStatus() {
   if (!hasChromeStorage()) return;

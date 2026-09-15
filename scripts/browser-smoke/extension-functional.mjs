@@ -4,10 +4,2935 @@
  * Runs from extension popup context (chrome.runtime.sendMessage).
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchWithExtension, rmProfileDir } from './launch-util.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let browser;
 let userDataDir;
+
+function normalizeProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+}
+
+/** Mirrors background.js poll loop skip checks (inQueueUrls / navigationLock). */
+function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
+  if (inQueueUrls.has(normUrl)) return true;
+  if (navigationLock.has(normUrl)) return true;
+  return false;
+}
+
+/** Mirrors background.js isInCheckoutFlow — poll must not navigate tabs already in checkout. */
+function isInCheckoutFlow(url) {
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+async function waitForMonitorLocks(popup, check, label, timeoutMs = 35000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    if (check(status)) return status;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error(`MON-3: timeout waiting for ${label}`);
+}
+
+/** Mirrors popup.js toggleMonitor retailer filter. */
+function filterProductsByRetailer(products, retailerFilter) {
+  return retailerFilter ? products.filter((p) => retailerFilter.test(p.url)) : products;
+}
+
+/** Mirrors background.js NAV_FAILED / WALMART_NAV_FAILED / SAMS_NAV_FAILED — releases navigationLock only. */
+function applyNavFailed(navigationLock, inQueueUrls, message) {
+  const normFailUrl = normalizeProductUrl(message.url || '');
+  if (normFailUrl) navigationLock.delete(normFailUrl);
+  return normFailUrl;
+}
+
+function applyWalmartNavFailed(navigationLock, inQueueUrls, message) {
+  return applyNavFailed(navigationLock, inQueueUrls, message);
+}
+
+/** Mirrors background.js ATC_SUCCESS handler — releases navigationLock and clears inQueueUrls. */
+function applyAtcSuccess(navigationLock, inQueueUrls, message) {
+  const normUrl = normalizeProductUrl(message.url || '');
+  if (normUrl) {
+    navigationLock.delete(normUrl);
+    inQueueUrls.delete(normUrl);
+  }
+  return normUrl;
+}
+
+/**
+ * FIX-3 parity for nav-failed-releases-lock generic invariant tag.
+ * Unified background handler + content-script release logs across Target, Walmart, Sam's Club.
+ */
+function runNavFailedReleasesLockOfflineTests() {
+  const bgSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/background.js'),
+    'utf8'
+  );
+  assert.match(bgSrc, /case 'NAV_FAILED':/, 'nav-failed-releases-lock: Target NAV_FAILED handler');
+  assert.match(bgSrc, /case 'WALMART_NAV_FAILED':/, 'nav-failed-releases-lock: Walmart handler');
+  assert.match(bgSrc, /case 'SAMS_NAV_FAILED':/, 'nav-failed-releases-lock: Sam\'s handler');
+  assert.match(
+    bgSrc,
+    /Navigation lock released \(failed\)/,
+    'nav-failed-releases-lock: background release log'
+  );
+  const navFailedBlock = bgSrc.slice(
+    bgSrc.indexOf("case 'NAV_FAILED'"),
+    bgSrc.indexOf("case 'WALMART_QUEUE_TIMEOUT'")
+  );
+  assert.ok(
+    !navFailedBlock.includes('inQueueUrls.delete'),
+    'nav-failed-releases-lock: must not clear inQueueUrls (WM-5)'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /releasing navigation lock/,
+    'nav-failed-releases-lock: Target content release log'
+  );
+  assert.match(
+    walmartSrc,
+    /releasing navigation lock/,
+    'nav-failed-releases-lock: Walmart content release log'
+  );
+  assert.match(
+    samsSrc,
+    /releasing navigation lock/,
+    'nav-failed-releases-lock: Sam\'s content release log'
+  );
+
+  const fixtureCases = [
+    {
+      type: 'NAV_FAILED',
+      url: 'https://www.target.com/p/-/A-66666666',
+      label: 'Target missing ATC (tgt-missing-atc-element)',
+    },
+    {
+      type: 'WALMART_NAV_FAILED',
+      url: 'https://www.walmart.com/ip/mock-predrop/123',
+      label: 'Walmart pre-drop (WM-2)',
+    },
+    {
+      type: 'WALMART_NAV_FAILED',
+      url: 'https://www.walmart.com/ip/mock-no-atc/559',
+      label: 'Walmart missing ATC (wm6-missing-atc-element)',
+    },
+    {
+      type: 'SAMS_NAV_FAILED',
+      url: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+      label: 'Sam\'s restock (sc6-repeated-nav-failed)',
+    },
+    {
+      type: 'SAMS_NAV_FAILED',
+      url: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+      label: 'Sam\'s invisible ATC (sc6-invisible-atc)',
+    },
+  ];
+
+  for (const { type, url, label } of fixtureCases) {
+    const normUrl = normalizeProductUrl(url);
+    const navigationLock = new Set([normUrl]);
+    const inQueueUrls = new Set();
+    applyNavFailed(navigationLock, inQueueUrls, { type, url });
+    assert.ok(!navigationLock.has(normUrl), `${label}: releases navigationLock`);
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after NAV_FAILED (no sacred lock)`
+    );
+  }
+
+  const sacredUrl = 'https://www.walmart.com/ip/mock-queue/456';
+  const normSacred = normalizeProductUrl(sacredUrl);
+  const sacredNavLock = new Set([normSacred]);
+  const sacredInQueue = new Set([normSacred]);
+  applyNavFailed(sacredNavLock, sacredInQueue, { type: 'WALMART_NAV_FAILED', url: sacredUrl });
+  assert.ok(!sacredNavLock.has(normSacred), 'WM-5: NAV_FAILED releases navigationLock on sacred URL');
+  assert.ok(sacredInQueue.has(normSacred), 'WM-5: sacred lock survives NAV_FAILED');
+  assert.ok(
+    pollWouldSkipNavigation(normSacred, sacredInQueue, sacredNavLock),
+    'WM-5: poll still blocked by sacred lock after NAV_FAILED'
+  );
+
+  for (let i = 0; i < 2; i++) {
+    const repeatUrl = 'https://www.walmart.com/ip/mock-no-atc/559';
+    const normRepeat = normalizeProductUrl(repeatUrl);
+    const repeatNavLock = new Set([normRepeat]);
+    const repeatInQueue = new Set();
+    applyNavFailed(repeatNavLock, repeatInQueue, { type: 'WALMART_NAV_FAILED', url: repeatUrl });
+    assert.equal(repeatInQueue.size, 0, `repeated NAV_FAILED cycle ${i + 1}: no sacred lock`);
+    assert.ok(!repeatNavLock.has(normRepeat), `repeated NAV_FAILED cycle ${i + 1}: releases navigationLock`);
+  }
+}
+
+/** Mirrors background.js WALMART_IN_QUEUE — only path that arms sacred lock. */
+function applyWalmartInQueue(inQueueUrls, message) {
+  const normQueueUrl = normalizeProductUrl(message.url || '');
+  if (normQueueUrl) inQueueUrls.add(normQueueUrl);
+  return normQueueUrl;
+}
+
+/** Mirrors background.js WALMART_QUEUE_TIMEOUT — releases sacred lock and navigationLock. */
+function applyWalmartQueueTimeout(navigationLock, inQueueUrls, message) {
+  const normTimeoutUrl = normalizeProductUrl(message.url || '');
+  if (normTimeoutUrl) {
+    inQueueUrls.delete(normTimeoutUrl);
+    navigationLock.delete(normTimeoutUrl);
+  }
+  return normTimeoutUrl;
+}
+
+/**
+ * FIX-3 parity for no-sacred-lock generic invariant tag.
+ * Pre-drop, FCFS, error paths, and checkout review must not populate inQueueUrls.
+ */
+function runNoSacredLockOfflineTests() {
+  const bgSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/background.js'),
+    'utf8'
+  );
+  const inQueueAddCount = (bgSrc.match(/inQueueUrls\.add/g) || []).length;
+  assert.equal(inQueueAddCount, 1, 'no-sacred-lock: only WALMART_IN_QUEUE may add to inQueueUrls');
+  assert.match(
+    bgSrc,
+    /case 'WALMART_IN_QUEUE':[\s\S]*?inQueueUrls\.add/,
+    'no-sacred-lock: inQueueUrls.add is inside WALMART_IN_QUEUE handler'
+  );
+
+  const navFailedBlock = bgSrc.slice(
+    bgSrc.indexOf("case 'NAV_FAILED'"),
+    bgSrc.indexOf("case 'WALMART_QUEUE_TIMEOUT'")
+  );
+  assert.ok(
+    !navFailedBlock.includes('inQueueUrls.add'),
+    'no-sacred-lock: NAV_FAILED handlers must not arm sacred lock'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.ok(!targetSrc.includes('WALMART_IN_QUEUE'), 'no-sacred-lock: Target must not emit WALMART_IN_QUEUE');
+  assert.ok(!samsSrc.includes('WALMART_IN_QUEUE'), 'no-sacred-lock: Sam\'s must not emit WALMART_IN_QUEUE');
+  assert.match(
+    walmartSrc,
+    /Price guard wait — no sacred lock/,
+    'no-sacred-lock: Walmart price-guard log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmShouldEnterSacredQueueWait/,
+    'no-sacred-lock: Walmart sacred-lock gate in source'
+  );
+
+  const noSacredCases = [
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'NAV_FAILED', url: 'https://www.target.com/p/-/A-66666666' },
+      label: 'Target missing ATC (tgt-missing-atc-element)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'NAV_FAILED', url: 'https://www.target.com/checkout' },
+      label: 'Target checkout review (tgt4-manual-review)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'WALMART_NAV_FAILED', url: 'https://www.walmart.com/ip/mock-predrop/123' },
+      label: 'Walmart pre-drop (WM-2)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'WALMART_NAV_FAILED', url: 'https://www.walmart.com/ip/mock-price-guard-timeout/991' },
+      label: 'Walmart price guard (wm6-price-guard-timeout)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'WALMART_NAV_FAILED', url: 'https://www.walmart.com/ip/mock-no-atc/559' },
+      label: 'Walmart missing ATC (wm6-missing-atc-element)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'SAMS_NAV_FAILED', url: 'https://www.samsclub.com/p/mock-fcfs/789' },
+      label: 'Sam\'s FCFS product (SC-5)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'SAMS_NAV_FAILED', url: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792' },
+      label: 'Sam\'s cart checkout-missing (SC-6)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyAtcSuccess(navLock, inQueue, msg),
+      msg: { type: 'ATC_SUCCESS', url: 'https://www.samsclub.com/p/mock-fcfs/789' },
+      label: 'Sam\'s FCFS ATC_SUCCESS (SC-5)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyAtcSuccess(navLock, inQueue, msg),
+      msg: { type: 'ATC_SUCCESS', url: 'https://www.target.com/p/mock-product' },
+      label: 'Target ATC_SUCCESS (TGT-1)',
+    },
+  ];
+
+  for (const { apply, msg, label } of noSacredCases) {
+    const navigationLock = new Set([normalizeProductUrl(msg.url)]);
+    const inQueueUrls = new Set();
+    apply(navigationLock, inQueueUrls, msg);
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normalizeProductUrl(msg.url), inQueueUrls, navigationLock),
+      `${label}: poll not blocked by sacred lock`
+    );
+  }
+
+  const contrastInQueue = new Set();
+  const contrastNorm = applyWalmartInQueue(contrastInQueue, {
+    type: 'WALMART_IN_QUEUE',
+    url: 'https://www.walmart.com/ip/mock-queue/456',
+  });
+  assert.equal(contrastInQueue.size, 1, 'contrast: WALMART_IN_QUEUE arms sacred lock on confirmed queue');
+  assert.ok(
+    pollWouldSkipNavigation(contrastNorm, contrastInQueue, new Set()),
+    'contrast: sacred lock blocks poll (WM-5)'
+  );
+
+  for (let i = 0; i < 2; i++) {
+    const predropUrl = 'https://www.walmart.com/ip/mock-predrop/123';
+    const normPredrop = normalizeProductUrl(predropUrl);
+    const predropInQueue = new Set();
+    const predropNavLock = new Set([normPredrop]);
+    applyNavFailed(predropNavLock, predropInQueue, { type: 'WALMART_NAV_FAILED', url: predropUrl });
+    assert.equal(predropInQueue.size, 0, `WM-2 repeated cycle ${i + 1}: pre-drop must not arm sacred lock`);
+  }
+}
+
+/** Mirrors wmHandleQueueRoom lock message — uses settings.productUrl, not /qp href. */
+function wmQueueRoomSacredLockMessages(settings) {
+  const lockUrl = settings?.productUrl;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/** Mirrors wmHandleQueue lock message — product URL for poll matching. */
+function wmCheckoutQueueSacredLockMessages(settings) {
+  const lockUrl = settings?.productUrl;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/** Mirrors product-page queue lock — prefers settings.productUrl, falls back to location.href. */
+function wmProductQueueSacredLockMessages(settings, locationHref) {
+  const lockUrl = settings?.productUrl || locationHref;
+  if (!lockUrl) return [];
+  return [{ type: 'WALMART_IN_QUEUE', url: lockUrl }];
+}
+
+/**
+ * FIX-3 parity for sacred-lock, sacred-lock-qp, and sacred-lock-checkout generic tags.
+ * Confirmed queue arms inQueueUrls on product URL (not page URL); WM-5 survives NAV_FAILED.
+ */
+function runSacredLockOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /Product-page queue detected/,
+    'sacred-lock: product-page queue log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room detected/,
+    'sacred-lock-qp: /qp waiting room log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue detected/,
+    'sacred-lock-checkout: checkout queue log in source'
+  );
+  assert.match(walmartSrc, /wmHandleQueueRoom/, 'sacred-lock-qp: wmHandleQueueRoom in source');
+  assert.match(walmartSrc, /wmHandleQueue/, 'sacred-lock-checkout: wmHandleQueue in source');
+  assert.match(
+    walmartSrc,
+    /wmHandleQueueRoom: no productUrl in settings/,
+    'sacred-lock-qp: missing productUrl warning in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueue: no productUrl in settings/,
+    'sacred-lock-checkout: missing productUrl warning in source'
+  );
+
+  function assertSacredLockOnProductUrl({
+    lockProductUrl,
+    pageUrl,
+    label,
+    lockMessagesFn,
+    samePageAndProduct = false,
+  }) {
+    const normProductUrl = normalizeProductUrl(lockProductUrl);
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+
+    const messages = lockMessagesFn({ productUrl: lockProductUrl });
+    assert.equal(messages.length, 1, `${label}: sends one WALMART_IN_QUEUE`);
+    assert.equal(messages[0].type, 'WALMART_IN_QUEUE', `${label}: message type`);
+    assert.equal(normalizeProductUrl(messages[0].url), normProductUrl, `${label}: lock keys productUrl`);
+    if (samePageAndProduct) {
+      assert.equal(normProductUrl, normPageUrl, `${label}: product-page queue keys page URL (location.href)`);
+    } else {
+      assert.notEqual(normProductUrl, normPageUrl, `${label}: lock must not key page URL`);
+    }
+
+    applyWalmartInQueue(inQueueUrls, messages[0]);
+    assert.ok(inQueueUrls.has(normProductUrl), `${label}: arms inQueueUrls on product URL`);
+    if (!samePageAndProduct) {
+      assert.ok(!inQueueUrls.has(normPageUrl), `${label}: page URL must not be sacred lock key`);
+    }
+    assert.ok(
+      pollWouldSkipNavigation(normProductUrl, inQueueUrls, new Set()),
+      `${label}: poll skips while sacred lock active`
+    );
+
+    const navigationLock = new Set([normProductUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: lockProductUrl });
+    assert.ok(!navigationLock.has(normProductUrl), `${label}: NAV_FAILED releases navigationLock`);
+    assert.ok(inQueueUrls.has(normProductUrl), `${label}: NAV_FAILED must not clear sacred lock (WM-5)`);
+    assert.ok(
+      pollWouldSkipNavigation(normProductUrl, inQueueUrls, navigationLock),
+      `${label}: poll still blocked after NAV_FAILED while sacred lock active`
+    );
+  }
+
+  assertSacredLockOnProductUrl({
+    lockProductUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    pageUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    label: 'sacred-lock product-page queue',
+    samePageAndProduct: true,
+    lockMessagesFn: (settings) =>
+      wmProductQueueSacredLockMessages(settings, 'https://www.walmart.com/ip/mock-queue/456'),
+  });
+
+  assertSacredLockOnProductUrl({
+    lockProductUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
+    pageUrl: 'https://www.walmart.com/qp/waiting-room-monitored',
+    label: 'sacred-lock-qp',
+    lockMessagesFn: wmQueueRoomSacredLockMessages,
+  });
+  assert.deepEqual(
+    wmQueueRoomSacredLockMessages({}),
+    [],
+    'sacred-lock-qp: no productUrl → no WALMART_IN_QUEUE'
+  );
+
+  assertSacredLockOnProductUrl({
+    lockProductUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
+    pageUrl: 'https://www.walmart.com/checkout',
+    label: 'sacred-lock-checkout',
+    lockMessagesFn: wmCheckoutQueueSacredLockMessages,
+  });
+  assert.deepEqual(
+    wmCheckoutQueueSacredLockMessages({}),
+    [],
+    'sacred-lock-checkout: no productUrl → no WALMART_IN_QUEUE'
+  );
+}
+
+/**
+ * FIX-3 parity for wm4-qp-no-producturl and wm4-checkout-no-producturl named tags.
+ * Unmonitored queue pages without productUrl must not arm sacred lock.
+ */
+function runWm4NoProductUrlOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueueRoom: no productUrl in settings — background nav lock NOT set/,
+    'wm4-qp-no-producturl: missing productUrl warning in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueue: no productUrl in settings — background nav lock NOT set/,
+    'wm4-checkout-no-producturl: missing productUrl warning in source'
+  );
+
+  const scenarios = [
+    {
+      invariant: 'wm4-qp-no-producturl',
+      label: '/qp waiting room without monitor',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room',
+      lockMessages: () => wmQueueRoomSacredLockMessages({}),
+    },
+    {
+      invariant: 'wm4-checkout-no-producturl',
+      label: '/checkout queue without monitor',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored',
+      lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
+    },
+  ];
+
+  for (const { invariant, label, pageUrl, lockMessages } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.deepEqual(
+      lockMessages(),
+      [],
+      `${label} (${invariant}): no productUrl must not send WALMART_IN_QUEUE`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label} (${invariant}): must not arm inQueueUrls`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label} (${invariant}): queue tab URL must not be sacred lock key`
+    );
+
+    navigationLock.add(normPageUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: pageUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label} (${invariant}): NAV_FAILED must not arm sacred lock without productUrl`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normPageUrl, inQueueUrls, navigationLock),
+      `${label} (${invariant}): poll may retry on unmonitored queue page (no sacred lock)`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-sacred-survives-nav-failed named tag.
+ * Sacred lock must survive WALMART_NAV_FAILED / NAV_FAILED cycles on all queue paths.
+ */
+function runWm5SacredSurvivesNavFailedOfflineTests() {
+  const scenarios = [
+    {
+      label: 'wm5-sacred-survives-nav-failed product-page queue',
+      pageUrl: 'https://www.walmart.com/ip/mock-queue/456',
+      lockUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    },
+    {
+      label: 'wm5-sacred-survives-nav-failed /qp monitored',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-monitored',
+      lockUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
+    },
+    {
+      label: 'wm5-sacred-survives-nav-failed /checkout sacred',
+      pageUrl: 'https://www.walmart.com/checkout',
+      lockUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
+    },
+  ];
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+  for (const { label, pageUrl, lockUrl } of scenarios) {
+    const normLockUrl = normalizeProductUrl(lockUrl);
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+    assert.ok(inQueueUrls.has(normLockUrl), `${label}: sacred lock armed on lockUrl`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl) || normPageUrl === normLockUrl,
+      `${label}: sacred lock must key lockUrl not tab pageUrl`
+    );
+
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normLockUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: pageUrl });
+      assert.ok(
+        inQueueUrls.has(normLockUrl),
+        `${label}: sacred lock must survive ${navFailTypes[i]} cycle ${i + 1}`
+      );
+      if (normPageUrl === normLockUrl) {
+        assert.ok(
+          !navigationLock.has(normLockUrl),
+          `${label}: ${navFailTypes[i]} cycle ${i + 1} must clear navigationLock`
+        );
+      }
+    }
+
+    assert.ok(
+      pollWouldSkipNavigation(normLockUrl, inQueueUrls, navigationLock),
+      `${label}: poll must skip navigate while sacred lock holds`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-live-poll-cycle named tag.
+ * Sacred lock survives page reload + repeated NAV_FAILED during live poll (no QUEUE_TIMEOUT).
+ */
+function runWm5LivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /Product-page queue detected/,
+    'wm5-live-poll-cycle: product-page queue detection log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room detected/,
+    'wm5-live-poll-cycle: /qp queue detection log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue detected/,
+    'wm5-live-poll-cycle: checkout queue detection log in source'
+  );
+
+  const scenarios = [
+    {
+      label: 'wm5-live-poll-cycle product-page queue',
+      lockUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    },
+    {
+      label: 'wm5-live-poll-cycle /qp monitored',
+      lockUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
+    },
+    {
+      label: 'wm5-live-poll-cycle /checkout sacred',
+      lockUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
+    },
+  ];
+
+  for (const { label, lockUrl } of scenarios) {
+    const normUrl = normalizeProductUrl(lockUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before live poll`);
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll must skip while sacred lock holds`
+    );
+
+    // Simulated page reload — background inQueueUrls persists (no QUEUE_TIMEOUT follows).
+    assert.ok(inQueueUrls.has(normUrl), `${label}: reload preserves sacred lock during live poll`);
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
+      `${label}: poll must skip after reload while sacred lock holds`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: lockUrl });
+      assert.ok(
+        inQueueUrls.has(normUrl),
+        `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label}: poll still blocked after ${navFailTypes[i]} during live poll`
+      );
+    }
+
+    assert.ok(
+      inQueueUrls.has(normUrl),
+      `${label}: sacred lock must persist at end of live poll (no QUEUE_TIMEOUT)`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll must still skip navigate while sacred lock holds at end of live poll`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm4-live-poll-cycle named tag.
+ * Unmonitored /qp + /checkout reload + NAV_FAILED must not arm sacred lock (Target-only monitor).
+ */
+function runWm4LivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueueRoom: no productUrl in settings/,
+    'wm4-live-poll-cycle: /qp warns when productUrl missing'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleQueue: no productUrl in settings/,
+    'wm4-live-poll-cycle: checkout queue warns when productUrl missing'
+  );
+
+  const scenarios = [
+    {
+      label: 'wm4-live-poll-cycle /qp unmonitored',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-qp-live/111',
+    },
+    {
+      label: 'wm4-live-poll-cycle /checkout unmonitored',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-checkout-live/222',
+    },
+    {
+      label: 'wm4-live-poll-cycle /qp unmonitored timeout',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-qp-live/111',
+    },
+    {
+      label: 'wm4-live-poll-cycle /checkout unmonitored timeout',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-checkout-live/222',
+    },
+    {
+      label: 'wm4-live-poll-cycle /qp monitored timeout (Target-only unmonitored)',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-monitored-timeout',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-qp-live/111',
+    },
+    {
+      label: 'wm4-live-poll-cycle /checkout monitored timeout (Target-only unmonitored)',
+      pageUrl: 'https://www.walmart.com/checkout/monitored-timeout',
+      walmartProbeUrl: 'https://www.walmart.com/ip/mock-wm4-checkout-live/222',
+    },
+  ];
+
+  for (const { label, pageUrl, walmartProbeUrl } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: unmonitored queue must not arm sacred lock on start`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label}: queue page URL must not be sacred lock key on start`
+    );
+
+    // Simulated reload during live poll — still no sacred lock (WM-4).
+    assert.equal(inQueueUrls.size, 0, `${label}: reload during live poll must not arm inQueueUrls`);
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label}: queue page URL must not be sacred lock key after reload`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normWalmartProbeUrl);
+      applyNavFailed(navigationLock, inQueueUrls, {
+        type: navFailTypes[i],
+        url: walmartProbeUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normPageUrl),
+        `${label}: live poll cycle ${i + 1} must not sacred-lock queue page ${normPageUrl} after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normWalmartProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normWalmartProbeUrl),
+          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normPageUrl, inQueueUrls, navigationLock),
+        `${label}: live poll cycle ${i + 1} must allow poll retry on unmonitored queue page (no sacred lock)`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: live poll must not arm inQueueUrls on unmonitored queue page`
+    );
+
+    const wmSacredLock = new Set([normWalmartProbeUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normWalmartProbeUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; unmonitored WM-4 does not arm it`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm4-qp-timeout-no-producturl and wm4-checkout-timeout-no-producturl.
+ * Unmonitored queue timeout → NAV_FAILED without arming sacred lock.
+ */
+function runWm4UnmonitoredQueueTimeoutOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room timeout — no productUrl — releasing navigation lock/,
+    'wm4-qp-timeout-no-producturl: unmonitored /qp timeout NAV_FAILED path in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue timeout — no productUrl — releasing navigation lock/,
+    'wm4-checkout-timeout-no-producturl: unmonitored checkout timeout NAV_FAILED path in source'
+  );
+
+  const scenarios = [
+    {
+      invariant: 'wm4-qp-timeout-no-producturl',
+      label: '/qp unmonitored timeout',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
+      lockMessages: () => wmQueueRoomSacredLockMessages({}),
+    },
+    {
+      invariant: 'wm4-checkout-timeout-no-producturl',
+      label: '/checkout unmonitored timeout',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
+      lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
+    },
+  ];
+
+  for (const { invariant, label, pageUrl, lockMessages } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.deepEqual(
+      lockMessages(),
+      [],
+      `${label} (${invariant}): no productUrl must not send WALMART_IN_QUEUE on queue entry`
+    );
+
+    navigationLock.add(normPageUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: pageUrl });
+    assert.ok(
+      !navigationLock.has(normPageUrl),
+      `${label} (${invariant}): timeout NAV_FAILED releases navigationLock on queue page`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label} (${invariant}): timeout must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normPageUrl, inQueueUrls, navigationLock),
+      `${label} (${invariant}): poll may retry after unmonitored timeout (no sacred lock)`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm4-poll-recovery-rearm named tag.
+ * Unmonitored queue timeout NAV_FAILED → poll re-arms navigationLock on recovery product (no sacred lock).
+ */
+function runWm4PollRecoveryRearmOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room timeout — no productUrl — releasing navigation lock/,
+    'wm4-poll-recovery-rearm: unmonitored /qp timeout NAV_FAILED path in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue timeout — no productUrl — releasing navigation lock/,
+    'wm4-poll-recovery-rearm: unmonitored checkout timeout NAV_FAILED path in source'
+  );
+
+  function assertWm4PollRecoveryRearm(pageUrl, recoveryProductUrl, label) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: unmonitored queue must not arm sacred lock on start`);
+
+    navigationLock.add(normPageUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: pageUrl });
+    assert.ok(
+      !navigationLock.has(normPageUrl),
+      `${label}: timeout NAV_FAILED releases navigationLock on queue page`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: timeout must not arm sacred lock`);
+
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product after timeout NAV_FAILED`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+    assert.ok(
+      !inQueueUrls.has(normRecoveryUrl),
+      `${label}: recovery product must not be in sacred lock`
+    );
+
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: recoveryProductUrl,
+    });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: repeated NAV_FAILED during poll recovery releases recovery lock for retry`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normRecoveryUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; unmonitored timeout recovery does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: '/qp unmonitored timeout (wm4-poll-recovery-rearm)',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-qp-unmonitored-recovery/996',
+      lockMessages: () => wmQueueRoomSacredLockMessages({}),
+    },
+    {
+      label: '/checkout unmonitored timeout (wm4-poll-recovery-rearm)',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-unmonitored-recovery/997',
+      lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
+    },
+  ];
+
+  for (const { label, pageUrl, recoveryProductUrl, lockMessages } of scenarios) {
+    assert.deepEqual(
+      lockMessages(),
+      [],
+      `${label}: no productUrl must not send WALMART_IN_QUEUE on queue entry`
+    );
+    assertWm4PollRecoveryRearm(pageUrl, recoveryProductUrl, label);
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-pre-timeout-live-poll-cycle named tag.
+ * Sacred lock survives reload + NAV_FAILED before QUEUE_TIMEOUT on monitored queue routes.
+ */
+function runWm5PreTimeoutLivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /\/qp waiting room detected/,
+    'wm5-pre-timeout-live-poll-cycle: /qp queue detection log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Product-page queue detected/,
+    'wm5-pre-timeout-live-poll-cycle: product-page queue detection log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Queue detected/,
+    'wm5-pre-timeout-live-poll-cycle: checkout queue detection log in source'
+  );
+
+  const scenarios = [
+    {
+      label: 'wm5-pre-timeout-live-poll-cycle /qp monitored',
+      productUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+    },
+    {
+      label: 'wm5-pre-timeout-live-poll-cycle /checkout monitored',
+      productUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+    },
+    {
+      label: 'wm5-pre-timeout-live-poll-cycle product-page queue',
+      productUrl: 'https://www.walmart.com/ip/mock-product-queue-pretimeout/460',
+    },
+  ];
+
+  for (const { label, productUrl } of scenarios) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+    navigationLock.add(normUrl);
+    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before pre-timeout poll`);
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll must skip while sacred lock holds`
+    );
+
+    assert.ok(
+      inQueueUrls.has(normUrl),
+      `${label}: reload preserves sacred lock in background before QUEUE_TIMEOUT`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
+      `${label}: poll must skip after reload while sacred lock holds (no navigationLock required)`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: productUrl });
+      assert.ok(
+        inQueueUrls.has(normUrl),
+        `${label}: pre-timeout cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label}: pre-timeout cycle ${i + 1} must not re-arm navigationLock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label}: poll still blocked after ${navFailTypes[i]} before QUEUE_TIMEOUT`
+      );
+    }
+
+    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock held before QUEUE_TIMEOUT fires`);
+
+    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: productUrl,
+    });
+    assert.ok(!inQueueUrls.has(normUrl), `${label}: QUEUE_TIMEOUT clears sacred lock after pre-timeout window`);
+    assert.ok(
+      !pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after QUEUE_TIMEOUT`
+    );
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-poll-recovery-rearm named tag.
+ * QUEUE_TIMEOUT clears sacred lock → poll re-arms navigationLock on recovery product (no sacred lock).
+ */
+function runWm5PollRecoveryRearmOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /WALMART_QUEUE_TIMEOUT/, 'wm5-poll-recovery-rearm: QUEUE_TIMEOUT handler in source');
+  assert.match(walmartSrc, /wmSignalQueueTimeout/, 'wm5-poll-recovery-rearm: queue timeout signal in source');
+
+  function assertWm5PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+    navigationLock.add(normMonitorUrl);
+    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: sacred lock armed before QUEUE_TIMEOUT`);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll blocked while sacred lock holds monitor product`
+    );
+
+    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: monitorProductUrl,
+    });
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: QUEUE_TIMEOUT clears sacred lock on monitor product`);
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `${label}: QUEUE_TIMEOUT clears navigationLock on monitor product`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry monitor product after QUEUE_TIMEOUT`
+    );
+
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+    assert.ok(
+      !inQueueUrls.has(normRecoveryUrl),
+      `${label}: recovery product must not be in sacred lock`
+    );
+
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: recoveryProductUrl,
+    });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normRecoveryUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; post-timeout recovery does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: '/qp monitored timeout (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored-recovery/998',
+      lockMessages: () =>
+        wmQueueRoomSacredLockMessages({
+          productUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+        }),
+    },
+    {
+      label: '/checkout monitored timeout (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored-recovery/999',
+      lockMessages: () =>
+        wmCheckoutQueueSacredLockMessages({
+          productUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+        }),
+    },
+    {
+      label: 'product-page queue timeout (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout-recovery/459',
+      lockMessages: () =>
+        wmProductQueueSacredLockMessages(
+          { productUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458' },
+          'https://www.walmart.com/ip/mock-product-queue-timeout/458'
+        ),
+    },
+    {
+      label: 'checkout SPA sacred (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred-recovery/997',
+      lockMessages: () => [{ type: 'WALMART_IN_QUEUE', url: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996' }],
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+    },
+    {
+      label: 'cross-page checkout SPA sacred (wm5-checkout-spa-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-recovery/1004',
+      lockMessages: () => [
+        { type: 'WALMART_IN_QUEUE', url: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002' },
+      ],
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
+    },
+    {
+      label: 'cross-page product queue poll (wm5-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-queue/456',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-queue-poll-recovery/461',
+      lockMessages: () =>
+        wmProductQueueSacredLockMessages(
+          { productUrl: 'https://www.walmart.com/ip/mock-queue/456' },
+          'https://www.walmart.com/ip/mock-queue-poll/457'
+        ),
+      queueTabUrl: 'https://www.walmart.com/ip/mock-queue-poll/457',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, recoveryProductUrl, lockMessages, checkoutTabUrl, queueTabUrl } of scenarios) {
+    const lockMsg = lockMessages()[0];
+    assert.ok(lockMsg, `${label}: queue entry emits WALMART_IN_QUEUE with monitor productUrl`);
+    assert.equal(
+      lockMsg.url,
+      monitorProductUrl,
+      `${label}: sacred lock keys monitor productUrl not queue tab URL`
+    );
+    if (checkoutTabUrl) {
+      const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+      const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+      assert.notEqual(
+        normCheckoutTabUrl,
+        normMonitorUrl,
+        `${label}: checkout SPA tab URL must differ from monitor productUrl`
+      );
+      assert.ok(
+        !normalizeProductUrl(lockMsg.url).includes('/checkout/'),
+        `${label}: sacred lock must key monitor productUrl not checkout tab URL`
+      );
+    }
+    if (queueTabUrl) {
+      const normQueueTabUrl = normalizeProductUrl(queueTabUrl);
+      const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+      assert.notEqual(
+        normalizeProductUrl(lockMsg.url),
+        normQueueTabUrl,
+        `${label}: sacred lock must not key queue tab URL`
+      );
+      assert.equal(
+        normalizeProductUrl(lockMsg.url),
+        normMonitorUrl,
+        `${label}: cross-page product queue lock keys monitor productUrl`
+      );
+    }
+    assertWm5PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label);
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-queue-timeout-clears-sacred-lock named tag.
+ * Monitored queue timeout uses QUEUE_TIMEOUT and clears sacred lock.
+ */
+function runWm5QueueTimeoutClearsSacredLockOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalQueueTimeout\(settings\.productUrl\)/,
+    'wm5-queue-timeout-clears-sacred-lock: monitored /qp and checkout use QUEUE_TIMEOUT when productUrl set'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalQueueTimeout\(lockUrl\)/,
+    'wm5-queue-timeout-clears-sacred-lock: product-page queue uses QUEUE_TIMEOUT via lockUrl'
+  );
+  assert.match(
+    walmartSrc,
+    /Product-page queue wait timed out/,
+    'wm5-queue-timeout-clears-sacred-lock: product-page queue timeout log in source'
+  );
+
+  function assertQueueTimeoutClearsSacredLock(monitorProductUrl, lockMessages, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const lockMsg = lockMessages()[0];
+    assert.ok(lockMsg, `${label}: monitored timeout must emit WALMART_IN_QUEUE with productUrl`);
+    assert.equal(lockMsg.type, 'WALMART_IN_QUEUE', `${label}: lock message type is WALMART_IN_QUEUE`);
+    assert.equal(
+      lockMsg.url,
+      monitorProductUrl,
+      `${label}: sacred lock keys monitor productUrl not queue tab URL`
+    );
+
+    applyWalmartInQueue(inQueueUrls, lockMsg);
+    navigationLock.add(normMonitorUrl);
+    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: sacred lock armed before QUEUE_TIMEOUT`);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll blocked while sacred lock holds`
+    );
+
+    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: monitorProductUrl,
+    });
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: QUEUE_TIMEOUT clears inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: QUEUE_TIMEOUT clears navigationLock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may re-navigate after QUEUE_TIMEOUT releases sacred lock`
+    );
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: contrast — unmonitored timeout NAV_FAILED must not arm sacred lock`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'product-page queue timeout (wm5-product-queue-timeout)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458',
+      lockMessages: () =>
+        wmProductQueueSacredLockMessages(
+          { productUrl: 'https://www.walmart.com/ip/mock-product-queue-timeout/458' },
+          'https://www.walmart.com/ip/mock-product-queue-timeout/458'
+        ),
+    },
+    {
+      label: '/qp monitored timeout (wm4-qp-timeout-with-producturl)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+      lockMessages: () =>
+        wmQueueRoomSacredLockMessages({
+          productUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+        }),
+    },
+    {
+      label: '/checkout monitored timeout (wm4-checkout-timeout-with-producturl)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+      lockMessages: () =>
+        wmCheckoutQueueSacredLockMessages({
+          productUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+        }),
+    },
+  ];
+
+  for (const { label, monitorProductUrl, lockMessages } of scenarios) {
+    assertQueueTimeoutClearsSacredLock(monitorProductUrl, lockMessages, label);
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-checkout-spa-timeout-clears-sacred-lock named tag.
+ * Checkout SPA stall with pre-armed sacred lock — timeout uses QUEUE_TIMEOUT (not NAV_FAILED).
+ */
+function runWm5CheckoutSpaTimeoutClearsSacredLockOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleCheckout timed out — releasing sacred lock for poll recovery/,
+    'wm5-checkout-spa-timeout-clears-sacred-lock: sacred lock release log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalQueueTimeout\(settings\.productUrl\)/,
+    'wm5-checkout-spa-timeout-clears-sacred-lock: uses wmSignalQueueTimeout when productUrl set'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleCheckout timed out — releasing navigation lock/,
+    'wm5-checkout-spa-timeout-clears-sacred-lock: contrast — no productUrl uses NAV_FAILED path'
+  );
+
+  function assertCheckoutSpaTimeoutClearsSacredLock(monitorProductUrl, checkoutTabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+    navigationLock.add(normMonitorUrl);
+    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: pre-armed sacred lock on monitor product`);
+    assert.ok(
+      !inQueueUrls.has(normCheckoutTabUrl),
+      `${label}: checkout SPA tab URL must not be sacred lock key`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll blocked while sacred lock holds before timeout`
+    );
+
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: monitorProductUrl,
+    });
+    assert.ok(
+      inQueueUrls.has(normMonitorUrl),
+      `${label}: NAV_FAILED alone must not clear sacred lock before checkout SPA timeout`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll still blocked after NAV_FAILED before timeout`
+    );
+
+    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: monitorProductUrl,
+    });
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: checkout SPA timeout QUEUE_TIMEOUT clears inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: checkout SPA timeout clears navigationLock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may re-navigate after checkout SPA timeout releases sacred lock`
+    );
+
+    navigationLock.add(normCheckoutTabUrl);
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: checkoutTabUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: contrast — unmonitored checkout SPA timeout must not arm sacred lock`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'checkout SPA sacred (wm5-checkout-spa-timeout-clears-sacred-lock)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+    },
+    {
+      label: 'cross-page checkout SPA sacred (wm5-checkout-spa-timeout-clears-sacred-lock)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, checkoutTabUrl } of scenarios) {
+    assertCheckoutSpaTimeoutClearsSacredLock(monitorProductUrl, checkoutTabUrl, label);
+  }
+}
+
+/**
+ * FIX-3 parity for wm5-checkout-spa-live-poll-cycle named tag.
+ * Pre-armed sacred lock survives reload + repeated NAV_FAILED before checkout SPA timeout.
+ */
+function runWm5CheckoutSpaLivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /releasing sacred lock for poll recovery/,
+    'wm5-checkout-spa-live-poll-cycle: checkout timeout releases sacred lock (not before timeout)'
+  );
+
+  const scenarios = [
+    {
+      label: 'checkout SPA sacred (wm5-checkout-spa-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+    },
+    {
+      label: 'cross-page checkout SPA sacred (wm5-checkout-spa-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
+      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
+    },
+  ];
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+  for (const { label, monitorProductUrl, checkoutTabUrl } of scenarios) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: pre-armed sacred lock on monitor product`);
+    assert.ok(
+      !inQueueUrls.has(normCheckoutTabUrl),
+      `${label}: checkout SPA tab URL must not be sacred lock key`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll blocked on monitor product before timeout`
+    );
+
+    assert.ok(
+      inQueueUrls.has(normMonitorUrl),
+      `${label}: reload preserves sacred lock before checkout SPA timeout`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll must skip after reload while sacred lock holds`
+    );
+
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normMonitorUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
+      assert.ok(
+        inQueueUrls.has(normMonitorUrl),
+        `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label}: poll blocked after ${navFailTypes[i]} before timeout`
+      );
+      if (normCheckoutTabUrl !== normMonitorUrl) {
+        assert.notEqual(
+          normCheckoutTabUrl,
+          normMonitorUrl,
+          `${label}: live poll cycle ${i + 1} sacred lock must key monitor productUrl not tab URL`
+        );
+      }
+    }
+
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: monitorProductUrl,
+    });
+    assert.ok(
+      inQueueUrls.has(normMonitorUrl),
+      `${label}: NAV_FAILED alone must not clear sacred lock before checkout SPA timeout`
+    );
+    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: monitorProductUrl,
+    });
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: checkout SPA timeout QUEUE_TIMEOUT clears sacred lock`);
+  }
+}
+
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed named tag.
+ * WM-6 error paths: repeated WALMART_NAV_FAILED must never arm sacred lock.
+ */
+function runWm6RepeatedNavFailedOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /wmSignalNavFailed/, 'wm6-repeated-nav-failed: nav failed signal in source');
+  assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-repeated-nav-failed: ATC wait helper in source');
+  assert.match(
+    walmartSrc,
+    /wmHandleCheckout timed out — releasing navigation lock/,
+    'wm6-repeated-nav-failed: checkout SPA timeout NAV_FAILED path in source'
+  );
+
+  function assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 1}: must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 1}: must clear navigationLock`
+      );
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 1}: allows poll retry (no sacred lock)`
+      );
+      if (normTabUrl) {
+        assert.notEqual(
+          normMonitorUrl,
+          normTabUrl,
+          `${label} repeated NAV_FAILED cycle ${i + 1}: monitor productUrl must differ from tab URL`
+        );
+        assert.ok(
+          !inQueueUrls.has(normTabUrl),
+          `${label} repeated NAV_FAILED cycle ${i + 1}: tab URL must not be sacred lock key`
+        );
+      }
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'missing ATC (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
+    },
+    {
+      label: 'cross-page missing ATC (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+      tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
+    },
+    {
+      label: 'cross-page price guard (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+      tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
+    },
+    {
+      label: 'cross-page PX (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
+      tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
+    },
+    {
+      label: 'cart checkout-missing (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-missing/888',
+      tabUrl: 'https://www.walmart.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
+      tabUrl: 'https://www.walmart.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle named tag.
+ * WM-6 error paths: reload + repeated NAV_FAILED during live poll, no sacred lock.
+ */
+function runWm6LivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /Price guard wait — no sacred lock/, 'wm6-live-poll-cycle: price-guard log in source');
+  assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-live-poll-cycle: PX timeout helper in source');
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+  function assertWm6LivePollCycle(monitorProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+    if (normTabUrl) {
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
+    }
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
+
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normMonitorUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normMonitorUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normMonitorUrl),
+          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label}: live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+      );
+      if (normTabUrl) {
+        assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
+      }
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'missing ATC (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
+    },
+    {
+      label: 'cross-page missing ATC (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+      tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
+    },
+    {
+      label: 'price guard (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    },
+    {
+      label: 'cross-page price guard (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+      tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
+    },
+    {
+      label: 'PX hang-tight (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
+    },
+    {
+      label: 'cross-page PX (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
+      tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
+    },
+    {
+      label: 'cart checkout-missing (wm6-cart-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-missing/888',
+      tabUrl: 'https://www.walmart.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (wm6-cart-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
+      tabUrl: 'https://www.walmart.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertWm6LivePollCycle(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm and wm6-cart-checkout-missing named tags.
+ * WM-6 error-path NAV_FAILED → poll re-arms navigationLock on recovery product (no sacred lock).
+ */
+function runWm6PollRecoveryRearmOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalNavFailed\(settings\?\.productUrl/,
+    'wm6-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+  assert.match(
+    walmartSrc,
+    /Checkout button not found on cart page — releasing navigation lock/,
+    'wm6-cart-checkout-missing: cart checkout-missing log in source'
+  );
+
+  function assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: monitorProductUrl,
+    });
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
+    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+    }
+
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+    assert.ok(
+      !inQueueUrls.has(normRecoveryUrl),
+      `${label}: recovery product must not be in sacred lock`
+    );
+
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: recoveryProductUrl,
+    });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normRecoveryUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'missing ATC (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
+    },
+    {
+      label: 'cross-page missing ATC (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-recovery/1000',
+      tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
+    },
+    {
+      label: 'price guard (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    },
+    {
+      label: 'cross-page price guard (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-recovery/994',
+      tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
+    },
+    {
+      label: 'PX hang-tight (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px/555',
+    },
+    {
+      label: 'cross-page PX (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px-cross-recovery/997',
+      tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
+    },
+    {
+      label: 'cart checkout-missing (wm6-cart-checkout-missing)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-missing/888',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
+      tabUrl: 'https://www.walmart.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-recovery/891',
+      tabUrl: 'https://www.walmart.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-recovery/1005',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed named tag.
+ * Target error paths: repeated NAV_FAILED must never arm sacred lock.
+ */
+function runTgtRepeatedNavFailedOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /signalNavFailed/, 'tgt-repeated-nav-failed: nav failed signal in source');
+  assert.match(
+    targetSrc,
+    /handleCheckoutStall timed out — releasing navigation lock/,
+    'tgt-repeated-nav-failed: checkout SPA timeout NAV_FAILED path in source'
+  );
+
+  function assertTgtRepeatedNavFailed(monitorProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 1}: must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 1}: must clear navigationLock`
+      );
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 1}: allows poll retry (no sacred lock)`
+      );
+      if (normTabUrl) {
+        assert.notEqual(
+          normMonitorUrl,
+          normTabUrl,
+          `${label} repeated NAV_FAILED cycle ${i + 1}: monitor productUrl must differ from tab URL`
+        );
+        assert.ok(
+          !inQueueUrls.has(normTabUrl),
+          `${label} repeated NAV_FAILED cycle ${i + 1}: tab URL must not be sacred lock key`
+        );
+      }
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'missing ATC (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/-/A-66666666',
+    },
+    {
+      label: 'cross-page missing ATC (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
+      tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
+    },
+    {
+      label: 'cart checkout-missing (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/-/A-88888888',
+      tabUrl: 'https://www.target.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-cart-cross-monitor/A-880088',
+      tabUrl: 'https://www.target.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
+      tabUrl: 'https://www.target.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
+      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertTgtRepeatedNavFailed(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-live-poll-cycle named tag.
+ * Target error paths: reload + repeated NAV_FAILED during live poll, no sacred lock.
+ */
+function runTgtLivePollCycleOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /productAtcWaitMs/, 'tgt-live-poll-cycle: ATC wait helper in source');
+  assert.match(targetSrc, /cartCheckoutWaitMs/, 'tgt-live-poll-cycle: cart checkout wait helper in source');
+
+  const navFailTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+
+  function assertTgtLivePollCycle(monitorProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+    if (normTabUrl) {
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
+    }
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
+
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normMonitorUrl);
+      if (navFailTypes[i] === 'ATC_SUCCESS') {
+        applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+      } else {
+        applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
+      }
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normMonitorUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normMonitorUrl),
+          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label}: live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+      );
+      if (normTabUrl) {
+        assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
+      }
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'product live poll (tgt-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+    },
+    {
+      label: 'missing ATC (tgt-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/-/A-66666666',
+    },
+    {
+      label: 'cross-page missing ATC (tgt-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
+      tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
+    },
+    {
+      label: 'cart checkout-missing (tgt-cart-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/-/A-88888888',
+      tabUrl: 'https://www.target.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (tgt-cart-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-cart-cross-monitor/A-880088',
+      tabUrl: 'https://www.target.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (tgt4-checkout-spa-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
+      tabUrl: 'https://www.target.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (tgt4-checkout-spa-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
+      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
+    },
+    {
+      label: 'signin gate (tgt-signin-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+      tabUrl: 'https://www.target.com/checkout/signin-gate',
+    },
+    {
+      label: 'cross-page signin gate (tgt-signin-live-poll-cycle)',
+      monitorProductUrl: 'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
+      tabUrl: 'https://www.target.com/checkout/signin-gate-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertTgtLivePollCycle(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-poll-recovery-rearm named tag.
+ * Target error-path NAV_FAILED → poll re-arms navigationLock on recovery product (no sacred lock).
+ */
+function runTgtPollRecoveryRearmOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /signalNavFailed\(settings\.productUrl/,
+    'tgt-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+  assert.match(
+    targetSrc,
+    /Checkout button not found on cart page — releasing navigation lock/,
+    'tgt-cart-checkout-missing: cart checkout-missing log in source'
+  );
+
+  function assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
+    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+    }
+
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+    assert.ok(!inQueueUrls.has(normRecoveryUrl), `${label}: recovery product must not be in sacred lock`);
+
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normRecoveryUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'missing ATC (tgt-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.target.com/p/-/A-66666666',
+      recoveryProductUrl: 'https://www.target.com/p/-/A-66666666',
+    },
+    {
+      label: 'cross-page missing ATC (tgt-missing-atc-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
+      recoveryProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-recovery/A-880096',
+      tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
+    },
+    {
+      label: 'review manual stop (tgt-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+      recoveryProductUrl: 'https://www.target.com/p/mock-review-recovery/A-880100',
+      tabUrl: 'https://www.target.com/checkout',
+    },
+    {
+      label: 'cross-page review (tgt-review-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
+      recoveryProductUrl: 'https://www.target.com/p/mock-review-cross-recovery/A-880102',
+      tabUrl: 'https://www.target.com/checkout/review-cross',
+    },
+    {
+      label: 'signin gate (tgt-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+      recoveryProductUrl: 'https://www.target.com/p/mock-signin-recovery/A-880099',
+      tabUrl: 'https://www.target.com/checkout/signin-gate',
+    },
+    {
+      label: 'cross-page signin gate (tgt-signin-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
+      recoveryProductUrl: 'https://www.target.com/p/mock-signin-cross-recovery/A-880098',
+      tabUrl: 'https://www.target.com/checkout/signin-gate-cross',
+    },
+    {
+      label: 'cart checkout-missing (tgt-cart-checkout-missing)',
+      monitorProductUrl: 'https://www.target.com/p/-/A-88888888',
+      recoveryProductUrl: 'https://www.target.com/p/-/A-77777777',
+      tabUrl: 'https://www.target.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (tgt-cart-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.target.com/p/mock-cart-cross-monitor/A-880088',
+      recoveryProductUrl: 'https://www.target.com/p/mock-cart-cross-recovery/A-880089',
+      tabUrl: 'https://www.target.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (tgt-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
+      recoveryProductUrl: 'https://www.target.com/p/-/A-77777777',
+      tabUrl: 'https://www.target.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (tgt4-checkout-spa-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
+      recoveryProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-recovery/A-880093',
+      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for sc3-disabled-atc named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-3: disabled ATC wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
+ */
+function runSc3DisabledAtcElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc3-disabled-atc: restock wait log in source');
+  assert.match(
+    samsSrc,
+    /ATC button not found or disabled/,
+    'sc3-disabled-atc: timeout log in source'
+  );
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc3-disabled-atc: ATC wait helper in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc3-disabled-atc: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc3-disabled-atc: Sam\'s product page must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc: must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc: releases navigationLock');
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc3-disabled-atc: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc3-disabled-atc: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc3-poll-recovery-rearm named tag.
+ * Sam's Club SC-3: disabled ATC wait timeout → poll recovery rearm, no sacred lock.
+ */
+function runSc3PollRecoveryRearmOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc3-poll-recovery-rearm: disabled ATC restock wait log in source');
+  assert.match(
+    samsSrc,
+    /ATC button not found or disabled/,
+    'sc3-poll-recovery-rearm: disabled ATC timeout user-facing log in source'
+  );
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc3-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc3-poll-recovery-rearm: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-poll-recovery-rearm: disabled ATC timeout releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, 'sc3-poll-recovery-rearm: disabled ATC timeout must not arm sacred lock');
+
+  navigationLock.add(normMonitorUrl);
+  assert.ok(
+    navigationLock.has(normMonitorUrl),
+    'sc3-poll-recovery-rearm: poll recovery re-arms navigationLock after disabled ATC NAV_FAILED'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc3-poll-recovery-rearm: poll recovery must not arm sacred lock');
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(
+    !navigationLock.has(normMonitorUrl),
+    'sc3-poll-recovery-rearm: repeated NAV_FAILED during poll recovery releases lock for retry'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc3-poll-recovery-rearm: poll may retry after disabled ATC poll recovery (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc3-poll-recovery-rearm: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc5-sc6-live-poll-cycle on /p/mock-fcfs-disabled/792 named tag.
+ * Sam's Club SC-3: disabled-ATC product page reload + repeated NAV_FAILED during live poll, no sacred lock.
+ */
+function runSc3DisabledAtcLivePollCycleOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc3-disabled-atc live poll: ATC wait helper in source');
+  assert.match(samsSrc, /FCFS restock wait/, 'sc3-disabled-atc live poll: restock wait log in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc live poll: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc live poll: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc live poll: timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc live poll: reload must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc live poll: reload timeout releases navigationLock');
+
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc3-disabled-atc live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `sc3-disabled-atc live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `sc3-disabled-atc live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc3-disabled-atc live poll: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc4-live-poll-cycle named tag.
+ * Sam's Club SC-4: checkout review reload + SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
+ */
+function runSc4LivePollCycleOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-live-poll-cycle: review reached log in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc4-live-poll-cycle: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-live-poll-cycle: must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'sc4-live-poll-cycle: checkout tab URL must not be sacred lock key');
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, 'sc4-live-poll-cycle: monitor productUrl must differ from checkout tab URL');
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'sc4-live-poll-cycle: reload during live poll must not arm inQueueUrls');
+
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc4-live-poll-cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `sc4-live-poll-cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `sc4-live-poll-cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCheckoutTabUrl),
+      `sc4-live-poll-cycle ${i + 1}: checkout tab URL must not become sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-live-poll-cycle: contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc6-repeated-nav-failed named tag.
+ * Sam's Club FCFS error paths: repeated SAMS_NAV_FAILED must never arm sacred lock.
+ */
+function runSc6RepeatedNavFailedOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /scSignalNavFailed/, 'sc6-repeated-nav-failed: nav failed signal in source');
+  assert.match(
+    samsSrc,
+    /Checkout button not found/,
+    'sc6-repeated-nav-failed: cart checkout-missing log in source'
+  );
+
+  function assertSc6RepeatedNavFailed(monitorProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 1}: must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 1}: must clear navigationLock`
+      );
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 1}: allows poll retry (no sacred lock)`
+      );
+      if (normTabUrl) {
+        assert.notEqual(
+          normMonitorUrl,
+          normTabUrl,
+          `${label} repeated NAV_FAILED cycle ${i + 1}: monitor productUrl must differ from tab URL`
+        );
+        assert.ok(
+          !inQueueUrls.has(normTabUrl),
+          `${label} repeated NAV_FAILED cycle ${i + 1}: tab URL must not be sacred lock key`
+        );
+      }
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'restock (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+    },
+    {
+      label: 'invisible ATC (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    },
+    {
+      label: 'cart checkout-missing (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
+      tabUrl: 'https://www.samsclub.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
+      tabUrl: 'https://www.samsclub.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (sc4-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-stall/793',
+      tabUrl: 'https://www.samsclub.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (sc4-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+      tabUrl: 'https://www.samsclub.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertSc6RepeatedNavFailed(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for sc6-cart-live-poll-cycle and sc6-checkout-spa-live-poll-cycle named tags.
+ * Sam's Club FCFS: reload + repeated SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
+ */
+function runSc6LivePollCycleOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc6-live-poll-cycle: ATC wait helper in source');
+  assert.match(samsSrc, /scCartCheckoutWaitMs/, 'sc6-live-poll-cycle: cart checkout wait helper in source');
+
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+
+  function assertSc6LivePollCycle(monitorProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+    if (normTabUrl) {
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
+    }
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
+
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      navigationLock.add(normMonitorUrl);
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+      } else {
+        applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+      }
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+      );
+      if (navigationLock.has(normMonitorUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normMonitorUrl),
+          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label}: live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+      );
+      if (normTabUrl) {
+        assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
+      }
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'restock (sc5-sc6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+    },
+    {
+      label: 'invisible ATC (sc5-sc6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    },
+    {
+      label: 'cart checkout-missing (sc6-cart-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
+      tabUrl: 'https://www.samsclub.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (sc6-cart-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
+      tabUrl: 'https://www.samsclub.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (sc6-checkout-spa-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-stall/793',
+      tabUrl: 'https://www.samsclub.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (sc6-checkout-spa-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+      tabUrl: 'https://www.samsclub.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertSc6LivePollCycle(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for sc6-poll-recovery-rearm and sc4-poll-recovery-rearm named tags.
+ * Sam's Club FCFS error-path SAMS_NAV_FAILED → poll re-arms navigationLock (no sacred lock).
+ */
+function runSc6PollRecoveryRearmOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc6-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+
+  function assertSc6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
+    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+    }
+
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+    assert.ok(!inQueueUrls.has(normRecoveryUrl), `${label}: recovery product must not be in sacred lock`);
+
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normRecoveryUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'restock (sc6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
+    },
+    {
+      label: 'invisible ATC (sc6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    },
+    {
+      label: 'cart checkout-missing (sc6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+      tabUrl: 'https://www.samsclub.com/cart/no-checkout',
+    },
+    {
+      label: 'cross-page cart checkout-missing (sc6-cart-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-recovery/795',
+      tabUrl: 'https://www.samsclub.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'checkout SPA timeout (sc4-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-stall/793',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+      tabUrl: 'https://www.samsclub.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (sc6-checkout-spa-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-recovery/797',
+      tabUrl: 'https://www.samsclub.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertSc6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * MON-2 offline parity: walmart-only monitor during live poll on Target tab.
+ * Parity with FIX-3 mon2-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runMon2LivePollCycleOfflineTests() {
+  const targetPageUrl = 'https://www.target.com/p/mock-product/A-880080';
+  const targetCheckoutUrl = 'https://www.target.com/checkout/review';
+  const walmartProbeUrl = 'https://www.walmart.com/ip/mock-mon2-target-live/333';
+  const normTargetPageUrl = normalizeProductUrl(targetPageUrl);
+  const normTargetCheckoutUrl = normalizeProductUrl(targetCheckoutUrl);
+  const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+
+  const allProducts = [
+    { url: targetPageUrl, qty: 1, name: 'MON-2 Target product' },
+    { url: walmartProbeUrl, qty: 1, name: 'MON-2 Walmart probe' },
+  ];
+  const walmartFilter = /walmart\.com/i;
+  const walmartOnlyProducts = filterProductsByRetailer(allProducts, walmartFilter);
+
+  assert.equal(walmartOnlyProducts.length, 1, 'MON-2 live poll: walmart-only monitor sends one product');
+  assert.ok(
+    walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+    'MON-2 live poll: monitor products must be walmart.com only'
+  );
+  assert.ok(
+    !walmartOnlyProducts.some((p) => /target\.com/i.test(p.url)),
+    'MON-2 live poll: target URL must be excluded from walmart-only monitor'
+  );
+
+  for (const targetUrl of [targetPageUrl, targetCheckoutUrl]) {
+    const normTargetUrl = normalizeProductUrl(targetUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.ok(
+      !inQueueUrls.has(normTargetUrl),
+      `MON-2 live poll: Target ${normTargetUrl} must not be sacred lock key before poll`
+    );
+
+    // Simulated Target tab reload during walmart-only poll — no sacred lock on Target URL.
+    assert.ok(
+      !inQueueUrls.has(normTargetUrl),
+      `MON-2 live poll: Target reload must not arm inQueueUrls on ${normTargetUrl}`
+    );
+    assert.ok(
+      walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+      `MON-2 live poll: walmart-only products must hold after Target reload on ${normTargetUrl}`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normWalmartProbeUrl);
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: navFailTypes[i],
+        url: walmartProbeUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `MON-2 live poll cycle ${i + 1} must not arm inQueueUrls on Target ${normTargetUrl} after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normTargetUrl),
+        `MON-2 live poll cycle ${i + 1} must not sacred-lock Target ${normTargetUrl} after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+        `MON-2 live poll cycle ${i + 1} must keep walmart-only products on ${normTargetUrl} after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normWalmartProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normWalmartProbeUrl),
+          `MON-2 live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normTargetUrl, inQueueUrls, navigationLock),
+        `MON-2 live poll cycle ${i + 1} must not block poll on unmonitored Target ${normTargetUrl}`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 live poll must not arm inQueueUrls on Target ${normTargetUrl}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normTargetCheckoutUrl) || normTargetUrl === normTargetCheckoutUrl,
+      `MON-2 live poll: Target checkout URL must not be sacred lock key during walmart-only poll`
+    );
+  }
+}
+
+/**
+ * MON-2 offline parity: samsclub-only monitor during live poll on Target/Walmart tab.
+ * Parity with FIX-3 mon2-samsclub-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runMon2SamsclubLivePollCycleOfflineTests() {
+  const crossRetailerPages = [
+    { label: 'Target product', url: 'https://www.target.com/p/mock-product/A-880080' },
+    { label: 'Target checkout', url: 'https://www.target.com/checkout/review' },
+    { label: 'Walmart pre-drop', url: 'https://www.walmart.com/ip/mock-predrop/333' },
+    { label: 'Walmart checkout', url: 'https://www.walmart.com/checkout/unmonitored' },
+  ];
+  const samsclubProbeUrl = 'https://www.samsclub.com/p/mock-mon2-walmart-live/444';
+  const normSamsclubProbeUrl = normalizeProductUrl(samsclubProbeUrl);
+
+  const allProducts = [
+    { url: crossRetailerPages[0].url, qty: 1, name: 'MON-2 Target product' },
+    { url: samsclubProbeUrl, qty: 1, name: 'MON-2 Sam probe' },
+  ];
+  const samsclubFilter = /samsclub\.com/i;
+  const samsclubOnlyProducts = filterProductsByRetailer(allProducts, samsclubFilter);
+
+  assert.equal(
+    samsclubOnlyProducts.length,
+    1,
+    'MON-2 samsclub live poll: samsclub-only monitor sends one product'
+  );
+  assert.ok(
+    samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
+    'MON-2 samsclub live poll: monitor products must be samsclub.com only'
+  );
+  assert.ok(
+    !samsclubOnlyProducts.some((p) => /target\.com|walmart\.com/i.test(p.url)),
+    'MON-2 samsclub live poll: cross-retailer URLs must be excluded from samsclub-only monitor'
+  );
+
+  for (const { label, url } of crossRetailerPages) {
+    const normCrossUrl = normalizeProductUrl(url);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.ok(
+      !inQueueUrls.has(normCrossUrl),
+      `MON-2 samsclub live poll: ${label} must not be sacred lock key before poll`
+    );
+
+    // Simulated cross-retailer tab reload during samsclub-only poll — no sacred lock.
+    assert.ok(
+      !inQueueUrls.has(normCrossUrl),
+      `MON-2 samsclub live poll: ${label} reload must not arm inQueueUrls on ${normCrossUrl}`
+    );
+    assert.ok(
+      samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
+      `MON-2 samsclub live poll: samsclub-only products must hold after ${label} reload`
+    );
+
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      navigationLock.add(normSamsclubProbeUrl);
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        applyAtcSuccess(navigationLock, inQueueUrls, {
+          type: 'ATC_SUCCESS',
+          url: samsclubProbeUrl,
+        });
+      } else {
+        applyWalmartNavFailed(navigationLock, inQueueUrls, {
+          type: liveSignalTypes[i],
+          url: samsclubProbeUrl,
+        });
+      }
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `MON-2 samsclub live poll cycle ${i + 1} on ${label} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normCrossUrl),
+        `MON-2 samsclub live poll cycle ${i + 1} must not sacred-lock ${label} ${normCrossUrl} after ${liveSignalTypes[i]}`
+      );
+      assert.ok(
+        samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
+        `MON-2 samsclub live poll cycle ${i + 1} must keep samsclub-only products on ${label} after ${liveSignalTypes[i]}`
+      );
+      if (navigationLock.has(normSamsclubProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normSamsclubProbeUrl),
+          `MON-2 samsclub live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normSamsclubProbeUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normCrossUrl, inQueueUrls, navigationLock),
+        `MON-2 samsclub live poll cycle ${i + 1} must not block poll on unmonitored ${label}`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 samsclub live poll must not arm inQueueUrls on ${label}`
+    );
+  }
+}
 
 async function sendBg(page, msg) {
   return page.evaluate(
@@ -28,6 +2953,36 @@ async function sendBg(page, msg) {
 }
 
 async function main() {
+  runNavFailedReleasesLockOfflineTests();
+  runNoSacredLockOfflineTests();
+  runSacredLockOfflineTests();
+  runWm4NoProductUrlOfflineTests();
+  runWm5SacredSurvivesNavFailedOfflineTests();
+  runWm5LivePollCycleOfflineTests();
+  runWm4LivePollCycleOfflineTests();
+  runWm4UnmonitoredQueueTimeoutOfflineTests();
+  runWm4PollRecoveryRearmOfflineTests();
+  runWm5PreTimeoutLivePollCycleOfflineTests();
+  runWm5PollRecoveryRearmOfflineTests();
+  runWm5QueueTimeoutClearsSacredLockOfflineTests();
+  runWm5CheckoutSpaTimeoutClearsSacredLockOfflineTests();
+  runWm5CheckoutSpaLivePollCycleOfflineTests();
+  runWm6RepeatedNavFailedOfflineTests();
+  runWm6LivePollCycleOfflineTests();
+  runWm6PollRecoveryRearmOfflineTests();
+  runTgtRepeatedNavFailedOfflineTests();
+  runTgtLivePollCycleOfflineTests();
+  runTgtPollRecoveryRearmOfflineTests();
+  runSc3DisabledAtcElementOfflineTests();
+  runSc3PollRecoveryRearmOfflineTests();
+  runSc3DisabledAtcLivePollCycleOfflineTests();
+  runSc4LivePollCycleOfflineTests();
+  runSc6RepeatedNavFailedOfflineTests();
+  runSc6LivePollCycleOfflineTests();
+  runSc6PollRecoveryRearmOfflineTests();
+  runMon2LivePollCycleOfflineTests();
+  runMon2SamsclubLivePollCycleOfflineTests();
+
   const launched = await launchWithExtension({ profilePrefix: 'tch-func-' });
   browser = launched.browser;
   userDataDir = launched.userDataDir;
@@ -92,6 +3047,197 @@ async function main() {
   await sendBg(popup, { type: 'STOP_MONITOR' });
   const afterMon = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
   assert.equal(afterMon.active, false, 'STOP_MONITOR should clear active');
+
+  // ─── MON-2: single-retailer monitor filter (popup toggleMonitor) ───────────
+  const targetUrl = 'https://www.target.com/p/mon2-target/-/A-100';
+  const walmartUrl = 'https://www.walmart.com/ip/mon2-walmart/200';
+  await popup.evaluate(
+    async (urls) => {
+      const products = [
+        { url: urls.target, qty: 1, name: 'MON-2 Target' },
+        { url: urls.walmart, qty: 1, name: 'MON-2 Walmart' },
+      ];
+      await chrome.storage.local.set({
+        monitor: { active: false, products, counts: {}, refreshInterval: 2 },
+      });
+    },
+    { target: targetUrl, walmart: walmartUrl }
+  );
+  await popup.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+  await popup.waitForSelector('#monitorBtn', { timeout: 15000 });
+  await popup.waitForFunction(
+    () => {
+      const btn = document.getElementById('monitorBtn');
+      return btn && !btn.disabled;
+    },
+    { timeout: 15000 }
+  );
+
+  await popup.evaluate(() => document.getElementById('monitorBtn')?.click());
+  await popup.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' }, (m) => {
+          const err = chrome.runtime.lastError;
+          resolve(!err && m?.active === true);
+        });
+      }),
+    { timeout: 15000 }
+  );
+  let mon2 = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon2.active, true, 'MON-2: Target Start monitoring sets active');
+  assert.equal(mon2.products?.length, 1, 'MON-2: Target monitor sends one product');
+  assert.ok(
+    mon2.products.every((p) => /target\.com/i.test(p.url)),
+    'MON-2: Target monitor filters to target.com only'
+  );
+
+  const wmBtnWhileTarget = await popup.$eval('#wmMonitorBtn', (el) => el.textContent?.trim());
+  assert.equal(wmBtnWhileTarget, 'Stop monitoring', 'MON-2: shared monitorActive on Walmart btn');
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  await popup.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' }, (m) => {
+          const err = chrome.runtime.lastError;
+          resolve(!err && m?.active === false);
+        });
+      }),
+    { timeout: 15000 }
+  );
+
+  // startMonitor persists only the filtered subset — restore both for Walmart filter test
+  await popup.evaluate(
+    async (urls) => {
+      const products = [
+        { url: urls.target, qty: 1, name: 'MON-2 Target' },
+        { url: urls.walmart, qty: 1, name: 'MON-2 Walmart' },
+      ];
+      const { monitor } = await chrome.storage.local.get('monitor');
+      await chrome.storage.local.set({
+        monitor: { ...(monitor || {}), active: false, products, tabIds: [], counts: {} },
+      });
+    },
+    { target: targetUrl, walmart: walmartUrl }
+  );
+
+  await popup.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+  await popup.waitForSelector('#tabWalmart', { timeout: 15000 });
+  await popup.waitForFunction(
+    () => !document.getElementById('monitorBtn')?.disabled,
+    { timeout: 15000 }
+  );
+  await popup.evaluate(() => document.getElementById('tabWalmart')?.click());
+  await popup.waitForSelector('#wmMonitorBtn', { timeout: 5000 });
+  await popup.waitForFunction(
+    () => {
+      const btn = document.getElementById('wmMonitorBtn');
+      return btn && !btn.disabled;
+    },
+    { timeout: 15000 }
+  );
+  await popup.evaluate(() => document.getElementById('wmMonitorBtn')?.click());
+  await popup.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MONITOR_STATUS' }, (m) => {
+          const err = chrome.runtime.lastError;
+          resolve(!err && m?.active === true);
+        });
+      }),
+    { timeout: 15000 }
+  );
+  mon2 = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon2.active, true, 'MON-2: Walmart Start monitoring sets active');
+  assert.equal(mon2.products?.length, 1, 'MON-2: Walmart monitor sends one product');
+  assert.ok(
+    mon2.products.every((p) => /walmart\.com/i.test(p.url)),
+    'MON-2: Walmart monitor filters to walmart.com only'
+  );
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+
+  // ─── MON-3: navigationLock + inQueueUrls skip poll re-navigation ───────────
+  const MON3_WM = 'https://www.walmart.com/ip/Test-Mon3-Product/987654321';
+  const MON3_NORM = normalizeProductUrl(MON3_WM);
+
+  assert.ok(isInCheckoutFlow('https://www.target.com/checkout'), 'MON-3: target checkout path');
+  assert.ok(isInCheckoutFlow('https://www.walmart.com/checkout'), 'MON-3: walmart checkout path');
+  assert.ok(isInCheckoutFlow('https://www.target.com/cart'), 'MON-3: cart path');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/ip/product/123'), 'MON-3: product page not checkout flow');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/qp'), 'MON-3: /qp uses sacred lock, not checkout-flow guard');
+
+  {
+    const inQ = new Set();
+    const navL = new Set();
+    assert.equal(pollWouldSkipNavigation(MON3_NORM, inQ, navL), false);
+    navL.add(MON3_NORM);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'MON-3: navigationLock blocks poll navigate'
+    );
+    navL.delete(MON3_NORM);
+    inQ.add(MON3_NORM);
+    assert.equal(
+      pollWouldSkipNavigation(MON3_NORM, inQ, navL),
+      true,
+      'MON-3: inQueueUrls blocks poll navigate'
+    );
+  }
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: MON3_WM, name: 'MON-3 test', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+
+  const withNavLock = await waitForMonitorLocks(
+    popup,
+    (status) => Array.isArray(status.navigationLock) && status.navigationLock.includes(MON3_NORM),
+    'navigationLock after poll navigate'
+  );
+  assert.ok(withNavLock.navigationLock.includes(MON3_NORM), 'MON-3: poll sets navigationLock');
+
+  await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: MON3_WM });
+  const inQueue = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(inQueue.inQueueUrls?.includes(MON3_NORM), 'MON-3: WALMART_IN_QUEUE adds inQueueUrls');
+
+  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: MON3_WM });
+  const afterNavFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.ok(
+    !afterNavFail.navigationLock?.includes(MON3_NORM),
+    'MON-3: WALMART_NAV_FAILED clears navigationLock'
+  );
+  assert.ok(
+    afterNavFail.inQueueUrls?.includes(MON3_NORM),
+    'MON-3: WALMART_NAV_FAILED must not clear inQueueUrls (WM-5)'
+  );
+
+  // MON-3: START_MONITOR calls stopMonitor first — clears sacred lock for a fresh session.
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: MON3_WM, name: 'MON-3 restart', qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+  const afterRestart = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(afterRestart.active, true, 'MON-3: START_MONITOR sets active after restart');
+  assert.ok(
+    !afterRestart.inQueueUrls?.includes(MON3_NORM),
+    'MON-3: START_MONITOR clears prior inQueueUrls (stopMonitor first)'
+  );
+  // Fresh poll may already have re-armed navigationLock after restart — that is expected.
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  const mon3Cleared = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  assert.equal(mon3Cleared.active, false, 'MON-3: STOP_MONITOR clears active');
+  assert.ok(!mon3Cleared.inQueueUrls?.length, 'MON-3: STOP_MONITOR clears inQueueUrls');
+  assert.ok(!mon3Cleared.navigationLock?.length, 'MON-3: STOP_MONITOR clears navigationLock');
 
   // ─── Telemetry (CHECKOUT_RETRY_EVENT → recordCheckoutRetryEvent) ──────────
   await sendBg(popup, {
@@ -185,7 +3331,9 @@ async function main() {
   await new Promise((r) => setTimeout(r, 8000));
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
-  console.log('FUNCTIONAL PASS: background messages + popup toggle/save + Target content script');
+  console.log(
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+  );
 }
 
 main()
