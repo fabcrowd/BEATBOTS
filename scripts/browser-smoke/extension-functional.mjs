@@ -2215,6 +2215,53 @@ function runTgtPollRecoveryRearmOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc3-disabled-atc named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-3: disabled ATC wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
+ */
+function runSc3DisabledAtcElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc3-disabled-atc: restock wait log in source');
+  assert.match(
+    samsSrc,
+    /ATC button not found or disabled/,
+    'sc3-disabled-atc: timeout log in source'
+  );
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc3-disabled-atc: ATC wait helper in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc3-disabled-atc: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc3-disabled-atc: Sam\'s product page must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc: must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc: releases navigationLock');
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc3-disabled-atc: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc3-disabled-atc: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc3-poll-recovery-rearm named tag.
  * Sam's Club SC-3: disabled ATC wait timeout → poll recovery rearm, no sacred lock.
  */
@@ -2926,6 +2973,7 @@ async function main() {
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
+  runSc3DisabledAtcElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
   runSc3DisabledAtcLivePollCycleOfflineTests();
   runSc4LivePollCycleOfflineTests();
@@ -3284,7 +3332,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
