@@ -2359,6 +2359,65 @@ function runSc4ManualReviewElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
+ */
+function runSc2CartCheckoutMissingElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /Checkout button not found/, 'sc2-cart-checkout-missing: checkout-missing log in source');
+  assert.match(
+    samsSrc,
+    /releasing navigation lock/,
+    'sc2-cart-checkout-missing: navigation lock release log in source'
+  );
+  assert.match(samsSrc, /scHandleCartPage/, 'sc2-cart-checkout-missing: scHandleCartPage in source');
+  assert.match(samsSrc, /scCartCheckoutWaitMs/, 'sc2-cart-checkout-missing: cart checkout wait helper in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc2-cart-checkout-missing: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc2-cart-checkout-missing: Sam\'s cart page must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792';
+  const cartTabUrl = 'https://www.samsclub.com/cart/no-checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'sc2-cart-checkout-missing: cart page must not populate inQueueUrls');
+  assert.ok(!inQueueUrls.has(normMonitorUrl), 'sc2-cart-checkout-missing: monitor productUrl must stay out of inQueueUrls');
+  assert.ok(!inQueueUrls.has(normCartTabUrl), 'sc2-cart-checkout-missing: cart tab URL must not be sacred lock key');
+  assert.notEqual(normMonitorUrl, normCartTabUrl, 'sc2-cart-checkout-missing: monitor productUrl must differ from cart tab URL');
+  assert.ok(
+    isInCheckoutFlow(cartTabUrl),
+    'sc2-cart-checkout-missing: cart tab is in checkout flow (MON-3 guard)'
+  );
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc2-cart-checkout-missing: must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc2-cart-checkout-missing: releases navigationLock');
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc2-cart-checkout-missing: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc2-cart-checkout-missing: contrast WM-4 — sacred lock would block poll; FCFS cart checkout-missing does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc3-poll-recovery-rearm named tag.
  * Sam's Club SC-3: disabled ATC wait timeout → poll recovery rearm, no sacred lock.
  */
@@ -3073,6 +3132,7 @@ async function main() {
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
+  runSc2CartCheckoutMissingElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
   runSc3DisabledAtcLivePollCycleOfflineTests();
   runSc4LivePollCycleOfflineTests();
