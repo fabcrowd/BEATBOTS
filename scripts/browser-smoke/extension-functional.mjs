@@ -2309,6 +2309,56 @@ function runSc6InvisibleAtcElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc4-manual-review named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4 / TGT-4: review step → manual stop, no Place Order click, no sacred lock.
+ */
+function runSc4ManualReviewElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-manual-review: review reached log in source');
+  assert.match(samsSrc, /scHandleReview/, 'sc4-manual-review: scHandleReview in source');
+  assert.match(
+    samsSrc,
+    /Reached review — Place Order remains manual/,
+    'sc4-manual-review: manual stop toast in source'
+  );
+  assert.match(samsSrc, /SC_SEL\.placeOrder/, 'sc4-manual-review: place-order selector in source');
+  assert.match(
+    samsSrc,
+    /if \(!settings\.autoPlaceOrder\)/,
+    'sc4-manual-review: TGT-4 default stop at review in source'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc4-manual-review: Sam\'s checkout must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-manual-review: review step must not populate inQueueUrls');
+  assert.ok(!inQueueUrls.has(normMonitorUrl), 'sc4-manual-review: monitor productUrl must stay out of inQueueUrls');
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'sc4-manual-review: checkout tab URL must not be sacred lock key');
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, 'sc4-manual-review: monitor productUrl must differ from checkout tab URL');
+  assert.ok(
+    isInCheckoutFlow(checkoutTabUrl),
+    'sc4-manual-review: checkout tab is in checkout flow (MON-3 guard)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-manual-review: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc3-poll-recovery-rearm named tag.
  * Sam's Club SC-3: disabled ATC wait timeout → poll recovery rearm, no sacred lock.
  */
@@ -3022,6 +3072,7 @@ async function main() {
   runTgtPollRecoveryRearmOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
+  runSc4ManualReviewElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
   runSc3DisabledAtcLivePollCycleOfflineTests();
   runSc4LivePollCycleOfflineTests();
@@ -3380,7 +3431,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
