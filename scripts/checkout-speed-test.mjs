@@ -236,6 +236,22 @@ section('Boundary edge cases');
   assert(getDropAwarePollSeconds({}, 0) === 1, 'zero baseSec falls back to default 1 (0 is falsy in || 1)');
 }
 
+{
+  // Fast local clock vs NTP-corrected now: aggressive poll must follow corrected time.
+  const fastLocalMs = DROP_MS - 7 * 60 * 1000;
+  const ntpNowMs = DROP_MS - 50 * 60 * 1000;
+  const { computeBackgroundPollSleepMs } = loadHelpers(fastLocalMs);
+  const mon = { dropExpectedAt: dropIso };
+  assert(
+    computeBackgroundPollSleepMs(mon) === 250,
+    'local Date.now in tension → aggressive 250ms'
+  );
+  assert(
+    computeBackgroundPollSleepMs(mon, ntpNowMs) === 2000,
+    'explicit NTP now far from drop → relaxed 2000ms (not aggressive early)'
+  );
+}
+
 section('Effective poll rates (reference)');
 console.log('Background loop (approx checks/min if each cycle is one fetch):');
 console.log('  250ms sleep → ~240 cycles/min (aggressive window)');

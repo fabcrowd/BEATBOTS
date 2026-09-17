@@ -2,14 +2,20 @@
 // - background.js via importScripts (service worker)
 // - content.js via manifest script order (before content.js)
 // Keep Date usage to Date.now() only so Node vm tests can mock time.
+// Optional `nowMs` (e.g. background service worker NTP-corrected time) must match
+// dropArmed / skip-monitoring so aggressive polling does not start before go-time.
 
-function computeBackgroundPollSleepMs(monitor) {
+function resolveDropNowMs(nowMs) {
+  return typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+}
+
+function computeBackgroundPollSleepMs(monitor, nowMs) {
   const base = 500;
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return base;
   const t = Date.parse(raw);
   if (!Number.isFinite(t)) return base;
-  const now = Date.now();
+  const now = resolveDropNowMs(nowMs);
   const until = t - now;
   const afterDrop = now - t;
   const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
@@ -20,12 +26,12 @@ function computeBackgroundPollSleepMs(monitor) {
 }
 
 /** Same 10m pre-drop / 3m post-drop band as aggressive polling — for UX hints only. */
-function isInDropTensionWindow(monitor) {
+function isInDropTensionWindow(monitor, nowMs) {
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return false;
   const t = Date.parse(raw);
   if (!Number.isFinite(t)) return false;
-  const now = Date.now();
+  const now = resolveDropNowMs(nowMs);
   const until = t - now;
   const afterDrop = now - t;
   const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
@@ -33,13 +39,13 @@ function isInDropTensionWindow(monitor) {
   return inPrewindow || inGrace;
 }
 
-function getDropAwarePollSeconds(monitor, baseSec) {
+function getDropAwarePollSeconds(monitor, baseSec, nowMs) {
   const b = Math.max(0.25, Number(baseSec) || 1);
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return b;
   const t = Date.parse(raw);
   if (!Number.isFinite(t)) return b;
-  const now = Date.now();
+  const now = resolveDropNowMs(nowMs);
   const until = t - now;
   const afterDrop = now - t;
   const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
@@ -57,12 +63,12 @@ function getDropAwarePollSeconds(monitor, baseSec) {
  * which inverted the curve — fixed to 3 min so cadence is strictly
  * non-increasing as `until -> 0`.
  */
-function getHarvestKeepaliveMinIntervalMs(monitor) {
+function getHarvestKeepaliveMinIntervalMs(monitor, nowMs) {
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return 5 * 60 * 1000;
   const t = Date.parse(raw);
   if (!Number.isFinite(t)) return 5 * 60 * 1000;
-  const now = Date.now();
+  const now = resolveDropNowMs(nowMs);
   const until = t - now;
   const afterDrop = now - t;
   const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
@@ -93,12 +99,12 @@ function getHarvestKeepaliveMinIntervalMs(monitor) {
  *
  * Cadence tightens monotonically as `monitor.dropExpectedAt` approaches.
  */
-function getHarvestBurstSameUrlDedupMs(monitor) {
+function getHarvestBurstSameUrlDedupMs(monitor, nowMs) {
   const raw = monitor?.dropExpectedAt;
   if (!raw || typeof raw !== 'string') return 120 * 1000;
   const t = Date.parse(raw);
   if (!Number.isFinite(t)) return 120 * 1000;
-  const now = Date.now();
+  const now = resolveDropNowMs(nowMs);
   const until = t - now;
   const afterDrop = now - t;
   const inPrewindow = until >= 0 && until <= 10 * 60 * 1000;
