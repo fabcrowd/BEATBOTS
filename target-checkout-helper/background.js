@@ -876,10 +876,11 @@ async function runBackgroundPoll() {
       }
     } catch {}
 
-    const dropAggressive = computeBackgroundPollSleepMs(monitor) <= 250;
+    const dropNow = accurateNow();
+    const dropAggressive = computeBackgroundPollSleepMs(monitor, dropNow) <= 250;
     const sleepMs = hadApiError && !dropAggressive
       ? (monitor.errorRetryDelayMs || 3500)
-      : computeBackgroundPollSleepMs(monitor);
+      : computeBackgroundPollSleepMs(monitor, dropNow);
     await sleep(sleepMs);
   }
   console.log('[TCH bg] background poll stopped');
@@ -1324,14 +1325,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           if (cfg.harvestingEnabled && monitor?.active) {
             const minMs = typeof getHarvestKeepaliveMinIntervalMs === 'function'
-              ? getHarvestKeepaliveMinIntervalMs(monitor)
+              ? getHarvestKeepaliveMinIntervalMs(monitor, accurateNow())
               : 25 * 60 * 1000;
             const elapsed = Date.now() - lastHarvestKeepaliveRunMs;
             nextHarvestInMs = Math.max(0, minMs - Math.max(0, elapsed));
             nextHarvestMode = 'monitor_keepalive';
           } else if (cfg.harvestingEnabled && cfg.dontStopHarvesting && lastHarvestCaptureMs > 0) {
             const dedupMs = typeof getHarvestBurstSameUrlDedupMs === 'function'
-              ? getHarvestBurstSameUrlDedupMs(monitor || {})
+              ? getHarvestBurstSameUrlDedupMs(monitor || {}, accurateNow())
               : 60 * 1000;
             const elapsed = Date.now() - lastHarvestCaptureMs;
             nextHarvestInMs = Math.max(0, dedupMs - Math.max(0, elapsed));
@@ -1450,10 +1451,10 @@ async function maybeRunDropAwareHarvestKeepalive() {
   const cfg = await tchGetHarvestConfig().catch(() => ({}));
   if (!cfg.harvestingEnabled) return;
 
+  const now = accurateNow();
   const minMs = typeof getHarvestKeepaliveMinIntervalMs === 'function'
-    ? getHarvestKeepaliveMinIntervalMs(monitor)
+    ? getHarvestKeepaliveMinIntervalMs(monitor, now)
     : 25 * 60 * 1000;
-  const now = Date.now();
   if (now - lastHarvestKeepaliveRunMs < minMs) return;
 
   try {
