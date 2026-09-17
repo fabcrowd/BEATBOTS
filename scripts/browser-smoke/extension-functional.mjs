@@ -2501,6 +2501,87 @@ function runSc4ManualReviewElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc4-shipping-payment-review named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4: checkout SPA shipping → payment → review; TGT-4 manual stop; no sacred lock.
+ */
+function runSc4ShippingPaymentReviewElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] Filling shipping form/, 'sc4-shipping-payment-review: shipping log in source');
+  assert.match(
+    samsSrc,
+    /\[SC\] Clicking Continue on shipping/,
+    'sc4-shipping-payment-review: shipping continue log in source'
+  );
+  assert.match(samsSrc, /\[SC\] Filling payment form/, 'sc4-shipping-payment-review: payment log in source');
+  assert.match(
+    samsSrc,
+    /\[SC\] Clicking Continue on payment/,
+    'sc4-shipping-payment-review: payment continue log in source'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-shipping-payment-review: review reached log in source');
+  assert.match(samsSrc, /scHandleCheckout/, 'sc4-shipping-payment-review: scHandleCheckout in source');
+  assert.match(samsSrc, /scHandleShipping/, 'sc4-shipping-payment-review: scHandleShipping in source');
+  assert.match(samsSrc, /scHandlePayment/, 'sc4-shipping-payment-review: scHandlePayment in source');
+  assert.match(
+    samsSrc,
+    /if \(!settings\.autoPlaceOrder\)/,
+    'sc4-shipping-payment-review: TGT-4 default stop at review in source'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc4-shipping-payment-review: Sam\'s checkout SPA must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutSpaUrl = 'https://www.samsclub.com/checkout/spa';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutSpaUrl = normalizeProductUrl(checkoutSpaUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-shipping-payment-review: checkout SPA must not populate inQueueUrls');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'sc4-shipping-payment-review: monitor productUrl must stay out of inQueueUrls'
+  );
+  assert.ok(
+    !inQueueUrls.has(normCheckoutSpaUrl),
+    'sc4-shipping-payment-review: checkout SPA tab URL must not be sacred lock key'
+  );
+  assert.notEqual(
+    normMonitorUrl,
+    normCheckoutSpaUrl,
+    'sc4-shipping-payment-review: monitor productUrl must differ from checkout SPA tab URL'
+  );
+  assert.ok(
+    isInCheckoutFlow(checkoutSpaUrl),
+    'sc4-shipping-payment-review: checkout SPA tab is in checkout flow (MON-3 guard)'
+  );
+  assert.ok(
+    navigationLock.has(normMonitorUrl),
+    'sc4-shipping-payment-review: monitor may hold navigationLock during checkout SPA'
+  );
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'sc4-shipping-payment-review: navigationLock alone must not imply sacred lock'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-shipping-payment-review: contrast WM-5 — sacred lock would block poll; FCFS checkout SPA does not arm it'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normCheckoutSpaUrl, inQueueUrls, navigationLock),
+    'sc4-shipping-payment-review: poll skip keys monitor productUrl, not checkout SPA tab path alone'
+  );
+}
+
+/**
  * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
  */
@@ -3276,6 +3357,7 @@ async function main() {
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
+  runSc4ShippingPaymentReviewElementOfflineTests();
   runSc2CartCheckoutMissingElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
   runSc3DisabledAtcLivePollCycleOfflineTests();
