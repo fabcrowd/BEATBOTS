@@ -2501,6 +2501,71 @@ function runSc4ManualReviewElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc4-shipping-payment-review named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4: checkout SPA shipping → payment → review, no sacred lock (TGT-4 manual stop).
+ */
+function runSc4ShippingPaymentReviewElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] Filling shipping form/, 'sc4-shipping-payment-review: shipping log in source');
+  assert.match(
+    samsSrc,
+    /\[SC\] Clicking Continue on shipping/,
+    'sc4-shipping-payment-review: shipping continue log in source'
+  );
+  assert.match(samsSrc, /\[SC\] Filling payment form/, 'sc4-shipping-payment-review: payment log in source');
+  assert.match(
+    samsSrc,
+    /\[SC\] Clicking Continue on payment/,
+    'sc4-shipping-payment-review: payment continue log in source'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-shipping-payment-review: review reached log in source');
+  assert.match(samsSrc, /scHandleShipping/, 'sc4-shipping-payment-review: scHandleShipping in source');
+  assert.match(samsSrc, /scHandlePayment/, 'sc4-shipping-payment-review: scHandlePayment in source');
+  assert.match(samsSrc, /scHandleCheckout/, 'sc4-shipping-payment-review: scHandleCheckout in source');
+  assert.match(
+    samsSrc,
+    /if \(!settings\.autoPlaceOrder\)/,
+    'sc4-shipping-payment-review: TGT-4 default stop at review in source'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc4-shipping-payment-review: Sam\'s checkout SPA must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutSpaTabUrl = 'https://www.samsclub.com/checkout/spa';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutSpaTabUrl = normalizeProductUrl(checkoutSpaTabUrl);
+  const inQueueUrls = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-shipping-payment-review: checkout SPA must not populate inQueueUrls');
+  assert.ok(!inQueueUrls.has(normMonitorUrl), 'sc4-shipping-payment-review: monitor productUrl must stay out of inQueueUrls');
+  assert.ok(
+    !inQueueUrls.has(normCheckoutSpaTabUrl),
+    'sc4-shipping-payment-review: checkout SPA tab URL must not be sacred lock key'
+  );
+  assert.notEqual(
+    normMonitorUrl,
+    normCheckoutSpaTabUrl,
+    'sc4-shipping-payment-review: monitor productUrl must differ from checkout SPA tab URL'
+  );
+  assert.ok(
+    isInCheckoutFlow(checkoutSpaTabUrl),
+    'sc4-shipping-payment-review: checkout SPA tab is in checkout flow (MON-3 guard)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-shipping-payment-review: contrast WM-5 — sacred lock would block poll; FCFS checkout SPA does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
  */
@@ -3276,6 +3341,7 @@ async function main() {
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
+  runSc4ShippingPaymentReviewElementOfflineTests();
   runSc2CartCheckoutMissingElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
   runSc3DisabledAtcLivePollCycleOfflineTests();
