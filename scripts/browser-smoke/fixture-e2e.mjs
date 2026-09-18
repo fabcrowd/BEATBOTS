@@ -2327,10 +2327,14 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       walmartSkipMonitoring: true,
     });
 
+    // Let background poll navigate monitor tab + content script reach NAV_FAILED once
+    // (parity with wm4/wm6 poll-recovery-rearm timing — avoids flake under full-suite load).
+    await new Promise((r) => setTimeout(r, 2000));
+
     let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 36; i++) {
       await new Promise((r) => setTimeout(r, 500));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
