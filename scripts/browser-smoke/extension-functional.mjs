@@ -2501,6 +2501,90 @@ function runSc4ManualReviewElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc4-checkout-spa-timeout named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4: checkout SPA stall → SAMS_NAV_FAILED, no sacred lock.
+ */
+function runSc4CheckoutSpaTimeoutElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    samsSrc,
+    /\[SC\] scHandleCheckout timed out/,
+    'sc4-checkout-spa-timeout: timeout log in source'
+  );
+  assert.match(
+    samsSrc,
+    /Checkout step timeout — take over manually/,
+    'sc4-checkout-spa-timeout: user-facing toast in source'
+  );
+  assert.match(samsSrc, /scHandleCheckout/, 'sc4-checkout-spa-timeout: scHandleCheckout in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc4-checkout-spa-timeout: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc4-checkout-spa-timeout: Sam\'s checkout SPA must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
+  const checkoutTabUrl = 'https://www.samsclub.com/checkout/spa-stall';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-checkout-spa-timeout: checkout stall must not populate inQueueUrls');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'sc4-checkout-spa-timeout: monitor productUrl must stay out of inQueueUrls'
+  );
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    'sc4-checkout-spa-timeout: checkout tab URL must not be sacred lock key'
+  );
+  assert.notEqual(
+    normMonitorUrl,
+    normCheckoutTabUrl,
+    'sc4-checkout-spa-timeout: monitor productUrl must differ from checkout tab URL'
+  );
+  assert.ok(
+    isInCheckoutFlow(checkoutTabUrl),
+    'sc4-checkout-spa-timeout: checkout SPA tab is in checkout flow (MON-3 guard)'
+  );
+
+  const navFailMsg = { type: 'SAMS_NAV_FAILED', url: monitorProductUrl };
+  assert.equal(
+    normalizeProductUrl(navFailMsg.url),
+    normMonitorUrl,
+    'sc4-checkout-spa-timeout: NAV_FAILED must key monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(navFailMsg.url),
+    normCheckoutTabUrl,
+    'sc4-checkout-spa-timeout: NAV_FAILED must not key checkout tab URL'
+  );
+
+  applyNavFailed(navigationLock, inQueueUrls, navFailMsg);
+  assert.equal(inQueueUrls.size, 0, 'sc4-checkout-spa-timeout: must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc4-checkout-spa-timeout: releases navigationLock');
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc4-checkout-spa-timeout: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-checkout-spa-timeout: contrast WM-5 — sacred lock would block poll; FCFS checkout SPA stall does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
  */
@@ -3276,6 +3360,7 @@ async function main() {
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
+  runSc4CheckoutSpaTimeoutElementOfflineTests();
   runSc2CartCheckoutMissingElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
   runSc3DisabledAtcLivePollCycleOfflineTests();
@@ -3635,7 +3720,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc4-checkout-spa-timeout + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
