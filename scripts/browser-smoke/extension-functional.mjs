@@ -2451,6 +2451,72 @@ function runSc6InvisibleAtcElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc4-shipping-payment-review named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4: checkout SPA shipping → payment → review happy path, no sacred lock.
+ */
+function runSc4ShippingPaymentReviewElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] Filling shipping form/, 'sc4-shipping-payment-review: shipping log in source');
+  assert.match(
+    samsSrc,
+    /\[SC\] Clicking Continue on shipping/,
+    'sc4-shipping-payment-review: shipping continue log in source'
+  );
+  assert.match(samsSrc, /\[SC\] Filling payment form/, 'sc4-shipping-payment-review: payment log in source');
+  assert.match(
+    samsSrc,
+    /\[SC\] Clicking Continue on payment/,
+    'sc4-shipping-payment-review: payment continue log in source'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-shipping-payment-review: review reached log in source');
+  assert.match(samsSrc, /scHandleShipping/, 'sc4-shipping-payment-review: scHandleShipping in source');
+  assert.match(samsSrc, /scHandlePayment/, 'sc4-shipping-payment-review: scHandlePayment in source');
+  assert.match(
+    samsSrc,
+    /if \(!settings\.autoPlaceOrder\)/,
+    'sc4-shipping-payment-review: TGT-4 default stop at review in source'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc4-shipping-payment-review: Sam\'s checkout SPA must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const checkoutSpaUrl = 'https://www.samsclub.com/checkout/spa';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutSpaUrl = normalizeProductUrl(checkoutSpaUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'sc4-shipping-payment-review: SPA happy path must not populate inQueueUrls');
+  assert.ok(!inQueueUrls.has(normMonitorUrl), 'sc4-shipping-payment-review: monitor productUrl must stay out of inQueueUrls');
+  assert.ok(!inQueueUrls.has(normCheckoutSpaUrl), 'sc4-shipping-payment-review: checkout SPA URL must not be sacred lock key');
+  assert.notEqual(
+    normMonitorUrl,
+    normCheckoutSpaUrl,
+    'sc4-shipping-payment-review: monitor productUrl must differ from checkout SPA URL'
+  );
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl) && navigationLock.has(normMonitorUrl),
+    'sc4-shipping-payment-review: navigationLock alone must not imply sacred lock'
+  );
+  assert.ok(
+    isInCheckoutFlow(checkoutSpaUrl),
+    'sc4-shipping-payment-review: checkout SPA is in checkout flow (MON-3 guard)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc4-shipping-payment-review: contrast WM-5 — sacred lock would block poll; Sam checkout SPA does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc4-manual-review named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-4 / TGT-4: review step → manual stop, no Place Order click, no sacred lock.
  */
@@ -3275,6 +3341,7 @@ async function main() {
   runTgtPollRecoveryRearmOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
+  runSc4ShippingPaymentReviewElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
   runSc2CartCheckoutMissingElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
@@ -3635,7 +3702,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc4-shipping-payment-review + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
