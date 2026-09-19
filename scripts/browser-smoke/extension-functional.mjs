@@ -2501,6 +2501,65 @@ function runSc4ManualReviewElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for tgt-checkout-signin named tag (element-only, not live-poll-cycle).
+ * TGT-4: checkout sign-in gate — pending step, no review, no retry spam, no sacred lock.
+ */
+function runTgt4CheckoutSigninElementOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /handleCheckoutPendingStep/, 'tgt-checkout-signin: handleCheckoutPendingStep defined');
+  assert.match(targetSrc, /checkout pending:/, 'tgt-checkout-signin: pending log in source');
+  assert.match(
+    targetSrc,
+    /waiting for shipping\/payment \(no reload\)/,
+    'tgt-checkout-signin: no-reload wait in source'
+  );
+  assert.match(
+    targetSrc,
+    /noRetryOnTimeout:\s*true/,
+    'tgt-checkout-signin: noRetryOnTimeout in watchForCheckoutStep'
+  );
+  assert.match(targetSrc, /hasCheckoutAuthGate/, 'tgt-checkout-signin: auth gate helper in source');
+  assert.match(targetSrc, /autoPlaceOrder/, 'tgt-checkout-signin: TGT-4 autoPlaceOrder guard in source');
+  assert.doesNotMatch(
+    targetSrc,
+    /WALMART_IN_QUEUE/,
+    'tgt-checkout-signin: Target must not emit WALMART_IN_QUEUE'
+  );
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const signinTabUrl = 'https://www.target.com/checkout/signin-gate';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normSigninTabUrl = normalizeProductUrl(signinTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'tgt-checkout-signin: must not arm sacred lock while pending signin');
+  assert.ok(!inQueueUrls.has(normSigninTabUrl), 'tgt-checkout-signin: signin tab URL must not be sacred lock key');
+  assert.notEqual(
+    normMonitorUrl,
+    normSigninTabUrl,
+    'tgt-checkout-signin: monitor productUrl must differ from signin tab URL'
+  );
+  assert.ok(
+    isInCheckoutFlow(signinTabUrl),
+    'tgt-checkout-signin: signin gate is in checkout flow (MON-3 guard)'
+  );
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'tgt-checkout-signin: navigationLock alone must not imply sacred lock'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'tgt-checkout-signin: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
  */
@@ -3273,6 +3332,7 @@ async function main() {
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
+  runTgt4CheckoutSigninElementOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
@@ -3635,7 +3695,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
