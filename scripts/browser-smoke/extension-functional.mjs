@@ -2357,6 +2357,79 @@ function runTgtPollRecoveryRearmOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for tgt-checkout-signin named tag (element-only, not live-poll-cycle).
+ * Target TGT-4: sign-in gate → pending step, no review, no retry spam, no sacred lock.
+ */
+function runTgt4CheckoutSigninElementOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /handleCheckoutPendingStep/, 'tgt-checkout-signin: handleCheckoutPendingStep in source');
+  assert.match(
+    targetSrc,
+    /checkout pending:/,
+    'tgt-checkout-signin: pending step log in source'
+  );
+  assert.match(
+    targetSrc,
+    /waiting for shipping\/payment \(no reload\)/,
+    'tgt-checkout-signin: no-reload wait in source'
+  );
+  assert.match(
+    targetSrc,
+    /noRetryOnTimeout:\s*true/,
+    'tgt-checkout-signin: noRetryOnTimeout in watchForCheckoutStep'
+  );
+  assert.match(targetSrc, /hasCheckoutAuthGate/, 'tgt-checkout-signin: auth gate helper in source');
+  assert.match(targetSrc, /handleReviewStep/, 'tgt-checkout-signin: review handler in source (contrast)');
+  assert.match(targetSrc, /autoPlaceOrder/, 'tgt-checkout-signin: autoPlaceOrder guard in source');
+  assert.doesNotMatch(
+    targetSrc,
+    /WALMART_IN_QUEUE/,
+    'tgt-checkout-signin: Target checkout must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const signinTabUrl = 'https://www.target.com/checkout/signin-gate';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normSigninTabUrl = normalizeProductUrl(signinTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  assert.equal(inQueueUrls.size, 0, 'tgt-checkout-signin: signin gate must not populate inQueueUrls');
+  assert.ok(!inQueueUrls.has(normMonitorUrl), 'tgt-checkout-signin: monitor productUrl must stay out of inQueueUrls');
+  assert.ok(!inQueueUrls.has(normSigninTabUrl), 'tgt-checkout-signin: signin tab URL must not be sacred lock key');
+  assert.notEqual(
+    normMonitorUrl,
+    normSigninTabUrl,
+    'tgt-checkout-signin: monitor productUrl must differ from signin tab URL'
+  );
+  assert.ok(
+    isInCheckoutFlow(signinTabUrl),
+    'tgt-checkout-signin: signin tab is in checkout flow (MON-3 guard)'
+  );
+  assert.ok(
+    navigationLock.has(normMonitorUrl),
+    'tgt-checkout-signin: live poll may hold navigationLock on monitor product during signin wait'
+  );
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'tgt-checkout-signin: navigationLock alone must not imply sacred lock during signin wait'
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'tgt-checkout-signin: navigationLock on monitor product skips poll re-navigation (not sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'tgt-checkout-signin: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc3-disabled-atc named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-3: disabled ATC wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
  */
@@ -3273,6 +3346,7 @@ async function main() {
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
+  runTgt4CheckoutSigninElementOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
