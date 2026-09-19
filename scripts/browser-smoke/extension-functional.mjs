@@ -2017,6 +2017,60 @@ function runWm6PollRecoveryRearmOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for tgt-checkout-signin named tag (element-only, not live-poll-cycle).
+ * TGT-4: checkout sign-in gate — pending step, no review, no retry spam, no sacred lock.
+ */
+function runTgt4CheckoutSigninElementOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /handleCheckoutPendingStep/, 'tgt-checkout-signin: handleCheckoutPendingStep in source');
+  assert.match(targetSrc, /checkout pending:/, 'tgt-checkout-signin: pending log in source');
+  assert.match(
+    targetSrc,
+    /waiting for shipping\/payment \(no reload\)/,
+    'tgt-checkout-signin: no-reload wait in source'
+  );
+  assert.match(targetSrc, /noRetryOnTimeout:\s*true/, 'tgt-checkout-signin: noRetryOnTimeout in watchForCheckoutStep');
+  assert.match(targetSrc, /hasCheckoutAuthGate/, 'tgt-checkout-signin: auth gate helper in source');
+  assert.match(targetSrc, /autoPlaceOrder/, 'tgt-checkout-signin: autoPlaceOrder guard in source');
+
+  function assertTgtCheckoutSignin(monitorProductUrl, signinTabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normSigninTabUrl = normalizeProductUrl(signinTabUrl);
+    const inQueueUrls = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock while signin pending`);
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normSigninTabUrl), `${label}: signin tab URL must not be sacred lock key`);
+    assert.notEqual(normMonitorUrl, normSigninTabUrl, `${label}: monitor productUrl must differ from signin tab URL`);
+    assert.ok(isInCheckoutFlow(signinTabUrl), `${label}: signin tab is in checkout flow (MON-3 guard)`);
+    assert.ok(
+      !inQueueUrls.has(normMonitorUrl),
+      `${label}: navigationLock alone must not imply sacred lock`
+    );
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; signin gate does not arm it`
+    );
+  }
+
+  assertTgtCheckoutSignin(
+    'https://www.target.com/p/mock-product',
+    'https://www.target.com/checkout/signin-gate',
+    'tgt-checkout-signin'
+  );
+  assertTgtCheckoutSignin(
+    'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
+    'https://www.target.com/checkout/signin-gate-cross',
+    'tgt-checkout-signin cross-page'
+  );
+}
+
+/**
  * FIX-3 parity for tgt-repeated-nav-failed named tag.
  * Target error paths: repeated NAV_FAILED must never arm sacred lock.
  */
@@ -3270,6 +3324,7 @@ async function main() {
   runWm6RepeatedNavFailedOfflineTests();
   runWm6LivePollCycleOfflineTests();
   runWm6PollRecoveryRearmOfflineTests();
+  runTgt4CheckoutSigninElementOfflineTests();
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
