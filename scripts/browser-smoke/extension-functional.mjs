@@ -1580,6 +1580,108 @@ function runWm2RepeatedNavFailedElementOfflineTests() {
   );
 }
 
+/** Mirrors walmart-content.js _wmInit — send WM_OFFER_ID_READY when page OID differs from stored. */
+function wmDecideOfferIdReadyMessage({ pageOid, storedOid, url }) {
+  if (!pageOid || pageOid === storedOid) return null;
+  return { type: 'WM_OFFER_ID_READY', offerId: pageOid, url };
+}
+
+/** Mirrors background.js WM_OFFER_ID_READY handler. */
+function bgApplyWalmartOfferIdReady(monitor, message) {
+  const mon = monitor || { products: [] };
+  const normUrl = normalizeProductUrl(message.url || '');
+  let updated = false;
+  for (const p of mon.products || []) {
+    if (normalizeProductUrl(p.url) === normUrl && p.oid !== message.offerId) {
+      p.oid = message.offerId;
+      updated = true;
+    }
+  }
+  return { updated, monitor: mon };
+}
+
+/**
+ * FIX-3 parity for wm7-offer-id-ready named tag (element-only, not live-poll-cycle).
+ * WM-7: __NEXT_DATA__ offerId → WM_OFFER_ID_READY updates monitor.products[].oid; no sacred lock.
+ */
+function runWm7OfferIdReadyElementOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  const bgSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/background.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /WM_OFFER_ID_READY/, 'wm7-offer-id-ready: message type in walmart source');
+  assert.match(walmartSrc, /wmReadNextData/, 'wm7-offer-id-ready: wmReadNextData in source');
+  assert.match(walmartSrc, /__NEXT_DATA__/, 'wm7-offer-id-ready: __NEXT_DATA__ in source');
+  assert.match(
+    walmartSrc,
+    /primaryOffer\?\.offerId/,
+    'wm7-offer-id-ready: primaryOffer.offerId path in source'
+  );
+  assert.match(bgSrc, /case 'WM_OFFER_ID_READY':/, 'wm7-offer-id-ready: background handler');
+  assert.match(
+    bgSrc,
+    /p\.oid = message\.offerId/,
+    'wm7-offer-id-ready: background stores oid on monitor product'
+  );
+
+  const productUrl = 'https://www.walmart.com/ip/mock-oid/777';
+  const normProductUrl = normalizeProductUrl(productUrl);
+  const expectedOid = 'FIXTURE-OID-WM7-777';
+
+  const readyMsg = wmDecideOfferIdReadyMessage({
+    pageOid: expectedOid,
+    storedOid: null,
+    url: productUrl,
+  });
+  assert.ok(readyMsg, 'wm7-offer-id-ready: sends when stored oid missing');
+  assert.equal(readyMsg.type, 'WM_OFFER_ID_READY', 'wm7-offer-id-ready: message type');
+  assert.equal(readyMsg.offerId, expectedOid, 'wm7-offer-id-ready: offerId from fixture __NEXT_DATA__');
+  assert.equal(
+    normalizeProductUrl(readyMsg.url),
+    normProductUrl,
+    'wm7-offer-id-ready: url keys monitor product'
+  );
+
+  assert.equal(
+    wmDecideOfferIdReadyMessage({ pageOid: expectedOid, storedOid: expectedOid, url: productUrl }),
+    null,
+    'wm7-offer-id-ready: no message when stored oid matches'
+  );
+  assert.equal(
+    wmDecideOfferIdReadyMessage({ pageOid: null, storedOid: null, url: productUrl }),
+    null,
+    'wm7-offer-id-ready: no message when page oid missing'
+  );
+
+  const monitor = {
+    active: true,
+    products: [{ url: productUrl, oid: null, qty: 1 }],
+  };
+  const apply = bgApplyWalmartOfferIdReady(monitor, readyMsg);
+  assert.ok(apply.updated, 'wm7-offer-id-ready: background updates monitor oid');
+  assert.equal(
+    apply.monitor.products[0].oid,
+    expectedOid,
+    'wm7-offer-id-ready: monitor.products[].oid set'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  assert.equal(inQueueUrls.size, 0, 'wm7-offer-id-ready: must not arm sacred lock');
+  assert.ok(
+    !pollWouldSkipNavigation(normProductUrl, inQueueUrls, navigationLock),
+    'wm7-offer-id-ready: poll not blocked by offerId ready (no sacred lock)'
+  );
+  assert.ok(
+    readyMsg.type !== 'WALMART_IN_QUEUE',
+    'wm7-offer-id-ready: must not send WALMART_IN_QUEUE'
+  );
+}
+
 /**
  * FIX-3 parity for wm2-live-poll-cycle named tag.
  * WM-2: pre-drop disabled ATC — reload + repeated NAV_FAILED during live poll, no sacred lock.
@@ -3267,6 +3369,7 @@ async function main() {
   runWm5CheckoutSpaLivePollCycleOfflineTests();
   runWm2RepeatedNavFailedElementOfflineTests();
   runWm2LivePollCycleElementOfflineTests();
+  runWm7OfferIdReadyElementOfflineTests();
   runWm6RepeatedNavFailedOfflineTests();
   runWm6LivePollCycleOfflineTests();
   runWm6PollRecoveryRearmOfflineTests();
