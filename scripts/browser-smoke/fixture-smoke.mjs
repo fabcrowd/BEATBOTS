@@ -251,7 +251,7 @@ const FIXTURE_MARKERS = {
     journeys: ['WM-5'],
     markers: [
       'data-tch-fixture="walmart-product-queue-timeout"',
-      'data-tch-queue-timeout-ms="750"',
+      'data-tch-queue-timeout-ms="5000"',
       'estimated wait time',
       'data-automation-id="queue-hold-spot-btn"',
     ],
