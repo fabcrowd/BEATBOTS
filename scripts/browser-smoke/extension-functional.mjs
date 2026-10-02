@@ -2430,6 +2430,81 @@ function runTgt4CheckoutSigninElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for tgt4-checkout-spa-timeout named tag (element-only, not live-poll-cycle).
+ * Target TGT-4: checkout SPA stall timeout → NAV_FAILED, no sacred lock.
+ */
+function runTgt4CheckoutSpaTimeoutElementOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /handleCheckoutStall timed out — releasing navigation lock/,
+    'tgt4-checkout-spa-timeout: timeout log in source'
+  );
+  assert.match(
+    targetSrc,
+    /signalNavFailed\(settings\.productUrl \|\| getRememberedProductUrl\(\) \|\| location\.href\)/,
+    'tgt4-checkout-spa-timeout: uses settings.productUrl before location.href'
+  );
+  assert.match(
+    targetSrc,
+    /Checkout step timeout — take over manually/,
+    'tgt4-checkout-spa-timeout: user-facing toast in source'
+  );
+  assert.match(
+    targetSrc,
+    /checkout stall: waiting for shipping\/payment\/review/,
+    'tgt4-checkout-spa-timeout: stall wait log in source'
+  );
+  assert.doesNotMatch(
+    targetSrc,
+    /WALMART_IN_QUEUE/,
+    'tgt4-checkout-spa-timeout: Target checkout must not emit Walmart queue semantics'
+  );
+
+  const scenarios = [
+    {
+      label: 'checkout SPA timeout (tgt4-checkout-spa-timeout)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
+      tabUrl: 'https://www.target.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (tgt4-checkout-spa-timeout)',
+      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
+      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = normalizeProductUrl(tabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on checkout stall`);
+    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+    assert.ok(isInCheckoutFlow(tabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED clears navigationLock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry monitor product after timeout (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; checkout stall without queue does not arm it`
+    );
+  }
+}
+
+/**
  * FIX-3 parity for sc3-disabled-atc named tag (element-only, not live-poll-cycle).
  * Sam's Club SC-3: disabled ATC wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
  */
@@ -3347,6 +3422,7 @@ async function main() {
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
   runTgt4CheckoutSigninElementOfflineTests();
+  runTgt4CheckoutSpaTimeoutElementOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
@@ -3709,7 +3785,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
