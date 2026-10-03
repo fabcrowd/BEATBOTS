@@ -2189,6 +2189,79 @@ function runWm6PxTimeoutNavFailedElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for px-timeout-ms-override named tag (element-only, not live-poll-cycle).
+ * WM-6: data-tch-px-timeout-ms on PX hang-tight → WALMART_NAV_FAILED at override ms, no sacred lock.
+ */
+function runWm6PxTimeoutMsOverrideElementOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /data-tch-px-timeout-ms/,
+    'px-timeout-ms-override: override attribute in source'
+  );
+  assert.match(walmartSrc, /wmPxTimeoutMs/, 'px-timeout-ms-override: timeout helper in source');
+  assert.match(
+    walmartSrc,
+    /PX page still showing/,
+    'px-timeout-ms-override: PX timeout log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /releasing nav lock/,
+    'px-timeout-ms-override: navigation lock release log in source'
+  );
+
+  const pxOverrideFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-override.html'),
+    'utf8'
+  );
+  assert.match(
+    pxOverrideFixture,
+    /data-tch-px-timeout-ms="750"/,
+    'px-timeout-ms-override: fixture override attribute'
+  );
+  assert.match(pxOverrideFixture, /Hang tight/, 'px-timeout-ms-override: hang-tight fixture marker');
+
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-px-override/558';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+    applyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: 'WALMART_NAV_FAILED',
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `px-timeout-ms-override cycle ${i + 1}: override timeout must not arm inQueueUrls`
+    );
+    assert.ok(
+      !inQueueUrls.has(normMonitorUrl),
+      `px-timeout-ms-override cycle ${i + 1}: monitor URL must stay out of inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `px-timeout-ms-override cycle ${i + 1}: override timeout must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `px-timeout-ms-override cycle ${i + 1}: poll may retry after override timeout (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'px-timeout-ms-override: contrast WM-5 — sacred lock would block poll; PX override timeout does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for tgt-repeated-nav-failed named tag.
  * Target error paths: repeated NAV_FAILED must never arm sacred lock.
  */
@@ -3592,6 +3665,7 @@ async function main() {
   runWm6PollRecoveryRearmOfflineTests();
   runWm6CheckoutSpaTimeoutElementOfflineTests();
   runWm6PxTimeoutNavFailedElementOfflineTests();
+  runWm6PxTimeoutMsOverrideElementOfflineTests();
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
