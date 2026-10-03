@@ -2017,6 +2017,79 @@ function runWm6PollRecoveryRearmOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for wm6-checkout-spa-timeout named tag (element-only, not live-poll-cycle).
+ * WM-6: checkout SPA stall timeout → QUEUE_TIMEOUT when productUrl set, no sacred lock.
+ */
+function runWm6CheckoutSpaTimeoutElementOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmHandleCheckout timed out/,
+    'wm6-checkout-spa-timeout: timeout log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalQueueTimeout\(settings\.productUrl\)/,
+    'wm6-checkout-spa-timeout: monitored checkout uses QUEUE_TIMEOUT when productUrl set'
+  );
+  assert.match(
+    walmartSrc,
+    /Checkout step timeout — take over manually/,
+    'wm6-checkout-spa-timeout: user-facing toast in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmCheckoutTotalTimeoutMs/,
+    'wm6-checkout-spa-timeout: checkout stall timeout helper in source'
+  );
+
+  const scenarios = [
+    {
+      label: 'checkout SPA timeout (wm6-checkout-spa-timeout)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall',
+    },
+    {
+      label: 'cross-page checkout SPA timeout (wm6-checkout-spa-timeout)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
+      tabUrl: 'https://www.walmart.com/checkout/spa-stall-cross',
+    },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = normalizeProductUrl(tabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on checkout stall`);
+    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+    assert.ok(isInCheckoutFlow(tabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+
+    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+      type: 'WALMART_QUEUE_TIMEOUT',
+      url: monitorProductUrl,
+    });
+    assert.equal(inQueueUrls.size, 0, `${label}: QUEUE_TIMEOUT must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: QUEUE_TIMEOUT clears navigationLock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry monitor product after timeout (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; checkout stall without queue does not arm it`
+    );
+  }
+}
+
+/**
  * FIX-3 parity for tgt-repeated-nav-failed named tag.
  * Target error paths: repeated NAV_FAILED must never arm sacred lock.
  */
@@ -3418,6 +3491,7 @@ async function main() {
   runWm6RepeatedNavFailedOfflineTests();
   runWm6LivePollCycleOfflineTests();
   runWm6PollRecoveryRearmOfflineTests();
+  runWm6CheckoutSpaTimeoutElementOfflineTests();
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
@@ -3785,7 +3859,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-checkout-spa-timeout + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
