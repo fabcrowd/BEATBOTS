@@ -2090,6 +2090,105 @@ function runWm6CheckoutSpaTimeoutElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for px-timeout-nav-failed named tag (element-only, not live-poll-cycle).
+ * WM-6: PerimeterX hang-tight / captcha / block → WALMART_NAV_FAILED on timeout, no sacred lock.
+ */
+function runWm6PxTimeoutNavFailedElementOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /PX\/loading page detected/,
+    'px-timeout-nav-failed: PX guard log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /PX page still showing/,
+    'px-timeout-nav-failed: PX timeout log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /releasing nav lock/,
+    'px-timeout-nav-failed: navigation lock release log in source'
+  );
+  assert.match(walmartSrc, /wmPxTimeoutMs/, 'px-timeout-nav-failed: timeout helper in source');
+  assert.match(walmartSrc, /wmIsPxPage/, 'px-timeout-nav-failed: PX page detection in source');
+
+  const pxHangTightFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px.html'),
+    'utf8'
+  );
+  assert.match(pxHangTightFixture, /Hang tight/, 'px-timeout-nav-failed: hang-tight fixture marker');
+  const pxCaptchaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-captcha.html'),
+    'utf8'
+  );
+  assert.match(pxCaptchaFixture, /id="px-captcha"/, 'px-timeout-nav-failed: captcha fixture marker');
+  const pxBlockFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-block.html'),
+    'utf8'
+  );
+  assert.match(pxBlockFixture, /px-block/, 'px-timeout-nav-failed: px-block fixture marker');
+
+  function assertPxTimeoutNavFailed(monitorProductUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} cycle ${i + 1}: PX timeout must not arm inQueueUrls`
+      );
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `${label} cycle ${i + 1}: monitor URL must stay out of inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} cycle ${i + 1}: PX timeout must clear navigationLock`
+      );
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} cycle ${i + 1}: poll may retry after PX timeout (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; PX timeout does not arm it`
+    );
+  }
+
+  const scenarios = [
+    {
+      label: 'PX hang-tight (px-timeout-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
+    },
+    {
+      label: 'PX captcha (px-timeout-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
+    },
+    {
+      label: 'PX block (px-timeout-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
+    },
+  ];
+
+  for (const { label, monitorProductUrl } of scenarios) {
+    assertPxTimeoutNavFailed(monitorProductUrl, label);
+  }
+}
+
+/**
  * FIX-3 parity for tgt-repeated-nav-failed named tag.
  * Target error paths: repeated NAV_FAILED must never arm sacred lock.
  */
@@ -3492,6 +3591,7 @@ async function main() {
   runWm6LivePollCycleOfflineTests();
   runWm6PollRecoveryRearmOfflineTests();
   runWm6CheckoutSpaTimeoutElementOfflineTests();
+  runWm6PxTimeoutNavFailedElementOfflineTests();
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
@@ -3859,7 +3959,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-checkout-spa-timeout + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-checkout-spa-timeout + px-timeout-nav-failed + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + sc3-disabled-atc + sc6-invisible-atc + sc4-manual-review + sc2-cart-checkout-missing + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
