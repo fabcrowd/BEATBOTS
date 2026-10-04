@@ -77,6 +77,19 @@ function applyAtcSuccess(navigationLock, inQueueUrls, message) {
   return normUrl;
 }
 
+/** Mirrors background.js WM_OFFER_ID_READY — stores offerId on matching monitor.products[]. */
+function applyWmOfferIdReady(products, message) {
+  const normUrl = normalizeProductUrl(message.url || '');
+  let updated = false;
+  for (const p of products) {
+    if (normalizeProductUrl(p.url) === normUrl && p.oid !== message.offerId) {
+      p.oid = message.offerId;
+      updated = true;
+    }
+  }
+  return { normUrl, updated };
+}
+
 /**
  * FIX-3 parity for nav-failed-releases-lock generic invariant tag.
  * Unified background handler + content-script release logs across Target, Walmart, Sam's Club.
@@ -2262,6 +2275,86 @@ function runWm6PxTimeoutMsOverrideElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for wm7-offer-id-ready named tag (element-only, not live-poll-cycle).
+ * WM-7: __NEXT_DATA__ offerId → WM_OFFER_ID_READY updates monitor.products[].oid; no sacred lock.
+ */
+function runWm7OfferIdReadyElementOfflineTests() {
+  const bgSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/background.js'),
+    'utf8'
+  );
+  assert.match(bgSrc, /case 'WM_OFFER_ID_READY':/, 'wm7-offer-id-ready: handler in background source');
+  const wm7Block = bgSrc.slice(
+    bgSrc.indexOf("case 'WM_OFFER_ID_READY'"),
+    bgSrc.indexOf("case 'GET_NTP_OFFSET'")
+  );
+  assert.ok(
+    !wm7Block.includes('inQueueUrls'),
+    'wm7-offer-id-ready: WM_OFFER_ID_READY must not touch inQueueUrls'
+  );
+
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /WM_OFFER_ID_READY/, 'wm7-offer-id-ready: message type in walmart source');
+  assert.match(walmartSrc, /wmReadNextData/, 'wm7-offer-id-ready: wmReadNextData in source');
+  assert.match(walmartSrc, /__NEXT_DATA__/, 'wm7-offer-id-ready: __NEXT_DATA__ in source');
+  assert.match(
+    walmartSrc,
+    /primaryOffer.*offerId/,
+    'wm7-offer-id-ready: primaryOffer.offerId path in source'
+  );
+
+  const oidFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-oid.html'),
+    'utf8'
+  );
+  assert.match(
+    oidFixture,
+    /FIXTURE-OID-WM7-777/,
+    'wm7-offer-id-ready: fixture offerId in __NEXT_DATA__'
+  );
+  assert.match(oidFixture, /data-tch-fixture="walmart-product-oid"/, 'wm7-offer-id-ready: fixture marker');
+
+  const productUrl = 'https://www.walmart.com/ip/mock-oid/777';
+  const normProductUrl = normalizeProductUrl(productUrl);
+  const expectedOid = 'FIXTURE-OID-WM7-777';
+  const monitor = {
+    products: [{ url: productUrl, oid: null }],
+  };
+
+  const first = applyWmOfferIdReady(monitor.products, {
+    type: 'WM_OFFER_ID_READY',
+    url: productUrl,
+    offerId: expectedOid,
+  });
+  assert.equal(first.normUrl, normProductUrl, 'wm7-offer-id-ready: normalizes product URL');
+  assert.ok(first.updated, 'wm7-offer-id-ready: first message updates oid');
+  assert.equal(monitor.products[0].oid, expectedOid, 'wm7-offer-id-ready: stores offerId on monitor product');
+
+  const second = applyWmOfferIdReady(monitor.products, {
+    type: 'WM_OFFER_ID_READY',
+    url: productUrl,
+    offerId: expectedOid,
+  });
+  assert.ok(!second.updated, 'wm7-offer-id-ready: duplicate message does not re-update');
+
+  const inQueueUrls = new Set();
+  assert.equal(inQueueUrls.size, 0, 'wm7-offer-id-ready: must not arm sacred lock');
+  assert.ok(
+    !pollWouldSkipNavigation(normProductUrl, inQueueUrls, new Set()),
+    'wm7-offer-id-ready: offerId ready alone must not block poll (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normProductUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normProductUrl, wmSacredLock, new Set()),
+    'wm7-offer-id-ready: contrast WM-4 — sacred lock would block poll; offerId path does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for tgt-repeated-nav-failed named tag.
  * Target error paths: repeated NAV_FAILED must never arm sacred lock.
  */
@@ -2840,6 +2933,63 @@ function runSc6InvisibleAtcElementOfflineTests() {
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'sc6-invisible-atc: contrast WM-5 — sacred lock would block poll; invisible ATC wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc5-repeated-atc-success named tag (element-only, not live-poll-cycle).
+ * SC-5: repeated ATC_SUCCESS on FCFS product must never arm sacred lock.
+ */
+function runSc5RepeatedAtcSuccessElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] Clicking ATC button/, 'sc5-repeated-atc-success: ATC click log in source');
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc5-repeated-atc-success: Sam\'s FCFS must not emit Walmart queue semantics'
+  );
+
+  const fcfsFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs.html'),
+    'utf8'
+  );
+  assert.match(
+    fcfsFixture,
+    /data-tch-fixture="samsclub-product-fcfs"/,
+    'sc5-repeated-atc-success: FCFS fixture marker'
+  );
+  assert.match(fcfsFixture, /add-to-cart/, 'sc5-repeated-atc-success: FCFS fixture ATC control');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  for (let i = 0; i < 3; i++) {
+    navigationLock.add(normMonitorUrl);
+    applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc5-repeated-atc-success cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `sc5-repeated-atc-success cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `sc5-repeated-atc-success cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc5-repeated-atc-success: contrast WM-5 — sacred lock would block poll; FCFS does not arm it'
   );
 }
 
@@ -3666,6 +3816,7 @@ async function main() {
   runWm6CheckoutSpaTimeoutElementOfflineTests();
   runWm6PxTimeoutNavFailedElementOfflineTests();
   runWm6PxTimeoutMsOverrideElementOfflineTests();
+  runWm7OfferIdReadyElementOfflineTests();
   runTgtRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
@@ -3673,6 +3824,7 @@ async function main() {
   runTgt4CheckoutSpaTimeoutElementOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
+  runSc5RepeatedAtcSuccessElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
   runSc2CartCheckoutMissingElementOfflineTests();
   runSc3PollRecoveryRearmOfflineTests();
