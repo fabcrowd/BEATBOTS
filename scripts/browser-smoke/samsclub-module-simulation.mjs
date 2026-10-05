@@ -332,6 +332,96 @@ function runSc2CartElementTests() {
 }
 
 /**
+ * SC-2: FCFS cart happy-path live poll cycle — reload + repeated signals during poll, no sacred lock.
+ * Parity with FIX-3 sc2-cart-live-poll-cycle on /cart (fixture-e2e has browser coverage).
+ */
+function runSc2CartLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
+  const cartTabUrl = 'https://www.samsclub.com/cart';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'SC-2: cart live poll must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normCartTabUrl), 'SC-2: cart tab URL must not be sacred lock key');
+
+  const cartPage = makePage({
+    pathname: '/cart',
+    elements: [
+      {
+        selectors: ['[data-automation-id="checkout-btn"]'],
+        text: 'Checkout',
+        tag: 'button',
+      },
+    ],
+  });
+
+  let checkoutCycles = 0;
+  const simulateCartCheckout = () => {
+    checkoutCycles += 1;
+    const cartResult = scHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+    assert.equal(cartResult.path, 'cart_to_checkout', 'SC-2: cart live poll happy path');
+    assert.ok(cartPage.elements[0].clicked, 'SC-2: cart live poll must click checkout');
+    return cartResult;
+  };
+
+  navigationLock.add(normMonitorUrl);
+  simulateCartCheckout();
+  assert.equal(inQueueUrls.size, 0, 'SC-2: cart checkout must not arm sacred lock');
+
+  navigationLock.add(normMonitorUrl);
+  simulateCartCheckout();
+  assert.equal(checkoutCycles, 2, 'SC-2: cart reload must re-trigger checkout click');
+  assert.equal(inQueueUrls.size, 0, 'SC-2: cart reload during live poll must not arm sacred lock');
+
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      bgApplyAtcSuccess(navigationLock, inQueueUrls, {
+        type: 'ATC_SUCCESS',
+        url: monitorProductUrl,
+      });
+    } else {
+      bgApplyNavFailed(navigationLock, inQueueUrls, {
+        type: liveSignalTypes[i],
+        url: monitorProductUrl,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-2: cart live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-2: cart live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-2: cart live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-2: cart live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'SC-2: cart navigationLock alone must not imply sacred lock after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-2: contrast WM-5 — sacred lock would block poll; Sam cart happy path does not arm it'
+  );
+}
+
+/**
  * SC-2: FCFS cart checkout-missing element — fixture DOM on /cart/no-checkout → NAV_FAILED, no sacred lock.
  * Parity with FIX-3 sc2-cart-checkout-missing on /cart/no-checkout (fixture-e2e has browser coverage).
  */
@@ -3390,6 +3480,7 @@ function main() {
   testSc2CartCheckoutMissing();
   testSc2ProductToCartChain();
   runSc2CartElementTests();
+  runSc2CartLivePollCycleTests();
   runSc2CartCheckoutMissingElementTests();
   testSc3Source();
   testSc3DisabledAtcNotQueue();
@@ -3434,7 +3525,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart checkout-missing element, SC-4 checkout review element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-4 checkout review element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
