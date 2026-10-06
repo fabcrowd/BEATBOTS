@@ -982,6 +982,8 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'no-sacred-lock',
       'sc2-cart-checkout-missing',
+      'sc2-cart-poll-recovery-rearm',
+      'sc2-repeated-nav-failed',
       'sc6-cart-live-poll-cycle',
       'sc6-poll-recovery-rearm',
       'sc6-repeated-nav-failed',
@@ -1000,6 +1002,8 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'no-sacred-lock',
       'sc2-cart-checkout-missing',
+      'sc2-cart-poll-recovery-rearm',
+      'sc2-repeated-nav-failed',
       'sc6-cart-live-poll-cycle',
       'sc6-poll-recovery-rearm',
       'sc6-repeated-nav-failed',

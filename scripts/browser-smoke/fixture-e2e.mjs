@@ -1241,6 +1241,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     // SC-4 / SC-6 / WM-2 / WM-6: repeated NAV_FAILED cycles must never arm sacred lock.
     if (
       invariants.includes('sc6-repeated-nav-failed') ||
+      invariants.includes('sc2-repeated-nav-failed') ||
       invariants.includes('wm2-repeated-nav-failed') ||
       invariants.includes('wm6-repeated-nav-failed') ||
       invariants.includes('sc4-repeated-nav-failed') ||
@@ -2454,6 +2455,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     invariants.includes('sc4-poll-recovery-rearm') ||
     invariants.includes('tgt-poll-recovery-rearm') ||
     invariants.includes('sc6-poll-recovery-rearm') ||
+    invariants.includes('sc2-cart-poll-recovery-rearm') ||
     invariants.includes('sc3-poll-recovery-rearm') ||
     invariants.includes('wm4-poll-recovery-rearm') ||
     invariants.includes('wm6-poll-recovery-rearm')
@@ -2468,7 +2470,9 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
             ? 'SC-4'
             : invariants.includes('sc3-poll-recovery-rearm')
               ? 'SC-3'
-              : 'SC-6';
+              : invariants.includes('sc2-cart-poll-recovery-rearm')
+                ? 'SC-2'
+                : 'SC-6';
     const monitorUrl = route.pollRecoveryProductPath
       ? `http://${route.host}:${port}${route.pollRecoveryProductPath}`
       : route.monitorProductPath
@@ -2792,6 +2796,7 @@ async function main() {
     // SC-6 / WM-6 / TGT-4: cross-page cart, signin, or review — tab on /cart/*, /checkout/signin-gate-cross, or /checkout/review-cross while monitor keys a product URL.
     if (
       (route.invariants?.includes('sc6-poll-recovery-rearm') ||
+        route.invariants?.includes('sc2-cart-poll-recovery-rearm') ||
         route.invariants?.includes('wm6-poll-recovery-rearm') ||
         (route.invariants?.includes('tgt-poll-recovery-rearm') &&
           (route.invariants?.includes('tgt-signin-live-poll-cycle') ||
