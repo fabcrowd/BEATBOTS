@@ -3455,36 +3455,48 @@ function runSc2CartCheckoutMissingElementOfflineTests() {
  * FIX-3 parity for sc2-cart-poll-recovery-rearm named tag (SC-2 cart error path).
  */
 function runSc2CartPollRecoveryRearmOfflineTests() {
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792';
-  const recoveryProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
-  const tabUrl = 'https://www.samsclub.com/cart/no-checkout';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
-  const normTabUrl = normalizeProductUrl(tabUrl);
-  const inQueueUrls = new Set();
-  const navigationLock = new Set();
+  function assertSc2CartPollRecovery(monitorProductUrl, recoveryProductUrl, tabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+    const normTabUrl = normalizeProductUrl(tabUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
 
-  navigationLock.add(normMonitorUrl);
-  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-  assert.ok(!navigationLock.has(normMonitorUrl), 'sc2-cart-poll-recovery-rearm: NAV_FAILED releases navigationLock');
-  assert.equal(inQueueUrls.size, 0, 'sc2-cart-poll-recovery-rearm: must not arm sacred lock');
-  assert.notEqual(normMonitorUrl, normTabUrl, 'sc2-cart-poll-recovery-rearm: monitor productUrl must differ from tab URL');
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock`);
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
 
-  navigationLock.add(normRecoveryUrl);
-  assert.ok(
-    navigationLock.has(normRecoveryUrl),
-    'sc2-cart-poll-recovery-rearm: poll recovery re-arms navigationLock on recovery product'
+    navigationLock.add(normRecoveryUrl);
+    assert.ok(
+      navigationLock.has(normRecoveryUrl),
+      `${label}: poll recovery re-arms navigationLock on recovery product`
+    );
+    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
+    assert.ok(
+      !navigationLock.has(normRecoveryUrl),
+      `${label}: NAV_FAILED during poll recovery releases recovery lock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+    );
+  }
+
+  assertSc2CartPollRecovery(
+    'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
+    'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    'https://www.samsclub.com/cart/no-checkout',
+    'sc2-cart-poll-recovery-rearm'
   );
-  assert.equal(inQueueUrls.size, 0, 'sc2-cart-poll-recovery-rearm: poll recovery must not arm sacred lock');
-
-  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
-  assert.ok(
-    !navigationLock.has(normRecoveryUrl),
-    'sc2-cart-poll-recovery-rearm: NAV_FAILED during poll recovery releases recovery lock'
-  );
-  assert.ok(
-    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
-    'sc2-cart-poll-recovery-rearm: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  assertSc2CartPollRecovery(
+    'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
+    'https://www.samsclub.com/p/mock-fcfs-cart-cross-recovery/795',
+    'https://www.samsclub.com/cart/no-checkout-cross',
+    'sc2-cart-cross-poll-recovery'
   );
 }
 
@@ -3492,23 +3504,34 @@ function runSc2CartPollRecoveryRearmOfflineTests() {
  * FIX-3 parity for sc2-repeated-nav-failed named tag (SC-2 cart checkout-missing).
  */
 function runSc2RepeatedNavFailedOfflineTests() {
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792';
-  const tabUrl = 'https://www.samsclub.com/cart/no-checkout';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const normTabUrl = normalizeProductUrl(tabUrl);
+  function assertSc2RepeatedNavFailed(monitorProductUrl, tabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = normalizeProductUrl(tabUrl);
 
-  for (let i = 0; i < 3; i++) {
-    const inQueueUrls = new Set();
-    const navigationLock = new Set([normMonitorUrl]);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-    assert.equal(inQueueUrls.size, 0, `sc2-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `sc2-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`);
-    assert.ok(
-      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `sc2-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
-    );
-    assert.notEqual(normMonitorUrl, normTabUrl, `sc2-repeated-nav-failed cycle ${i + 1}: monitor URL differs from cart tab`);
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+      assert.equal(inQueueUrls.size, 0, `${label} cycle ${i + 1}: must not arm inQueueUrls`);
+      assert.ok(!navigationLock.has(normMonitorUrl), `${label} cycle ${i + 1}: must clear navigationLock`);
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} cycle ${i + 1}: allows poll retry (no sacred lock)`
+      );
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label} cycle ${i + 1}: monitor URL differs from cart tab`);
+    }
   }
+
+  assertSc2RepeatedNavFailed(
+    'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
+    'https://www.samsclub.com/cart/no-checkout',
+    'sc2-repeated-nav-failed'
+  );
+  assertSc2RepeatedNavFailed(
+    'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
+    'https://www.samsclub.com/cart/no-checkout-cross',
+    'sc2-repeated-nav-failed cross-page'
+  );
 }
 
 /**

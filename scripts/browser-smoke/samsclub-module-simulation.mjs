@@ -553,6 +553,77 @@ function runSc2CartRepeatedNavFailedTests() {
   assert.notEqual(normMonitorUrl, normCartTabUrl, 'SC-2 cart repeated NAV_FAILED: monitor URL differs from cart tab');
 }
 
+/**
+ * SC-2: cross-page cart poll recovery — tab on /cart/no-checkout-cross, monitor keys distinct productUrl.
+ * Parity with FIX-3 sc2-cart-cross-poll-recovery (fixture-e2e sc2-cart-poll-recovery-rearm on cross route).
+ */
+function runSc2CartCrossPollRecoveryRearmTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794';
+  const recoveryProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-recovery/795';
+  const cartTabUrl = 'https://www.samsclub.com/cart/no-checkout-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  const cartResult = scHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+  assert.equal(cartResult.path, 'checkout_not_found', 'SC-2 cart cross poll recovery: missing checkout path');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  const navFail = cartResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(navFail, 'SC-2 cart cross poll recovery: sends SAMS_NAV_FAILED');
+  assert.equal(navFail.url, monitorProductUrl, 'SC-2 cart cross poll recovery: NAV_FAILED uses monitor productUrl');
+  assert.notEqual(normalizeProductUrl(navFail.url), normCartTabUrl, 'SC-2 cart cross poll recovery: must not key cart tab URL');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'SC-2 cart cross poll recovery: NAV_FAILED must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-2 cart cross poll recovery: releases navigationLock on monitor product');
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'SC-2 cart cross poll recovery: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'SC-2 cart cross poll recovery: must not arm sacred lock');
+}
+
+/**
+ * SC-2: cross-page repeated SAMS_NAV_FAILED on cart checkout-missing — no sacred lock.
+ * Parity with FIX-3 sc2-repeated-nav-failed on /cart/no-checkout-cross (fixture-e2e has browser coverage).
+ */
+function runSc2CartCrossRepeatedNavFailedTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794';
+  const cartTabUrl = 'https://www.samsclub.com/cart/no-checkout-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+  const cartPage = makePage({ pathname: '/cart/no-checkout-cross', elements: [] });
+  const cartResult = scHandleCartPageSim(cartPage, { productUrl: monitorProductUrl });
+  const navFail = cartResult.messages.find((m) => m.type === 'SAMS_NAV_FAILED');
+  assert.ok(navFail, 'SC-2 cart cross repeated NAV_FAILED: initial message');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, navFail);
+  assert.equal(inQueueUrls.size, 0, 'SC-2 cart cross repeated NAV_FAILED cycle 1: no sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-2 cart cross repeated NAV_FAILED cycle 1: clears lock');
+
+  for (let i = 0; i < 2; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `SC-2 cart cross repeated NAV_FAILED cycle ${i + 2}: no sacred lock`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `SC-2 cart cross repeated NAV_FAILED cycle ${i + 2}: clears lock`);
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-2 cart cross repeated NAV_FAILED cycle ${i + 2}: poll may retry`
+    );
+  }
+  assert.notEqual(normMonitorUrl, normCartTabUrl, 'SC-2 cart cross repeated NAV_FAILED: monitor URL differs from cart tab');
+}
+
 function testSc1Hosts() {
   const hosts = loadHosts();
   assert.ok(hosts.SAMSCLUB, 'SC-1: TCH_HOSTS.SAMSCLUB defined');
@@ -3555,6 +3626,8 @@ function main() {
   runSc2CartCheckoutMissingElementTests();
   runSc2CartPollRecoveryRearmTests();
   runSc2CartRepeatedNavFailedTests();
+  runSc2CartCrossPollRecoveryRearmTests();
+  runSc2CartCrossRepeatedNavFailedTests();
   testSc3Source();
   testSc3DisabledAtcNotQueue();
   testSc3ProductPageHappyPath();
@@ -3598,7 +3671,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-4 checkout review element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
