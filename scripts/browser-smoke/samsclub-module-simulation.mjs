@@ -1931,45 +1931,62 @@ function runSc4CheckoutReviewElementTests() {
   assert.match(SC_SRC, /Reached review — Place Order remains manual/, 'SC-4 checkout review element: manual stop toast in source');
   assert.match(SC_SRC, /SC_SEL\.placeOrder/, 'SC-4 checkout review element: place-order selector in source');
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
-  const normUrl = normalizeProductUrl(monitorProductUrl);
-  const inQueueUrls = new Set();
+  function assertSc4CheckoutReviewElement({ pathname, monitorProductUrl, label, docAttrs }) {
+    const normUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(`https://www.samsclub.com${pathname}`);
+    const inQueueUrls = new Set();
 
-  const reviewPage = makePage({
+    const reviewPage = makePage({
+      pathname,
+      docAttrs,
+      elements: [
+        {
+          selectors: ['button[data-automation-id="place-order-btn"]'],
+          tag: 'button',
+          text: 'Place order',
+        },
+      ],
+    });
+
+    assert.equal(scGetPageTypeSim(pathname), 'checkout', `${label}: ${pathname} → checkout page type`);
+    assert.ok(scCheckoutHasReviewSim(reviewPage), `${label}: review step detected via place-order-btn`);
+
+    const handleResult = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(handleResult.path, 'review_manual', `${label}: TGT-4 manual stop at review`);
+    assert.ok(handleResult.actions.includes('review_manual_stop'), `${label}: review_manual_stop action`);
+    assert.equal(reviewPage.elements[0].clicked, false, `${label}: Place Order not clicked`);
+    assert.ok(!handleResult.actions.includes('click_place_order'), `${label}: must not auto-click Place Order`);
+
+    assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+    assert.notEqual(normUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it`
+    );
+  }
+
+  assertSc4CheckoutReviewElement({
     pathname: '/checkout',
+    monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs/789',
+    label: 'SC-4 checkout review element',
     docAttrs: {
       'data-tch-fixture': 'samsclub-checkout-review',
       'data-tch-path': '/checkout',
     },
-    elements: [
-      {
-        selectors: ['button[data-automation-id="place-order-btn"]'],
-        tag: 'button',
-        text: 'Place order',
-      },
-    ],
   });
-
-  assert.equal(scGetPageTypeSim('/checkout'), 'checkout', 'SC-4 checkout review element: /checkout → checkout page type');
-  assert.ok(scCheckoutHasReviewSim(reviewPage), 'SC-4 checkout review element: review step detected via place-order-btn');
-
-  const handleResult = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
-  assert.equal(handleResult.path, 'review_manual', 'SC-4 checkout review element: TGT-4 manual stop at review');
-  assert.ok(handleResult.actions.includes('review_manual_stop'), 'SC-4 checkout review element: review_manual_stop action');
-  assert.equal(reviewPage.elements[0].clicked, false, 'SC-4 checkout review element: Place Order not clicked');
-  assert.ok(
-    !handleResult.actions.includes('click_place_order'),
-    'SC-4 checkout review element: must not auto-click Place Order'
-  );
-
-  assert.equal(inQueueUrls.size, 0, 'SC-4 checkout review element: review step must not populate inQueueUrls');
-  assert.ok(!inQueueUrls.has(normUrl), 'SC-4 checkout review element: monitor productUrl must stay out of inQueueUrls');
-
-  const wmSacredLock = new Set([normUrl]);
-  assert.ok(
-    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
-    'SC-4 checkout review element: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it'
-  );
+  assertSc4CheckoutReviewElement({
+    pathname: '/checkout/review-cross',
+    monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+    label: 'SC-4 checkout review cross element',
+    docAttrs: {
+      'data-tch-fixture': 'samsclub-checkout-review-cross',
+      'data-tch-path': '/checkout/review-cross',
+    },
+  });
 }
 
 function testSc4Source() {
@@ -3692,7 +3709,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 

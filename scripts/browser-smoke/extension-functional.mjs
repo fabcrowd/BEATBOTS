@@ -3290,25 +3290,33 @@ function runSc4ManualReviewElementOfflineTests() {
     'sc4-manual-review: Sam\'s checkout must not emit Walmart queue semantics'
   );
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
-  const checkoutTabUrl = 'https://www.samsclub.com/checkout';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-  const inQueueUrls = new Set();
+  function assertSc4ManualReviewOffline(monitorProductUrl, checkoutTabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+    const inQueueUrls = new Set();
 
-  assert.equal(inQueueUrls.size, 0, 'sc4-manual-review: review step must not populate inQueueUrls');
-  assert.ok(!inQueueUrls.has(normMonitorUrl), 'sc4-manual-review: monitor productUrl must stay out of inQueueUrls');
-  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'sc4-manual-review: checkout tab URL must not be sacred lock key');
-  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, 'sc4-manual-review: monitor productUrl must differ from checkout tab URL');
-  assert.ok(
-    isInCheckoutFlow(checkoutTabUrl),
-    'sc4-manual-review: checkout tab is in checkout flow (MON-3 guard)'
+    assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+    assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+    assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it`
+    );
+  }
+
+  assertSc4ManualReviewOffline(
+    'https://www.samsclub.com/p/mock-fcfs/789',
+    'https://www.samsclub.com/checkout',
+    'sc4-manual-review'
   );
-
-  const wmSacredLock = new Set([normMonitorUrl]);
-  assert.ok(
-    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc4-manual-review: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it'
+  assertSc4ManualReviewOffline(
+    'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+    'https://www.samsclub.com/checkout/review-cross',
+    'sc4-manual-review cross-page'
   );
 }
 
