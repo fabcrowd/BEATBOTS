@@ -593,38 +593,53 @@ function runTgt4CheckoutReviewElementTests() {
   );
   assert.match(TGT_SRC, /\[data-test="placeOrderButton"\]/, 'TGT-4 checkout review element: place-order selector in source');
 
-  const monitorProductUrl = 'https://www.target.com/p/mock-product';
-  const normUrl = normalizeProductUrl(monitorProductUrl);
-  const inQueueUrls = new Set();
+  function assertTgt4CheckoutReviewElement({ pathname, monitorProductUrl, label }) {
+    const normUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(`https://www.target.com${pathname}`);
+    const inQueueUrls = new Set();
 
-  const reviewPage = makePage({
+    const reviewPage = makePage({
+      pathname,
+      elements: [
+        {
+          selectors: ['[data-test="placeOrderButton"]'],
+          tag: 'button',
+          text: 'Place order',
+        },
+      ],
+    });
+
+    const handleResult = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(handleResult.path, 'review_manual', `${label}: TGT-4 manual stop at review`);
+    assert.ok(handleResult.actions.includes('review_manual_stop'), `${label}: review_manual_stop action`);
+    assert.equal(reviewPage.elements[0].clicked, false, `${label}: Place Order not clicked`);
+    assert.ok(
+      !handleResult.actions.includes('click_place_order'),
+      `${label}: must not auto-click Place Order`
+    );
+
+    assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+    assert.notEqual(normUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; Target review does not arm it`
+    );
+  }
+
+  assertTgt4CheckoutReviewElement({
     pathname: '/checkout',
-    elements: [
-      {
-        selectors: ['[data-test="placeOrderButton"]'],
-        tag: 'button',
-        text: 'Place order',
-      },
-    ],
+    monitorProductUrl: 'https://www.target.com/p/mock-product',
+    label: 'TGT-4 checkout review element',
   });
-
-  const handleResult = tgtHandleReviewSim(reviewPage, { autoPlaceOrder: false });
-  assert.equal(handleResult.path, 'review_manual', 'TGT-4 checkout review element: TGT-4 manual stop at review');
-  assert.ok(handleResult.actions.includes('review_manual_stop'), 'TGT-4 checkout review element: review_manual_stop action');
-  assert.equal(reviewPage.elements[0].clicked, false, 'TGT-4 checkout review element: Place Order not clicked');
-  assert.ok(
-    !handleResult.actions.includes('click_place_order'),
-    'TGT-4 checkout review element: must not auto-click Place Order'
-  );
-
-  assert.equal(inQueueUrls.size, 0, 'TGT-4 checkout review element: review step must not populate inQueueUrls');
-  assert.ok(!inQueueUrls.has(normUrl), 'TGT-4 checkout review element: monitor productUrl must stay out of inQueueUrls');
-
-  const wmSacredLock = new Set([normUrl]);
-  assert.ok(
-    bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
-    'TGT-4 checkout review element: contrast WM-5 — sacred lock would block poll; Target review does not arm it'
-  );
+  assertTgt4CheckoutReviewElement({
+    pathname: '/checkout/review-cross',
+    monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
+    label: 'TGT-4 checkout review cross element',
+  });
 }
 
 /**
@@ -2304,7 +2319,7 @@ function main() {
   runTgt4SigninCrossLivePollCycleTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC element, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, checkout review element, cart checkout-missing element, cart checkout-missing cross element, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA timeout, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, checkout signin gate, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC element, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, checkout review element, checkout review cross element, cart checkout-missing element, cart checkout-missing cross element, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA timeout, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, checkout signin gate, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin poll recovery, no sacred lock'
   );
 }
 

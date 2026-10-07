@@ -2963,6 +2963,64 @@ function runTgt4CheckoutSpaTimeoutElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for tgt4-manual-review named tag (element-only, not live-poll-cycle).
+ * Target TGT-4: review step → manual stop, no Place Order click, no sacred lock.
+ */
+function runTgt4ManualReviewElementOfflineTests() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /\[TCH\] review reached/, 'tgt4-manual-review: review reached log in source');
+  assert.match(targetSrc, /handleReviewStep/, 'tgt4-manual-review: handleReviewStep in source');
+  assert.match(
+    targetSrc,
+    /Reached review — Place Order remains manual/,
+    'tgt4-manual-review: manual stop toast in source'
+  );
+  assert.match(targetSrc, /\[data-test="placeOrderButton"\]/, 'tgt4-manual-review: place-order selector in source');
+  assert.match(
+    targetSrc,
+    /if \(settings\.autoPlaceOrder\)/,
+    'tgt4-manual-review: autoPlaceOrder guard at review in source'
+  );
+  assert.doesNotMatch(
+    targetSrc,
+    /WALMART_IN_QUEUE/,
+    'tgt4-manual-review: Target checkout must not emit Walmart queue semantics'
+  );
+
+  function assertTgt4ManualReviewOffline(monitorProductUrl, checkoutTabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+    const inQueueUrls = new Set();
+
+    assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+    assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+    assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; Target review does not arm it`
+    );
+  }
+
+  assertTgt4ManualReviewOffline(
+    'https://www.target.com/p/mock-product',
+    'https://www.target.com/checkout',
+    'tgt4-manual-review'
+  );
+  assertTgt4ManualReviewOffline(
+    'https://www.target.com/p/mock-review-cross-monitor/A-880101',
+    'https://www.target.com/checkout/review-cross',
+    'tgt4-manual-review cross-page'
+  );
+}
+
+/**
  * FIX-3 parity for tgt4-live-poll-cycle named tag.
  * Target TGT-4: checkout review reload + NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
  */
@@ -4384,6 +4442,7 @@ async function main() {
   runTgtPollRecoveryRearmOfflineTests();
   runTgt4CheckoutSigninElementOfflineTests();
   runTgt4CheckoutSpaTimeoutElementOfflineTests();
+  runTgt4ManualReviewElementOfflineTests();
   runTgt4LivePollCycleOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
