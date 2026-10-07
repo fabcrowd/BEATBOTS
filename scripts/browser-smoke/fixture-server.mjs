@@ -1052,6 +1052,19 @@ export const FIXTURE_E2E_ROUTES = [
   },
   {
     host: 'www.samsclub.com',
+    path: '/checkout/review-cross',
+    file: MOCK_URLS.samsclubCheckoutReviewCross,
+    initLog: '[TCH] init',
+    journey: 'SC-4',
+    invariants: [
+      'no-sacred-lock',
+      'sc4-manual-review',
+      'sc4-live-poll-cycle',
+    ],
+    monitorProductPath: '/p/mock-checkout-spa-cross-monitor/796',
+  },
+  {
+    host: 'www.samsclub.com',
     path: '/checkout/spa',
     file: MOCK_URLS.samsclubCheckoutSpa,
     initLog: '[TCH] init',

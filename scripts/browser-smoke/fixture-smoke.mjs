@@ -434,6 +434,16 @@ const FIXTURE_MARKERS = {
       'data-automation-id="place-order-btn"',
     ],
   },
+  samsclubCheckoutReviewCross: {
+    fixtureId: 'samsclub-checkout-review-cross',
+    journeys: ['SC-4', 'TGT-4'],
+    markers: [
+      'data-tch-fixture="samsclub-checkout-review-cross"',
+      'data-tch-path="/checkout/review-cross"',
+      'data-automation-id="place-order-btn"',
+      'monitor keys product',
+    ],
+  },
   samsclubCheckoutSpa: {
     fixtureId: 'samsclub-checkout-spa',
     journeys: ['SC-4'],
