@@ -2801,7 +2801,9 @@ async function main() {
         (route.invariants?.includes('tgt-poll-recovery-rearm') &&
           (route.invariants?.includes('tgt-signin-live-poll-cycle') ||
             route.invariants?.includes('tgt4-live-poll-cycle') ||
-            route.invariants?.includes('tgt-cart-live-poll-cycle')))) &&
+            route.invariants?.includes('tgt-cart-live-poll-cycle'))) ||
+        (route.invariants?.includes('sc4-poll-recovery-rearm') &&
+          route.invariants?.includes('sc4-live-poll-cycle'))) &&
       route.monitorProductPath &&
       route.path !== route.monitorProductPath
     ) {

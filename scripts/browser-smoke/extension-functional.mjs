@@ -4199,6 +4199,12 @@ function runSc6PollRecoveryRearmOfflineTests() {
       recoveryProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-recovery/797',
       tabUrl: 'https://www.samsclub.com/checkout/spa-stall-cross',
     },
+    {
+      label: 'cross-page review manual stop (sc4-review-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-recovery/797',
+      tabUrl: 'https://www.samsclub.com/checkout/review-cross',
+    },
   ];
 
   for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {

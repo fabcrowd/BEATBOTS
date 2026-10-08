@@ -1060,8 +1060,10 @@ export const FIXTURE_E2E_ROUTES = [
       'no-sacred-lock',
       'sc4-manual-review',
       'sc4-live-poll-cycle',
+      'sc4-poll-recovery-rearm',
     ],
     monitorProductPath: '/p/mock-checkout-spa-cross-monitor/796',
+    pollRecoveryProductPath: '/p/mock-checkout-spa-cross-recovery/797',
   },
   {
     host: 'www.samsclub.com',
