@@ -2622,6 +2622,105 @@ function runSc4LivePollCycleTests() {
 }
 
 /**
+ * SC-4: cross-page review live poll cycle — tab on /checkout/review-cross,
+ * monitor keys distinct productUrl; reload + repeated SAMS_NAV_FAILED/ATC_SUCCESS during poll, no sacred lock.
+ * Parity with FIX-3 sc4-live-poll-cycle on /checkout/review-cross (fixture-e2e has browser coverage).
+ */
+function runSc4ReviewCrossLivePollCycleTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796';
+  const reviewTabUrl = 'https://www.samsclub.com/checkout/review-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normReviewTabUrl = normalizeProductUrl(reviewTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout/review-cross',
+    elements: [
+      {
+        selectors: ['[data-automation-id="place-order-btn"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-4: cross-page review live poll must not arm sacred lock on start');
+  assert.ok(!inQueueUrls.has(normReviewTabUrl), 'SC-4: cross-page review tab URL must not be sacred lock key');
+  assert.notEqual(normMonitorUrl, normReviewTabUrl, 'SC-4: monitor productUrl must differ from review tab URL');
+
+  let reviewCycles = 0;
+  const simulateReviewReload = () => {
+    reviewCycles += 1;
+    const result = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(result.path, 'review_manual', 'SC-4: cross-page review reload must preserve manual stop');
+    assert.ok(result.actions.includes('review_manual_stop'), 'SC-4: cross-page review reload must not click Place Order');
+    assert.equal(reviewPage.elements[0].clicked, false, 'SC-4: Place Order must remain unclicked after cross-page review reload');
+    return result;
+  };
+
+  simulateReviewReload();
+  simulateReviewReload();
+  assert.equal(reviewCycles, 2, 'SC-4: cross-page review reload must re-detect review step');
+  assert.match(SC_SRC, /\[SC\] review reached/, 'SC-4: cross-page review live poll — review reached log in source');
+
+  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    const signalUrl = monitorProductUrl;
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      bgApplyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      assert.equal(signalUrl, monitorProductUrl, 'SC-4: cross-page review live poll NAV_FAILED uses monitor productUrl');
+      assert.notEqual(
+        normalizeProductUrl(signalUrl),
+        normReviewTabUrl,
+        'SC-4: cross-page review live poll NAV_FAILED must not key review tab URL'
+      );
+      bgApplyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: signalUrl });
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `SC-4: cross-page review live poll cycle ${i + 1} NAV_FAILED releases navigationLock`
+      );
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-4: cross-page review live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normReviewTabUrl),
+      `SC-4: cross-page review live poll cycle ${i + 1} must not sacred-lock review tab`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `SC-4: cross-page review live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-4: cross-page review live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+  }
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, 'SC-4: cross-page review live poll must not arm inQueueUrls after poll wait');
+  assert.ok(
+    !inQueueUrls.has(normReviewTabUrl),
+    'SC-4: cross-page review tab URL must not become sacred lock key after poll wait'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-4: cross-page review live poll — contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it'
+  );
+}
+
+/**
  * SC-4: checkout SPA timeout NAV_FAILED → poll recovery rearm — no sacred lock.
  * Parity with FIX-3 sc4-poll-recovery-rearm (fixture-e2e has browser coverage).
  */
@@ -3753,13 +3852,14 @@ function main() {
   runSc4CheckoutSpaCrossRepeatedNavFailedTests();
   runSc4PollRecoveryRearmTests();
   runSc4LivePollCycleTests();
+  runSc4ReviewCrossLivePollCycleTests();
   runSc6CheckoutSpaLivePollCycleTests();
   runSc6CheckoutSpaCrossLivePollCycleTests();
   runSc6CartLivePollCycleTests();
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, cross-page review poll recovery, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, cross-page review poll recovery, cross-page review live poll cycle, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
