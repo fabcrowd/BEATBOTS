@@ -2721,6 +2721,82 @@ function runSc4ReviewCrossLivePollCycleTests() {
 }
 
 /**
+ * SC-4: cross-page repeated SAMS_NAV_FAILED on review-cross — no sacred lock; manual stop preserved.
+ * Parity with FIX-3 sc4-repeated-nav-failed on /checkout/review-cross (fixture-e2e has browser coverage).
+ */
+function runSc4ReviewCrossRepeatedNavFailedTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796';
+  const reviewTabUrl = 'https://www.samsclub.com/checkout/review-cross';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normReviewTabUrl = normalizeProductUrl(reviewTabUrl);
+
+  const reviewPage = makePage({
+    pathname: '/checkout/review-cross',
+    elements: [
+      {
+        selectors: ['[data-automation-id="place-order-btn"]'],
+        tag: 'button',
+        text: 'Place order',
+      },
+    ],
+  });
+  const reviewResult = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+  assert.equal(reviewResult.path, 'review_manual', 'SC-4 review cross repeated NAV_FAILED: manual stop at review');
+  assert.equal(reviewPage.elements[0].clicked, false, 'SC-4 review cross repeated NAV_FAILED: must not click Place Order');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  const initialMsg = { type: 'SAMS_NAV_FAILED', url: monitorProductUrl };
+  assert.equal(initialMsg.type, 'SAMS_NAV_FAILED', 'SC-4 review cross repeated NAV_FAILED: message type');
+  assert.equal(
+    normalizeProductUrl(initialMsg.url),
+    normMonitorUrl,
+    'SC-4 review cross repeated NAV_FAILED: NAV_FAILED must key monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(initialMsg.url),
+    normReviewTabUrl,
+    'SC-4 review cross repeated NAV_FAILED: NAV_FAILED must not key review tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+  assert.equal(inQueueUrls.size, 0, 'SC-4 review cross repeated NAV_FAILED cycle 1 must not arm inQueueUrls');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-4 review cross repeated NAV_FAILED cycle 1 must clear navigationLock');
+
+  for (let i = 0; i < 2; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `SC-4 review cross repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `SC-4 review cross repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+    );
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-4 review cross repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+    );
+    const afterReview = scHandleReviewSim(reviewPage, { autoPlaceOrder: false });
+    assert.equal(
+      afterReview.path,
+      'review_manual',
+      `SC-4 review cross repeated NAV_FAILED cycle ${i + 2} preserves manual stop`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'SC-4 review cross repeated NAV_FAILED: contrast WM-5 — sacred lock would block poll; review step does not arm it'
+  );
+  assert.match(SC_SRC, /\[SC\] review reached/, 'SC-4 review cross repeated NAV_FAILED: review reached log in source');
+}
+
+/**
  * SC-4: checkout SPA timeout NAV_FAILED → poll recovery rearm — no sacred lock.
  * Parity with FIX-3 sc4-poll-recovery-rearm (fixture-e2e has browser coverage).
  */
@@ -3853,6 +3929,7 @@ function main() {
   runSc4PollRecoveryRearmTests();
   runSc4LivePollCycleTests();
   runSc4ReviewCrossLivePollCycleTests();
+  runSc4ReviewCrossRepeatedNavFailedTests();
   runSc6CheckoutSpaLivePollCycleTests();
   runSc6CheckoutSpaCrossLivePollCycleTests();
   runSc6CartLivePollCycleTests();

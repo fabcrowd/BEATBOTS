@@ -2505,6 +2505,11 @@ function runTgtRepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
       tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
     },
+    {
+      label: 'cross-page review manual stop (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
+      tabUrl: 'https://www.target.com/checkout/review-cross',
+    },
   ];
 
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
@@ -4014,6 +4019,11 @@ function runSc6RepeatedNavFailedOfflineTests() {
       label: 'cross-page checkout SPA timeout (sc4-repeated-nav-failed)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
       tabUrl: 'https://www.samsclub.com/checkout/spa-stall-cross',
+    },
+    {
+      label: 'cross-page review manual stop (sc4-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+      tabUrl: 'https://www.samsclub.com/checkout/review-cross',
     },
   ];
 
