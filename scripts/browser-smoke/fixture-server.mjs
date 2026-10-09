@@ -35,6 +35,7 @@ export const FIXTURE_E2E_ROUTES = [
       'tgt4-manual-review',
       'tgt4-live-poll-cycle',
       'tgt-poll-recovery-rearm',
+      'tgt-repeated-nav-failed',
       'mon2-live-poll-cycle',
       'mon2-samsclub-live-poll-cycle',
     ],

@@ -2506,6 +2506,11 @@ function runTgtRepeatedNavFailedOfflineTests() {
       tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
     },
     {
+      label: 'review manual stop (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+      tabUrl: 'https://www.target.com/checkout',
+    },
+    {
       label: 'cross-page review manual stop (tgt-repeated-nav-failed)',
       monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
       tabUrl: 'https://www.target.com/checkout/review-cross',
