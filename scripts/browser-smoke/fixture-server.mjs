@@ -21,7 +21,13 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.targetProduct,
     initLog: '[TCH] init',
     journey: 'TGT-1',
-    invariants: ['tgt-live-poll-cycle', 'mon2-live-poll-cycle', 'mon2-samsclub-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'tgt-repeated-nav-failed',
+      'tgt-live-poll-cycle',
+      'mon2-live-poll-cycle',
+      'mon2-samsclub-live-poll-cycle',
+    ],
     monitorProductPath: '/p/mock-product',
   },
   {

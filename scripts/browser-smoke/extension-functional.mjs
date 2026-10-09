@@ -2477,6 +2477,10 @@ function runTgtRepeatedNavFailedOfflineTests() {
 
   const scenarios = [
     {
+      label: 'product page (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+    },
+    {
       label: 'missing ATC (tgt-repeated-nav-failed)',
       monitorProductUrl: 'https://www.target.com/p/-/A-66666666',
     },
