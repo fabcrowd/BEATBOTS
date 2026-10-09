@@ -30,6 +30,7 @@ export function getChromiumExecutable() {
  *   timeout?: number,
  *   profilePrefix?: string,
  *   userDataDir?: string,
+ *   extraArgs?: string[],
  * }} [options] If userDataDir is set, reuse that Chrome user-data-dir (login + extension state persist).
  */
 export async function launchWithExtension(options = {}) {
@@ -54,6 +55,7 @@ export async function launchWithExtension(options = {}) {
       '--no-default-browser-check',
       '--disable-default-apps',
       '--disable-popup-blocking',
+      ...(options.extraArgs || []),
     ],
   });
 
