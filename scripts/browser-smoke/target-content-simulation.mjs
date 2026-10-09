@@ -1609,6 +1609,89 @@ function runTgt4SigninLivePollCycleTests() {
 }
 
 /**
+ * TGT-4: repeated NAV_FAILED on signin-gate — tab on /checkout/signin-gate, monitor keys /p/mock-product.
+ * No sacred lock; signin pending preserved.
+ * Parity with FIX-3 tgt-repeated-nav-failed on /checkout/signin-gate (fixture-e2e has browser coverage).
+ */
+function runTgt4SigninRepeatedNavFailedTests() {
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const signinTabUrl = 'https://www.target.com/checkout/signin-gate';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normSigninTabUrl = normalizeProductUrl(signinTabUrl);
+
+  const signinPage = makePage({
+    pathname: '/checkout/signin-gate',
+    elements: [
+      {
+        selectors: ['[data-test="authModal"]'],
+        tag: 'div',
+        text: 'Sign in to continue checkout',
+      },
+    ],
+  });
+  const step = tgtDetectCheckoutStep(signinPage);
+  assert.equal(step, 'signin', 'TGT-4 signin repeated NAV_FAILED: signin gate step');
+  const pending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, step);
+  assert.equal(pending.path, 'signin_pending', 'TGT-4 signin repeated NAV_FAILED: signin pending');
+  assert.equal(pending.reachedReview, false, 'TGT-4 signin repeated NAV_FAILED: must not reach review');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  const initialMsg = { type: 'NAV_FAILED', url: monitorProductUrl };
+  assert.equal(initialMsg.type, 'NAV_FAILED', 'TGT-4 signin repeated NAV_FAILED: message type');
+  assert.equal(
+    normalizeProductUrl(initialMsg.url),
+    normMonitorUrl,
+    'TGT-4 signin repeated NAV_FAILED: NAV_FAILED must key monitor productUrl'
+  );
+  assert.notEqual(
+    normalizeProductUrl(initialMsg.url),
+    normSigninTabUrl,
+    'TGT-4 signin repeated NAV_FAILED: NAV_FAILED must not key signin tab URL'
+  );
+
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+  assert.equal(inQueueUrls.size, 0, 'TGT-4 signin repeated NAV_FAILED cycle 1 must not arm inQueueUrls');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'TGT-4 signin repeated NAV_FAILED cycle 1 must clear navigationLock');
+
+  for (let i = 0; i < 2; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `TGT-4 signin repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `TGT-4 signin repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+    );
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `TGT-4 signin repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+    );
+    const afterPending = tgtHandleCheckoutPendingSim(signinPage, { productUrl: monitorProductUrl }, 'signin');
+    assert.equal(
+      afterPending.path,
+      'signin_pending',
+      `TGT-4 signin repeated NAV_FAILED cycle ${i + 2} preserves signin pending`
+    );
+    assert.equal(
+      afterPending.reachedReview,
+      false,
+      `TGT-4 signin repeated NAV_FAILED cycle ${i + 2} must not reach review`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    bgPollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'TGT-4 signin repeated NAV_FAILED: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
+}
+
+/**
  * TGT-4: cross-page repeated NAV_FAILED on signin-gate-cross — no sacred lock; signin pending preserved.
  * Parity with FIX-3 tgt-repeated-nav-failed on /checkout/signin-gate-cross (fixture-e2e has browser coverage).
  */
@@ -2474,11 +2557,12 @@ function main() {
   runTgt4CheckoutSigninTests();
   testTgt4SigninPagePollRecovery();
   runTgt4SigninLivePollCycleTests();
+  runTgt4SigninRepeatedNavFailedTests();
   runTgt4SigninCrossLivePollCycleTests();
   runTgt4SigninCrossRepeatedNavFailedTests();
   testTgt4SigninCrossPagePollRecovery();
   console.log(
-    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC element, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, checkout review element, checkout review cross element, cart checkout-missing element, cart checkout-missing cross element, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA timeout, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, checkout signin gate, signin poll recovery, signin live poll cycle, cross-page signin live poll cycle, cross-page signin repeated NAV_FAILED, cross-page signin poll recovery, no sacred lock'
+    'target-content-simulation PASS (TGT-1 + TGT-4): missing ATC element, repeated missing ATC NAV_FAILED, missing ATC live poll cycle, cross-page missing ATC poll recovery, cross-page missing ATC repeated NAV_FAILED, cross-page missing ATC live poll cycle, product live poll cycle, checkout review element, checkout review cross element, cart checkout-missing element, cart checkout-missing cross element, review live poll cycle, review poll recovery, cross-page review live poll cycle, cross-page review poll recovery, cart checkout-missing, cross-page cart poll recovery, cross-page cart live poll cycle, cross-page checkout SPA poll recovery, poll recovery rearm, checkout SPA timeout, checkout SPA live poll cycle, checkout SPA repeated NAV_FAILED, cross-page checkout SPA live poll cycle, cross-page checkout SPA repeated NAV_FAILED, cart live poll cycle, checkout signin gate, signin poll recovery, signin live poll cycle, signin repeated NAV_FAILED, cross-page signin live poll cycle, cross-page signin repeated NAV_FAILED, cross-page signin poll recovery, no sacred lock'
   );
 }
 

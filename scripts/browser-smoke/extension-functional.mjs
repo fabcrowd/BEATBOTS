@@ -2511,6 +2511,11 @@ function runTgtRepeatedNavFailedOfflineTests() {
       tabUrl: 'https://www.target.com/checkout/review-cross',
     },
     {
+      label: 'signin gate (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-product',
+      tabUrl: 'https://www.target.com/checkout/signin-gate',
+    },
+    {
       label: 'cross-page signin gate (tgt-repeated-nav-failed)',
       monitorProductUrl: 'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
       tabUrl: 'https://www.target.com/checkout/signin-gate-cross',

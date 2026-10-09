@@ -92,6 +92,7 @@ export const FIXTURE_E2E_ROUTES = [
       'tgt-checkout-signin',
       'tgt-signin-live-poll-cycle',
       'tgt-poll-recovery-rearm',
+      'tgt-repeated-nav-failed',
       'mon2-live-poll-cycle',
     ],
     monitorProductPath: '/p/mock-product',
