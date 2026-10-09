@@ -2510,6 +2510,11 @@ function runTgtRepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
       tabUrl: 'https://www.target.com/checkout/review-cross',
     },
+    {
+      label: 'cross-page signin gate (tgt-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
+      tabUrl: 'https://www.target.com/checkout/signin-gate-cross',
+    },
   ];
 
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
