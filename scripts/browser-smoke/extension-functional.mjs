@@ -4265,6 +4265,9 @@ function runSc6PollRecoveryRearmOfflineTests() {
 function runMon2LivePollCycleOfflineTests() {
   const targetPageUrl = 'https://www.target.com/p/mock-product/A-880080';
   const targetCheckoutUrl = 'https://www.target.com/checkout/review';
+  const targetReviewCrossUrl = 'https://www.target.com/checkout/review-cross';
+  const targetSigninCrossUrl = 'https://www.target.com/checkout/signin-gate-cross';
+  const targetSigninUrl = 'https://www.target.com/checkout/signin-gate';
   const walmartProbeUrl = 'https://www.walmart.com/ip/mock-mon2-target-live/333';
   const normTargetPageUrl = normalizeProductUrl(targetPageUrl);
   const normTargetCheckoutUrl = normalizeProductUrl(targetCheckoutUrl);
@@ -4287,7 +4290,13 @@ function runMon2LivePollCycleOfflineTests() {
     'MON-2 live poll: target URL must be excluded from walmart-only monitor'
   );
 
-  for (const targetUrl of [targetPageUrl, targetCheckoutUrl]) {
+  for (const targetUrl of [
+    targetPageUrl,
+    targetCheckoutUrl,
+    targetReviewCrossUrl,
+    targetSigninUrl,
+    targetSigninCrossUrl,
+  ]) {
     const normTargetUrl = normalizeProductUrl(targetUrl);
     const inQueueUrls = new Set();
     const navigationLock = new Set();
@@ -4359,6 +4368,9 @@ function runMon2SamsclubLivePollCycleOfflineTests() {
   const crossRetailerPages = [
     { label: 'Target product', url: 'https://www.target.com/p/mock-product/A-880080' },
     { label: 'Target checkout', url: 'https://www.target.com/checkout/review' },
+    { label: 'Target review cross', url: 'https://www.target.com/checkout/review-cross' },
+    { label: 'Target signin gate', url: 'https://www.target.com/checkout/signin-gate' },
+    { label: 'Target signin cross', url: 'https://www.target.com/checkout/signin-gate-cross' },
     { label: 'Walmart pre-drop', url: 'https://www.walmart.com/ip/mock-predrop/333' },
     { label: 'Walmart checkout', url: 'https://www.walmart.com/checkout/unmonitored' },
   ];
