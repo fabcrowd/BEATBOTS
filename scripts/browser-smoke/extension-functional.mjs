@@ -4465,6 +4465,95 @@ function runMon2SamsclubLivePollCycleOfflineTests() {
   }
 }
 
+/**
+ * MON-2 offline parity: walmart-only monitor during live poll on Sam's Club tab.
+ * Parity with FIX-3 mon2-walmart-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runMon2WalmartLivePollCycleOfflineTests() {
+  const samsclubPages = [
+    { label: 'cart', url: 'https://www.samsclub.com/cart' },
+    { label: 'checkout', url: 'https://www.samsclub.com/checkout' },
+    { label: 'review cross', url: 'https://www.samsclub.com/checkout/review-cross' },
+  ];
+  const walmartProbeUrl = 'https://www.walmart.com/ip/mock-mon2-samsclub-live/666';
+  const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
+  const walmartFilter = /walmart\.com/i;
+
+  const allProducts = [
+    { url: samsclubPages[0].url, qty: 1, name: 'MON-2 Sam product' },
+    { url: walmartProbeUrl, qty: 1, name: 'MON-2 Walmart probe' },
+  ];
+  const walmartOnlyProducts = filterProductsByRetailer(allProducts, walmartFilter);
+
+  assert.equal(walmartOnlyProducts.length, 1, 'MON-2 walmart live poll: walmart-only monitor sends one product');
+  assert.ok(
+    walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+    'MON-2 walmart live poll: monitor products must be walmart.com only'
+  );
+  assert.ok(
+    !walmartOnlyProducts.some((p) => /samsclub\.com/i.test(p.url)),
+    'MON-2 walmart live poll: samsclub URL must be excluded from walmart-only monitor'
+  );
+
+  for (const { label, url } of samsclubPages) {
+    const normSamsUrl = normalizeProductUrl(url);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.ok(
+      !inQueueUrls.has(normSamsUrl),
+      `MON-2 walmart live poll: ${label} must not be sacred lock key before poll`
+    );
+
+    assert.ok(
+      !inQueueUrls.has(normSamsUrl),
+      `MON-2 walmart live poll: ${label} reload must not arm inQueueUrls on ${normSamsUrl}`
+    );
+    assert.ok(
+      walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+      `MON-2 walmart live poll: walmart-only products must hold after ${label} reload`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normWalmartProbeUrl);
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: navFailTypes[i],
+        url: walmartProbeUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `MON-2 walmart live poll cycle ${i + 1} on ${label} must not arm inQueueUrls after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normSamsUrl),
+        `MON-2 walmart live poll cycle ${i + 1} must not sacred-lock ${label} ${normSamsUrl} after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+        `MON-2 walmart live poll cycle ${i + 1} must keep walmart-only products on ${label} after ${navFailTypes[i]}`
+      );
+      if (navigationLock.has(normWalmartProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normWalmartProbeUrl),
+          `MON-2 walmart live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normSamsUrl, inQueueUrls, navigationLock),
+        `MON-2 walmart live poll cycle ${i + 1} must not block poll on unmonitored ${label}`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 walmart live poll must not arm inQueueUrls on ${label}`
+    );
+  }
+}
+
 async function sendBg(page, msg) {
   return page.evaluate(
     (m) =>
@@ -4535,6 +4624,7 @@ async function main() {
   runSc6PollRecoveryRearmOfflineTests();
   runMon2LivePollCycleOfflineTests();
   runMon2SamsclubLivePollCycleOfflineTests();
+  runMon2WalmartLivePollCycleOfflineTests();
 
   const launched = await launchWithExtension({ profilePrefix: 'tch-func-' });
   browser = launched.browser;
