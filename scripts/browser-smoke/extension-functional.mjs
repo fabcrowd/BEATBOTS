@@ -4077,6 +4077,11 @@ function runSc6RepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
     },
     {
+      label: 'cross-page invisible ATC (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802',
+      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803',
+    },
+    {
       label: 'cart checkout-missing (sc6-repeated-nav-failed)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
       tabUrl: 'https://www.samsclub.com/cart/no-checkout',
@@ -4180,6 +4185,11 @@ function runSc6LivePollCycleOfflineTests() {
     {
       label: 'invisible ATC (sc5-sc6-live-poll-cycle)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    },
+    {
+      label: 'cross-page invisible ATC (sc6-invisible-atc-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802',
+      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803',
     },
     {
       label: 'cart checkout-missing (sc6-cart-live-poll-cycle)',
@@ -4289,6 +4299,12 @@ function runSc6PollRecoveryRearmOfflineTests() {
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
       recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-recovery/795',
       tabUrl: 'https://www.samsclub.com/cart/no-checkout-cross',
+    },
+    {
+      label: 'cross-page invisible ATC (sc6-invisible-atc-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-recovery/804',
+      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803',
     },
     {
       label: 'checkout SPA timeout (sc4-poll-recovery-rearm)',
