@@ -1643,6 +1643,78 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('sc6-invisible-atc-live-poll-cycle')) {
+    const monitorUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+    const atcWaitMs = route.atcWaitMs > 0 ? route.atcWaitMs : 750;
+    const pollWaitMs = atcWaitMs + 900;
+
+    // Live background poll: invisible ATC wait timeout must never arm sacred lock during real poll cycles.
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: monitorUrl, name: `Fixture SC-6 invisible ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, pollWaitMs));
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 SC-6: invisible ATC reload during live poll must not arm inQueueUrls on ${normMonitorUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('ATC button not found or disabled')).length >= 2,
+      `FIX-3 SC-6: invisible ATC reload must re-trigger wait timeout on ${pageUrl}, got: ${logs.slice(-10).join(' | ') || '(none)'}`
+    );
+    assert.ok(
+      !logs.some((l) => l.includes('Clicking ATC button')),
+      `FIX-3 SC-6: invisible ATC live poll must not click on ${pageUrl}`
+    );
+    const navFailTypes = ['SAMS_NAV_FAILED', 'NAV_FAILED', 'SAMS_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: monitorUrl });
+      await new Promise((r) => setTimeout(r, 650));
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 SC-6: invisible ATC live poll cycle ${i + 1} must not arm inQueueUrls on ${normMonitorUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+      );
+      if (cycleNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+        assert.ok(
+          !cycleInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+          `FIX-3 SC-6: invisible ATC live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normMonitorUrl} after ${navFailTypes[i]}`
+        );
+      }
+    }
+    await new Promise((r) => setTimeout(r, pollWaitMs + 500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    const liveNavLock = afterPollWait?.navigationLock || [];
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 SC-6: invisible ATC live poll must not arm inQueueUrls on ${normMonitorUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    if (liveNavLock.some((u) => normalizeProductUrl(u) === normMonitorUrl)) {
+      assert.ok(
+        !liveInQueue.some((u) => normalizeProductUrl(u) === normMonitorUrl),
+        `FIX-3 SC-6: invisible ATC navigationLock alone must not imply sacred lock on ${normMonitorUrl}`
+      );
+    }
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('tgt4-checkout-spa-live-poll-cycle')) {
     const monitorUrl = route.monitorProductPath
       ? `http://${route.host}:${port}${route.monitorProductPath}`
@@ -2913,6 +2985,10 @@ function routeWaitMs(route) {
   if (route.invariants?.includes('tgt-cart-live-poll-cycle')) return 9500;
   if (route.invariants?.includes('sc6-cart-live-poll-cycle')) return 9500;
   if (route.invariants?.includes('sc6-checkout-spa-live-poll-cycle')) return route.checkoutTimeoutMs + 900;
+  if (route.invariants?.includes('sc6-invisible-atc-live-poll-cycle')) {
+    const atcMs = route.atcWaitMs > 0 ? route.atcWaitMs : 750;
+    return atcMs + 900;
+  }
   if (route.invariants?.includes('sc4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('tgt4-checkout-spa-timeout')) return route.checkoutTimeoutMs + 900;
   if (route.invariants?.includes('tgt4-checkout-spa-live-poll-cycle')) return route.checkoutTimeoutMs + 900;
