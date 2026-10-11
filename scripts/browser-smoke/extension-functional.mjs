@@ -4466,6 +4466,102 @@ function runMon2SamsclubLivePollCycleOfflineTests() {
 }
 
 /**
+ * MON-2 offline parity: target-only monitor during live poll on Walmart tab.
+ * Parity with FIX-3 mon2-target-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function runMon2TargetLivePollCycleOfflineTests() {
+  const walmartPages = [
+    { label: 'pre-drop product', url: 'https://www.walmart.com/ip/mock-predrop/123' },
+    { label: 'checkout unmonitored', url: 'https://www.walmart.com/checkout/unmonitored' },
+    { label: 'cart', url: 'https://www.walmart.com/cart/no-checkout' },
+  ];
+  const targetProbeUrl = 'https://www.target.com/p/mock-mon2-walmart-tab/777';
+  const normTargetProbeUrl = normalizeProductUrl(targetProbeUrl);
+  const targetFilter = /target\.com/i;
+
+  const allProducts = [
+    { url: walmartPages[0].url, qty: 1, name: 'MON-2 Walmart product' },
+    { url: targetProbeUrl, qty: 1, name: 'MON-2 Target probe' },
+  ];
+  const targetOnlyProducts = filterProductsByRetailer(allProducts, targetFilter);
+
+  assert.equal(targetOnlyProducts.length, 1, 'MON-2 target live poll: target-only monitor sends one product');
+  assert.ok(
+    targetOnlyProducts.every((p) => targetFilter.test(p.url)),
+    'MON-2 target live poll: monitor products must be target.com only'
+  );
+  assert.ok(
+    !targetOnlyProducts.some((p) => /walmart\.com/i.test(p.url)),
+    'MON-2 target live poll: walmart URL must be excluded from target-only monitor'
+  );
+
+  for (const { label, url } of walmartPages) {
+    const normWalmartUrl = normalizeProductUrl(url);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    assert.ok(
+      !inQueueUrls.has(normWalmartUrl),
+      `MON-2 target live poll: ${label} must not be sacred lock key before poll`
+    );
+
+    assert.ok(
+      !inQueueUrls.has(normWalmartUrl),
+      `MON-2 target live poll: ${label} reload must not arm inQueueUrls on ${normWalmartUrl}`
+    );
+    assert.ok(
+      targetOnlyProducts.every((p) => targetFilter.test(p.url)),
+      `MON-2 target live poll: target-only products must hold after ${label} reload`
+    );
+
+    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+    for (let i = 0; i < liveSignalTypes.length; i++) {
+      navigationLock.add(normTargetProbeUrl);
+      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+        applyAtcSuccess(navigationLock, inQueueUrls, {
+          type: 'ATC_SUCCESS',
+          url: targetProbeUrl,
+        });
+      } else {
+        applyWalmartNavFailed(navigationLock, inQueueUrls, {
+          type: liveSignalTypes[i],
+          url: targetProbeUrl,
+        });
+      }
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `MON-2 target live poll cycle ${i + 1} on ${label} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normWalmartUrl),
+        `MON-2 target live poll cycle ${i + 1} must not sacred-lock ${label} ${normWalmartUrl} after ${liveSignalTypes[i]}`
+      );
+      assert.ok(
+        targetOnlyProducts.every((p) => targetFilter.test(p.url)),
+        `MON-2 target live poll cycle ${i + 1} must keep target-only products on ${label} after ${liveSignalTypes[i]}`
+      );
+      if (navigationLock.has(normTargetProbeUrl)) {
+        assert.ok(
+          !inQueueUrls.has(normTargetProbeUrl),
+          `MON-2 target live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normTargetProbeUrl} after ${liveSignalTypes[i]}`
+        );
+      }
+      assert.ok(
+        !pollWouldSkipNavigation(normWalmartUrl, inQueueUrls, navigationLock),
+        `MON-2 target live poll cycle ${i + 1} must not block poll on unmonitored ${label}`
+      );
+    }
+
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 target live poll must not arm inQueueUrls on ${label}`
+    );
+  }
+}
+
+/**
  * MON-2 offline parity: walmart-only monitor during live poll on Sam's Club tab.
  * Parity with FIX-3 mon2-walmart-live-poll-cycle (fixture-e2e has browser coverage).
  */
@@ -4625,6 +4721,7 @@ async function main() {
   runMon2LivePollCycleOfflineTests();
   runMon2SamsclubLivePollCycleOfflineTests();
   runMon2WalmartLivePollCycleOfflineTests();
+  runMon2TargetLivePollCycleOfflineTests();
 
   const launched = await launchWithExtension({ profilePrefix: 'tch-func-' });
   browser = launched.browser;

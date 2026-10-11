@@ -2151,6 +2151,84 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     await new Promise((r) => setTimeout(r, 300));
   }
 
+  if (invariants.includes('mon2-target-live-poll-cycle')) {
+    const targetProbePath = '/p/mock-mon2-walmart-tab/777';
+    const targetProbeUrl = `http://www.target.com:${port}${targetProbePath}`;
+    const normTargetProbeUrl = normalizeProductUrl(targetProbeUrl);
+    const normWalmartPageUrl = normalizeProductUrl(pageUrl);
+
+    // Target-only monitor — Walmart tab must stay unmonitored (MON-2 retailer filter).
+    await sendBg(popup, {
+      type: 'START_MONITOR',
+      products: [{ url: targetProbeUrl, name: `Fixture MON-2 ${route.journey}`, qty: 1 }],
+      refreshInterval: 1,
+      dropExpectedAt: '',
+      walmartSkipMonitoring: true,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    const urlBeforeReload = page.url();
+    assert.ok(
+      urlBeforeReload.includes('walmart.com'),
+      `FIX-3 MON-2: Walmart tab must stay on walmart.com before reload during target-only poll on ${pageUrl}, got ${urlBeforeReload}`
+    );
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const urlAfterReload = page.url();
+    assert.ok(
+      urlAfterReload.includes('walmart.com'),
+      `FIX-3 MON-2: Walmart tab must stay on walmart.com after reload during target-only poll on ${pageUrl}, got ${urlAfterReload}`
+    );
+    assert.ok(
+      normalizeProductUrl(urlAfterReload) === normWalmartPageUrl,
+      `FIX-3 MON-2: Walmart tab URL must not change during target-only poll on ${pageUrl}, got ${urlAfterReload}`
+    );
+    const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const reloadProducts = afterReload?.products || [];
+    const reloadInQueue = afterReload?.inQueueUrls || [];
+    assert.ok(
+      reloadProducts.length && reloadProducts.every((p) => /target\.com/i.test(p.url)),
+      `FIX-3 MON-2: target-only monitor must send only target.com products on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+    );
+    assert.ok(
+      !reloadProducts.some((p) => /walmart\.com/i.test(p.url)),
+      `FIX-3 MON-2: walmart URL must be excluded from target-only monitor on ${pageUrl}, got ${JSON.stringify(reloadProducts)}`
+    );
+    assert.equal(
+      reloadInQueue.length,
+      0,
+      `FIX-3 MON-2: Walmart page reload during target-only poll must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      !reloadInQueue.some((u) => normalizeProductUrl(u) === normWalmartPageUrl),
+      `FIX-3 MON-2: Walmart page URL must not be sacred lock key during target-only poll on ${pageUrl}, got ${JSON.stringify(reloadInQueue)}`
+    );
+    assert.ok(
+      logs.filter((l) => l.includes('[WMT] init')).length >= 2,
+      `FIX-3 MON-2: Walmart page reload must re-init content script on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+    // Live NAV_FAILED/ATC_SUCCESS cycles are covered offline (runMon2TargetLivePollCycleOfflineTests).
+    // Target bg poll navigates the active tab and closes the extension popup — skip here.
+    await new Promise((r) => setTimeout(r, 2500));
+    const afterPollWait = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const liveProducts = afterPollWait?.products || [];
+    const liveInQueue = afterPollWait?.inQueueUrls || [];
+    assert.ok(
+      liveProducts.every((p) => /target\.com/i.test(p.url)),
+      `FIX-3 MON-2: live poll must keep target-only products on ${pageUrl}, got ${JSON.stringify(liveProducts)}`
+    );
+    assert.equal(
+      liveInQueue.length,
+      0,
+      `FIX-3 MON-2: live poll must not arm inQueueUrls on Walmart ${pageUrl}, got inQueueUrls=${JSON.stringify(liveInQueue)}`
+    );
+    assert.ok(
+      page.url().includes('walmart.com'),
+      `FIX-3 MON-2: Walmart tab must remain on walmart.com after live poll on ${pageUrl}, got ${page.url()}`
+    );
+    await sendBg(popup, { type: 'STOP_MONITOR' });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   if (invariants.includes('wm2-live-poll-cycle')) {
     const monitorUrl = route.livePollMonitorPath
       ? `http://${route.host}:${port}${route.livePollMonitorPath}`

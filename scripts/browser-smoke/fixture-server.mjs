@@ -342,6 +342,7 @@ export const FIXTURE_E2E_ROUTES = [
       'wm2-repeated-nav-failed',
       'wm2-live-poll-cycle',
       'mon2-samsclub-live-poll-cycle',
+      'mon2-target-live-poll-cycle',
     ],
   },
   {
@@ -405,6 +406,7 @@ export const FIXTURE_E2E_ROUTES = [
       'wm4-checkout-no-producturl',
       'wm4-live-poll-cycle',
       'mon2-samsclub-live-poll-cycle',
+      'mon2-target-live-poll-cycle',
     ],
   },
   {
@@ -524,6 +526,14 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [],
   },
   {
+    host: 'www.target.com',
+    path: '/p/mock-mon2-walmart-tab/777',
+    file: MOCK_URLS.targetProduct,
+    initLog: '[TCH] init',
+    journey: 'MON-2',
+    invariants: [],
+  },
+  {
     host: 'www.walmart.com',
     path: '/ip/mock-oid/777',
     file: MOCK_URLS.walmartProductOid,
@@ -546,6 +556,7 @@ export const FIXTURE_E2E_ROUTES = [
       'wm6-poll-recovery-rearm',
       'wm6-repeated-nav-failed',
       'nav-failed-releases-lock',
+      'mon2-target-live-poll-cycle',
     ],
     monitorProductPath: '/ip/mock-cart-missing/888',
     pollRecoveryProductPath: '/ip/mock-no-atc/559',
