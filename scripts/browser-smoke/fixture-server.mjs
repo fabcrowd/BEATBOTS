@@ -417,6 +417,7 @@ export const FIXTURE_E2E_ROUTES = [
     journey: 'WM-5',
     invariants: [
       'wm5-pre-timeout-live-poll-cycle',
+      'wm5-product-queue-cross-live-poll-cycle',
       'wm5-product-queue-timeout',
       'wm5-queue-timeout-clears-sacred-lock',
       'wm5-poll-recovery-rearm',

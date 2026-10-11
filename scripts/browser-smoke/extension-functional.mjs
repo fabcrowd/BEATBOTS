@@ -1527,6 +1527,77 @@ function runWm5CheckoutSpaLivePollCycleOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for wm5-product-queue-cross-live-poll-cycle named tag.
+ * Cross-page product queue: tab on /ip/mock-queue-poll/457, sacred lock keys monitor /ip/mock-queue/456.
+ */
+function runWm5ProductQueueCrossLivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /const lockUrl = settings\?\.productUrl \|\| location\.href/,
+    'wm5-product-queue-cross-live-poll-cycle: product-page queue lock uses settings.productUrl'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalQueueTimeout\(lockUrl\)/,
+    'wm5-product-queue-cross-live-poll-cycle: queue timeout uses lockUrl'
+  );
+
+  const monitorProductUrl = 'https://www.walmart.com/ip/mock-queue/456';
+  const queueTabUrl = 'https://www.walmart.com/ip/mock-queue-poll/457';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normQueueTabUrl = normalizeProductUrl(queueTabUrl);
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+  assert.ok(inQueueUrls.has(normMonitorUrl), 'wm5-product-queue-cross-live-poll-cycle: sacred lock on monitor product');
+  assert.ok(
+    !inQueueUrls.has(normQueueTabUrl),
+    'wm5-product-queue-cross-live-poll-cycle: queue tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'wm5-product-queue-cross-live-poll-cycle: poll blocked on monitor product before timeout'
+  );
+
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
+    assert.ok(
+      inQueueUrls.has(normMonitorUrl),
+      `wm5-product-queue-cross-live-poll-cycle: cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `wm5-product-queue-cross-live-poll-cycle: cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `wm5-product-queue-cross-live-poll-cycle: poll blocked after ${navFailTypes[i]} before timeout`
+    );
+    assert.notEqual(
+      normQueueTabUrl,
+      normMonitorUrl,
+      `wm5-product-queue-cross-live-poll-cycle: cycle ${i + 1} sacred lock must key monitor productUrl not tab URL`
+    );
+  }
+
+  applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: monitorProductUrl,
+  });
+  assert.ok(
+    !inQueueUrls.has(normMonitorUrl),
+    'wm5-product-queue-cross-live-poll-cycle: QUEUE_TIMEOUT clears sacred lock'
+  );
+}
+
+/**
  * FIX-3 parity for wm2-repeated-nav-failed named tag (element-only, not live-poll-cycle).
  * WM-2: pre-drop disabled ATC → WALMART_NAV_FAILED, no sacred lock, no WALMART_IN_QUEUE.
  */
@@ -4756,6 +4827,7 @@ async function main() {
   runWm5QueueTimeoutClearsSacredLockOfflineTests();
   runWm5CheckoutSpaTimeoutClearsSacredLockOfflineTests();
   runWm5CheckoutSpaLivePollCycleOfflineTests();
+  runWm5ProductQueueCrossLivePollCycleOfflineTests();
   runWm2RepeatedNavFailedElementOfflineTests();
   runWm2LivePollCycleElementOfflineTests();
   runWm6RepeatedNavFailedOfflineTests();
@@ -5146,7 +5218,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 

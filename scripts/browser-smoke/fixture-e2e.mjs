@@ -278,27 +278,30 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs) 
   }
 
   await new Promise((r) => setTimeout(r, 50));
-  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
-  await new Promise((r) => setTimeout(r, 100));
-  await sendBg(popup, { type: 'NAV_FAILED', url: lockUrl });
-  await new Promise((r) => setTimeout(r, 300));
-
-  const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
-  const afterInQueue = after?.inQueueUrls || [];
-  const afterNavLock = after?.navigationLock || [];
-  assert.ok(
-    afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
-    `FIX-3 WM-5: pre-timeout live poll must preserve sacred lock on ${normLockUrl} before QUEUE_TIMEOUT, got inQueueUrls=${JSON.stringify(afterInQueue)}`
-  );
-  assert.ok(
-    !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
-    `FIX-3 WM-5: pre-timeout NAV_FAILED must not re-arm navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
-  );
-  assert.equal(
-    pollWouldSkipNavigation(normLockUrl, new Set(afterInQueue), new Set(afterNavLock)),
-    true,
-    `FIX-3 WM-5: pre-timeout live poll must skip navigate while sacred lock holds on ${normLockUrl}`
-  );
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED'];
+  if ((route.invariants || []).includes('wm5-product-queue-cross-live-poll-cycle')) {
+    navFailTypes.push('WALMART_NAV_FAILED', 'NAV_FAILED');
+  }
+  for (let i = 0; i < navFailTypes.length; i++) {
+    await sendBg(popup, { type: navFailTypes[i], url: lockUrl });
+    await new Promise((r) => setTimeout(r, i < 2 ? 100 : 650));
+    const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const cycleInQueue = cycle?.inQueueUrls || [];
+    const cycleNavLock = cycle?.navigationLock || [];
+    assert.ok(
+      cycleInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: pre-timeout live poll cycle ${i + 1} must preserve sacred lock on ${normLockUrl} before QUEUE_TIMEOUT after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+    );
+    assert.ok(
+      !cycleNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: pre-timeout cycle ${i + 1} must not re-arm navigationLock on ${normLockUrl} after ${navFailTypes[i]}, got ${JSON.stringify(cycleNavLock)}`
+    );
+    assert.equal(
+      pollWouldSkipNavigation(normLockUrl, new Set(cycleInQueue), new Set(cycleNavLock)),
+      true,
+      `FIX-3 WM-5: pre-timeout live poll cycle ${i + 1} must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
+  }
 
   // Cross-page product-tab routes START_MONITOR before navigation; stop poll so
   // post-QUEUE_TIMEOUT navigate to the monitored queue product cannot re-arm inQueueUrls.
