@@ -2154,7 +2154,6 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
   if (invariants.includes('mon2-target-live-poll-cycle')) {
     const targetProbePath = '/p/mock-mon2-walmart-tab/777';
     const targetProbeUrl = `http://www.target.com:${port}${targetProbePath}`;
-    const normTargetProbeUrl = normalizeProductUrl(targetProbeUrl);
     const normWalmartPageUrl = normalizeProductUrl(pageUrl);
 
     // Target-only monitor — Walmart tab must stay unmonitored (MON-2 retailer filter).
