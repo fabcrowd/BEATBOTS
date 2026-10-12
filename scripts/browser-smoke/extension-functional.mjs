@@ -816,6 +816,64 @@ function runWm4LivePollCycleOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for wm4-qp-cross-live-poll-cycle and wm4-checkout-cross-live-poll-cycle.
+ * Cross-page queue tab + distinct monitor productUrl — sacred lock keys monitor URL (WM-4/WM-5).
+ */
+function runWm4CrossLivePollCycleOfflineTests() {
+  const scenarios = [
+    {
+      label: 'wm4-qp-cross-live-poll-cycle',
+      pageUrl: 'https://www.walmart.com/qp/waiting-room-cross',
+      monitorUrl: 'https://www.walmart.com/ip/mock-wm4-qp-cross-monitor/112',
+    },
+    {
+      label: 'wm4-checkout-cross-live-poll-cycle',
+      pageUrl: 'https://www.walmart.com/checkout/unmonitored-cross',
+      monitorUrl: 'https://www.walmart.com/ip/mock-wm4-checkout-cross-monitor/223',
+    },
+  ];
+
+  for (const { label, pageUrl, monitorUrl } of scenarios) {
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const normMonitorUrl = normalizeProductUrl(monitorUrl);
+    const inQueueUrls = new Set([normMonitorUrl]);
+    const navigationLock = new Set();
+
+    assert.notEqual(normPageUrl, normMonitorUrl, `${label}: tab URL must differ from monitor productUrl`);
+    assert.ok(
+      inQueueUrls.has(normMonitorUrl),
+      `${label}: sacred lock must key monitor productUrl`
+    );
+    assert.ok(
+      !inQueueUrls.has(normPageUrl),
+      `${label}: queue tab URL must not be sacred lock key`
+    );
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: sacred lock on monitor must block poll`
+    );
+
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      navigationLock.add(normMonitorUrl);
+      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorUrl });
+      assert.ok(
+        inQueueUrls.has(normMonitorUrl),
+        `${label}: cycle ${i + 1} must preserve sacred lock on monitor after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !inQueueUrls.has(normPageUrl),
+        `${label}: cycle ${i + 1} must not sacred-lock queue tab after ${navFailTypes[i]}`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label}: cycle ${i + 1} must clear navigationLock on monitor after ${navFailTypes[i]}`
+      );
+    }
+  }
+}
+
+/**
  * FIX-3 parity for wm4-qp-timeout-no-producturl and wm4-checkout-timeout-no-producturl.
  * Unmonitored queue timeout → NAV_FAILED without arming sacred lock.
  */
@@ -4879,6 +4937,7 @@ async function main() {
   runWm5SacredSurvivesNavFailedOfflineTests();
   runWm5LivePollCycleOfflineTests();
   runWm4LivePollCycleOfflineTests();
+  runWm4CrossLivePollCycleOfflineTests();
   runWm4UnmonitoredQueueTimeoutOfflineTests();
   runWm4PollRecoveryRearmOfflineTests();
   runWm5PreTimeoutLivePollCycleOfflineTests();
@@ -5278,7 +5337,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 

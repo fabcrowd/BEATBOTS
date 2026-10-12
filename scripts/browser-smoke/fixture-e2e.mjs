@@ -311,6 +311,115 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs) 
   }
 }
 
+/**
+ * WM-4/WM-5: cross-page queue live poll — tab on /qp or /checkout while monitor keys
+ * a distinct product URL; sacred lock must key monitor productUrl, not the queue tab URL.
+ */
+async function assertWm4CrossLivePollCycle(popup, route, page, port, logs) {
+  const crossTag = (route.invariants || []).find((i) =>
+    i === 'wm4-qp-cross-live-poll-cycle' || i === 'wm4-checkout-cross-live-poll-cycle'
+  );
+  if (!crossTag || !route.crossMonitorProductPath) {
+    throw new Error(`wm4 cross live poll requires crossMonitorProductPath on ${route.path}`);
+  }
+  const lockUrl = `http://${route.host}:${port}${route.crossMonitorProductPath}`;
+  const normLockUrl = normalizeProductUrl(lockUrl);
+  const pageUrl = `http://${route.host}:${port}${route.path}`;
+  const normPageUrl = normalizeProductUrl(pageUrl);
+
+  await sendBg(popup, {
+    type: 'START_MONITOR',
+    products: [{ url: lockUrl, name: `Fixture WM-4 cross ${route.journey}`, qty: 1 }],
+    refreshInterval: 1,
+    dropExpectedAt: '',
+    walmartSkipMonitoring: true,
+  });
+  await new Promise((r) => setTimeout(r, 800));
+  // Re-init queue tab with monitor productUrl so WALMART_IN_QUEUE keys the monitor URL (WM-4).
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 2000));
+
+  let initialInQueue = [];
+  for (let i = 0; i < 16; i++) {
+    await new Promise((r) => setTimeout(r, 40));
+    const initial = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    initialInQueue = initial?.inQueueUrls || [];
+    if (initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl)) break;
+  }
+  assert.ok(
+    initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-4: cross live poll expects sacred lock on monitor ${normLockUrl}, got inQueueUrls=${JSON.stringify(initialInQueue)}`
+  );
+  assert.ok(
+    !initialInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+    `FIX-3 WM-4: cross live poll must not sacred-lock queue tab ${normPageUrl} on start`
+  );
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 2000));
+  const afterReload = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+  const reloadInQueue = afterReload?.inQueueUrls || [];
+  const reloadNavLock = afterReload?.navigationLock || [];
+  assert.ok(
+    reloadInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-4: cross reload must preserve sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(reloadInQueue)}`
+  );
+  assert.ok(
+    !reloadInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+    `FIX-3 WM-4: cross reload must not sacred-lock queue tab ${normPageUrl}`
+  );
+  assert.equal(
+    pollWouldSkipNavigation(normLockUrl, new Set(reloadInQueue), new Set(reloadNavLock)),
+    true,
+    `FIX-3 WM-4: cross reload must skip navigate while sacred lock holds on ${normLockUrl}`
+  );
+  if (route.path.includes('/qp/')) {
+    assert.ok(
+      logs.filter((l) => l.includes('/qp waiting room detected')).length >= 2,
+      `FIX-3 WM-4: cross /qp reload must re-detect waiting room on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+  } else if (route.path.includes('checkout')) {
+    assert.ok(
+      logs.filter((l) => l.includes('Queue detected')).length >= 2,
+      `FIX-3 WM-4: cross checkout reload must re-detect queue on ${pageUrl}, got: ${logs.slice(-8).join(' | ') || '(none)'}`
+    );
+  }
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    await sendBg(popup, { type: navFailTypes[i], url: lockUrl });
+    await new Promise((r) => setTimeout(r, i < 2 ? 100 : 650));
+    const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const cycleInQueue = cycle?.inQueueUrls || [];
+    const cycleNavLock = cycle?.navigationLock || [];
+    assert.ok(
+      cycleInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-4: cross live poll cycle ${i + 1} must preserve sacred lock on ${normLockUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+    );
+    assert.ok(
+      !cycleNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-4: cross cycle ${i + 1} must not re-arm navigationLock on ${normLockUrl} after ${navFailTypes[i]}, got ${JSON.stringify(cycleNavLock)}`
+    );
+    assert.equal(
+      pollWouldSkipNavigation(normLockUrl, new Set(cycleInQueue), new Set(cycleNavLock)),
+      true,
+      `FIX-3 WM-4: cross live poll cycle ${i + 1} must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
+    assert.notEqual(
+      normPageUrl,
+      normLockUrl,
+      `${crossTag}: cycle ${i + 1} sacred lock must key monitor productUrl not tab URL`
+    );
+    assert.ok(
+      !cycleInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-4: cross live poll cycle ${i + 1} must not sacred-lock queue tab ${normPageUrl} after ${navFailTypes[i]}`
+    );
+  }
+
+  await sendBg(popup, { type: 'STOP_MONITOR' });
+  await new Promise((r) => setTimeout(r, 300));
+}
+
 /** WM-5: checkout SPA stall with pre-armed sacred lock must survive pre-timeout live poll. */
 async function assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs) {
   if (!route.monitorProductPath) {
@@ -3061,6 +3170,13 @@ async function main() {
 
     if (route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')) {
       await assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs);
+    }
+
+    if (
+      route.invariants?.includes('wm4-qp-cross-live-poll-cycle') ||
+      route.invariants?.includes('wm4-checkout-cross-live-poll-cycle')
+    ) {
+      await assertWm4CrossLivePollCycle(popup, route, page, port, logs);
     }
 
     if (route.invariants?.includes('wm5-checkout-spa-live-poll-cycle')) {
