@@ -5391,7 +5391,7 @@ function runWm5CheckoutSpaLivePollCycleTests() {
 /**
  * WM-5: cross-page checkout SPA sacred live poll cycle — tab on /checkout/spa-stall-sacred-cross,
  * sacred lock keys monitor productUrl; reload + repeated NAV_FAILED before timeout, lock persists.
- * Parity with FIX-3 wm5-checkout-spa-live-poll-cycle on /checkout/spa-stall-sacred-cross (fixture-e2e has browser coverage).
+ * Parity with FIX-3 wm5-checkout-spa-cross-live-poll-cycle on /checkout/spa-stall-sacred-cross (fixture-e2e has browser coverage).
  */
 function runWm5CheckoutSpaCrossLivePollCycleTests() {
   const WMT_SRC = fs.readFileSync(

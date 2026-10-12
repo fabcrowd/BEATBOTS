@@ -351,27 +351,38 @@ async function assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs)
     `FIX-3 WM-5: checkout SPA live poll must not release sacred lock before timeout on ${route.path}`
   );
 
-  await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: lockUrl });
-  await new Promise((r) => setTimeout(r, 100));
-  await sendBg(popup, { type: 'NAV_FAILED', url: lockUrl });
-  await new Promise((r) => setTimeout(r, 300));
-
-  const after = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
-  const afterInQueue = after?.inQueueUrls || [];
-  const afterNavLock = after?.navigationLock || [];
-  assert.ok(
-    afterInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
-    `FIX-3 WM-5: checkout SPA live poll must preserve sacred lock before timeout on ${normLockUrl}, got inQueueUrls=${JSON.stringify(afterInQueue)}`
-  );
-  assert.ok(
-    !afterNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
-    `FIX-3 WM-5: checkout SPA NAV_FAILED must not re-arm navigationLock on ${normLockUrl}, got ${JSON.stringify(afterNavLock)}`
-  );
-  assert.equal(
-    pollWouldSkipNavigation(normLockUrl, new Set(afterInQueue), new Set(afterNavLock)),
-    true,
-    `FIX-3 WM-5: checkout SPA live poll must skip navigate while sacred lock holds on ${normLockUrl}`
-  );
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED'];
+  if ((route.invariants || []).includes('wm5-checkout-spa-cross-live-poll-cycle')) {
+    navFailTypes.push('WALMART_NAV_FAILED', 'NAV_FAILED');
+  }
+  for (let i = 0; i < navFailTypes.length; i++) {
+    await sendBg(popup, { type: navFailTypes[i], url: lockUrl });
+    await new Promise((r) => setTimeout(r, i < 2 ? 100 : 650));
+    const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const cycleInQueue = cycle?.inQueueUrls || [];
+    const cycleNavLock = cycle?.navigationLock || [];
+    assert.ok(
+      cycleInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: checkout SPA live poll cycle ${i + 1} must preserve sacred lock on ${normLockUrl} before timeout after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+    );
+    assert.ok(
+      !cycleNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: checkout SPA cycle ${i + 1} must not re-arm navigationLock on ${normLockUrl} after ${navFailTypes[i]}, got ${JSON.stringify(cycleNavLock)}`
+    );
+    assert.equal(
+      pollWouldSkipNavigation(normLockUrl, new Set(cycleInQueue), new Set(cycleNavLock)),
+      true,
+      `FIX-3 WM-5: checkout SPA live poll cycle ${i + 1} must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
+    if ((route.invariants || []).includes('wm5-checkout-spa-cross-live-poll-cycle')) {
+      const pageUrl = `http://${route.host}:${port}${route.path}`;
+      assert.notEqual(
+        normalizeProductUrl(pageUrl),
+        normLockUrl,
+        `FIX-3 WM-5: checkout SPA cross live poll cycle ${i + 1} sacred lock must key monitor productUrl not tab URL`
+      );
+    }
+  }
 }
 
 async function assertRouteInvariants(popup, route, logs, page, port) {
