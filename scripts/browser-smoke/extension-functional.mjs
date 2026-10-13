@@ -4052,6 +4052,26 @@ function runSc3PollRecoveryRearmOfflineTests() {
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'sc3-poll-recovery-rearm: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
   );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809';
+  const crossRecovery = 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-recovery/811';
+  const crossTab = 'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossRecovery = normalizeProductUrl(crossRecovery);
+  const normCrossTab = normalizeProductUrl(crossTab);
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc3-disabled-atc-cross-poll-recovery: NAV_FAILED releases monitor lock');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc3-disabled-atc-cross-poll-recovery: monitor URL differs from tab');
+  crossNavLock.add(normCrossRecovery);
+  assert.ok(
+    crossNavLock.has(normCrossRecovery),
+    'sc3-disabled-atc-cross-poll-recovery: poll recovery re-arms on recovery product'
+  );
+  assert.equal(crossInQueue.size, 0, 'sc3-disabled-atc-cross-poll-recovery: must not arm sacred lock');
 }
 
 /**
@@ -4113,6 +4133,25 @@ function runSc3DisabledAtcLivePollCycleOfflineTests() {
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'sc3-disabled-atc live poll: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
   );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.samsclub.com/p/mock-fcfs-disabled-cross/810');
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc3-disabled-atc-cross live poll: timeout must not arm sacred lock');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc3-disabled-atc-cross live poll: monitor URL differs from tab');
+  for (const sig of ['SAMS_NAV_FAILED', 'ATC_SUCCESS']) {
+    crossNavLock.add(normCrossMonitor);
+    if (sig === 'ATC_SUCCESS') {
+      applyAtcSuccess(crossNavLock, crossInQueue, { type: 'ATC_SUCCESS', url: crossMonitor });
+    } else {
+      applyNavFailed(crossNavLock, crossInQueue, { type: sig, url: crossMonitor });
+    }
+    assert.equal(crossInQueue.size, 0, `sc3-disabled-atc-cross live poll: ${sig} must not arm sacred lock`);
+  }
 }
 
 /**
@@ -4273,6 +4312,11 @@ function runSc6RepeatedNavFailedOfflineTests() {
       label: 'cross-page restock (sc6-repeated-nav-failed)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross-monitor/806',
       tabUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross/807',
+    },
+    {
+      label: 'cross-page disabled ATC (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
+      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810',
     },
     {
       label: 'cart checkout-missing (sc6-repeated-nav-failed)',
@@ -4509,6 +4553,12 @@ function runSc6PollRecoveryRearmOfflineTests() {
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross-monitor/806',
       recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross-recovery/808',
       tabUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross/807',
+    },
+    {
+      label: 'cross-page disabled ATC (sc3-disabled-atc-cross-poll-recovery)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
+      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-recovery/811',
+      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810',
     },
     {
       label: 'checkout SPA timeout (sc4-poll-recovery-rearm)',

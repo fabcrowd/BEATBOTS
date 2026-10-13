@@ -347,6 +347,35 @@ const FIXTURE_MARKERS = {
       'disabled',
     ],
   },
+  samsclubProductFcfsDisabledCrossMonitor: {
+    fixtureId: 'samsclub-product-fcfs-disabled-cross-monitor',
+    journeys: ['SC-3'],
+    markers: [
+      'data-tch-fixture="samsclub-product-fcfs-disabled-cross-monitor"',
+      'data-tch-path="/p/mock-fcfs-disabled-cross-monitor/809"',
+      'data-automation-id="add-to-cart-btn"',
+    ],
+  },
+  samsclubProductFcfsDisabledCross: {
+    fixtureId: 'samsclub-product-fcfs-disabled-cross',
+    journeys: ['SC-3'],
+    markers: [
+      'data-tch-fixture="samsclub-product-fcfs-disabled-cross"',
+      'data-tch-path="/p/mock-fcfs-disabled-cross/810"',
+      'data-tch-atc-wait-ms="750"',
+      'disabled',
+    ],
+  },
+  samsclubProductFcfsDisabledCrossRecovery: {
+    fixtureId: 'samsclub-product-fcfs-disabled-cross-recovery',
+    journeys: ['SC-3'],
+    markers: [
+      'data-tch-fixture="samsclub-product-fcfs-disabled-cross-recovery"',
+      'data-tch-path="/p/mock-fcfs-disabled-cross-recovery/811"',
+      'data-tch-atc-wait-ms="750"',
+      'data-automation-id="add-to-cart-btn"',
+    ],
+  },
   samsclubProductFcfsRestock: {
     fixtureId: 'samsclub-product-fcfs-restock',
     journeys: ['SC-6'],
