@@ -8,7 +8,7 @@ Keep the Chrome MV3 extension (`target-checkout-helper/`) reliable across **Targ
 
 ## Definition of done (automation stops iterating when all are true)
 
-- [ ] `cd scripts/browser-smoke && npm ci && npx playwright install chromium && npm run test:extension` exits **0**
+- [ ] `cd scripts/browser-smoke && npm ci && npm run install-chromium && npm run test:extension` exits **0**
 - [ ] Every test file traces to a journey step in `scripts/browser-smoke/test-scope.mjs` (no orphan tests)
 - [ ] All **INVARIANTS** in `test-scope.mjs` still hold (MON-2, WM-2/4/5, SC-5, TGT-4, WM-3, SC-3)
 - [ ] No unrelated refactors outside files required for the failing test or journey step
@@ -33,7 +33,7 @@ Keep the Chrome MV3 extension (`target-checkout-helper/`) reliable across **Targ
 ```bash
 cd scripts/browser-smoke
 npm ci
-npx playwright install chromium
+npm run install-chromium
 npm run test:extension
 ```
 

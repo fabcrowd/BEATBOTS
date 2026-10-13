@@ -10,7 +10,7 @@ Configure this in **[Cursor Dashboard → Cloud Agents](https://cursor.com/dashb
 ## Recommended install command
 
 ```bash
-cd scripts/browser-smoke && npm ci && npx playwright install chromium
+cd scripts/browser-smoke && npm ci && npm run install-chromium
 ```
 
 No root-level `package.json`; all Node deps live under `scripts/browser-smoke/`.
@@ -25,7 +25,7 @@ cd scripts/browser-smoke && npm run test:extension
 
 - Tests use **mock HTML fixtures** and headless Chromium — no live retailer logins required.
 - Extension path for harness: `../../target-checkout-helper` (relative to `scripts/browser-smoke/`).
-- If Chromium install fails, retry `npx playwright install chromium` once.
+- Use `npm run install-chromium` (local Playwright binary). If install fails, run `./node_modules/.bin/playwright install chromium` once.
 - Do **not** commit `scripts/browser-smoke/node_modules/`.
 
 ## Branch for overnight automation

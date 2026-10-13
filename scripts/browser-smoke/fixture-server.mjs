@@ -1230,7 +1230,7 @@ export const FIXTURE_E2E_ROUTES = [
       'nav-failed-releases-lock',
       'sc3-disabled-atc',
       'sc3-poll-recovery-rearm',
-      'sc5-sc6-live-poll-cycle',
+      'sc3-disabled-atc-live-poll-cycle',
     ],
     monitorProductPath: '/p/mock-fcfs-disabled/792',
     monitorQty: 5,

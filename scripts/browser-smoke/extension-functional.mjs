@@ -4055,7 +4055,7 @@ function runSc3PollRecoveryRearmOfflineTests() {
 }
 
 /**
- * FIX-3 parity for sc5-sc6-live-poll-cycle on /p/mock-fcfs-disabled/792 named tag.
+ * FIX-3 parity for sc3-disabled-atc-live-poll-cycle on /p/mock-fcfs-disabled/792 named tag.
  * Sam's Club SC-3: disabled-ATC product page reload + repeated NAV_FAILED during live poll, no sacred lock.
  */
 function runSc3DisabledAtcLivePollCycleOfflineTests() {

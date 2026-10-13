@@ -2441,7 +2441,7 @@ function runSc3PollRecoveryRearmTests() {
 
 /**
  * SC-3: disabled-ATC product page live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
- * Parity with FIX-3 sc5-sc6-live-poll-cycle on /p/mock-fcfs-disabled/792 (fixture-e2e has browser coverage).
+ * Parity with FIX-3 sc3-disabled-atc-live-poll-cycle on /p/mock-fcfs-disabled/792 (fixture-e2e has browser coverage).
  */
 function runSc3DisabledAtcLivePollCycleTests() {
   const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
