@@ -1262,6 +1262,7 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'no-sacred-lock',
       'nav-failed-releases-lock',
+      'sc6-repeated-nav-failed',
       'sc3-disabled-atc',
       'sc3-poll-recovery-rearm',
       'sc3-disabled-atc-live-poll-cycle',

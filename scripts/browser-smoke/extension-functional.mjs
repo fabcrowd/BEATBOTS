@@ -4314,6 +4314,10 @@ function runSc6RepeatedNavFailedOfflineTests() {
       tabUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross/807',
     },
     {
+      label: 'disabled ATC (sc6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled/792',
+    },
+    {
       label: 'cross-page disabled ATC (sc6-repeated-nav-failed)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
       tabUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810',

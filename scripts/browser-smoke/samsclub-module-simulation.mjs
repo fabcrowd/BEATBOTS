@@ -2673,6 +2673,54 @@ function runSc3DisabledAtcCrossLivePollCycleTests() {
 }
 
 /**
+ * SC-3: disabled ATC repeated NAV_FAILED — same-page monitor/tab, no sacred lock.
+ * Parity with FIX-3 sc6-repeated-nav-failed on /p/mock-fcfs-disabled/792 (fixture-e2e has browser coverage).
+ */
+function runSc3DisabledAtcRepeatedNavFailedTests() {
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+
+  const disabledPage = makePage({
+    pathname: '/p/mock-fcfs-disabled/792',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+  });
+
+  const initialMsg = scInvisibleAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
+  assert.ok(initialMsg, 'SC-3 disabled-atc repeated: initial NAV_FAILED message');
+  assert.equal(initialMsg.url, monitorProductUrl, 'SC-3 disabled-atc repeated: keys monitor productUrl');
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+  navigationLock.add(normMonitorUrl);
+  bgApplyNavFailed(navigationLock, inQueueUrls, initialMsg);
+  assert.equal(inQueueUrls.size, 0, 'SC-3 disabled-atc repeated cycle 1 must not arm inQueueUrls');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-3 disabled-atc repeated cycle 1 must clear navigationLock');
+
+  for (let i = 0; i < 2; i++) {
+    navigationLock.add(normMonitorUrl);
+    bgApplyNavFailed(navigationLock, inQueueUrls, {
+      type: 'SAMS_NAV_FAILED',
+      url: monitorProductUrl,
+    });
+    assert.equal(inQueueUrls.size, 0, `SC-3 disabled-atc repeated cycle ${i + 2} must not arm inQueueUrls`);
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `SC-3 disabled-atc repeated cycle ${i + 2} must clear navigationLock for monitor productUrl`
+    );
+    assert.ok(
+      !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `SC-3 disabled-atc repeated cycle ${i + 2} allows poll retry (no sacred lock)`
+    );
+  }
+}
+
+/**
  * SC-3: cross-page disabled ATC repeated NAV_FAILED — keys monitor productUrl, not tab URL.
  * Parity with FIX-3 sc6-repeated-nav-failed on /p/mock-fcfs-disabled-cross/810 (fixture-e2e has browser coverage).
  */
@@ -4433,6 +4481,7 @@ function main() {
   runSc3DisabledAtcLivePollCycleTests();
   testSc3DisabledAtcCrossPagePollRecovery();
   runSc3DisabledAtcCrossLivePollCycleTests();
+  runSc3DisabledAtcRepeatedNavFailedTests();
   runSc3DisabledAtcCrossRepeatedNavFailedTests();
   testSc5Source();
   runSc5FcfsNoSacredLockTests();
