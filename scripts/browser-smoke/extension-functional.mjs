@@ -1933,6 +1933,18 @@ function runWm6RepeatedNavFailedOfflineTests() {
       tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
     },
     {
+      label: 'PX hang-tight (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
+    },
+    {
+      label: 'PX captcha (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
+    },
+    {
+      label: 'PX block (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
+    },
+    {
       label: 'cross-page PX (wm6-repeated-nav-failed)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
       tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
