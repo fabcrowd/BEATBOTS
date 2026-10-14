@@ -3274,6 +3274,7 @@ async function main() {
     // SC-6 / WM-6 / TGT-4: cross-page cart, signin, or review — tab on /cart/*, /checkout/signin-gate-cross, or /checkout/review-cross while monitor keys a product URL.
     if (
       (route.invariants?.includes('sc6-poll-recovery-rearm') ||
+        route.invariants?.includes('sc3-poll-recovery-rearm') ||
         route.invariants?.includes('sc2-cart-poll-recovery-rearm') ||
         route.invariants?.includes('wm6-poll-recovery-rearm') ||
         (route.invariants?.includes('tgt-poll-recovery-rearm') &&
