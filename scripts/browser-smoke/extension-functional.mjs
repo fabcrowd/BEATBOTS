@@ -2048,6 +2048,14 @@ function runWm6LivePollCycleOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
     },
     {
+      label: 'PX captcha (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
+    },
+    {
+      label: 'PX block (wm6-live-poll-cycle)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
+    },
+    {
       label: 'cross-page PX (wm6-live-poll-cycle)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
       tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
@@ -2179,6 +2187,16 @@ function runWm6PollRecoveryRearmOfflineTests() {
       label: 'PX hang-tight (wm6-poll-recovery-rearm)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
       recoveryProductUrl: 'https://www.walmart.com/ip/mock-px/555',
+    },
+    {
+      label: 'PX captcha (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
+    },
+    {
+      label: 'PX block (wm6-poll-recovery-rearm)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
+      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
     },
     {
       label: 'cross-page PX (wm6-poll-recovery-rearm)',
