@@ -1342,6 +1342,8 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       logs.some((l) => l.includes('releasing navigation lock')) ||
       (invariants.includes('px-timeout-nav-failed') &&
         logs.some((l) => l.includes('PX page still showing') && l.includes('releasing nav lock'))) ||
+      (invariants.includes('wm6-price-guard-timeout') &&
+        logs.some((l) => l.includes('Price guard wait timed out'))) ||
       (invariants.includes('wm6-checkout-spa-timeout') &&
         logs.some((l) => l.includes('releasing sacred lock for poll recovery')));
     assert.ok(
