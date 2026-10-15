@@ -1394,6 +1394,40 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     }
   }
 
+  // TGT-1/TGT-4: repeated NAV_FAILED keyed on monitor productUrl (routes without timeout release log).
+  if (
+    invariants.includes('tgt-repeated-nav-failed') &&
+    !invariants.includes('nav-failed-releases-lock')
+  ) {
+    const repeatedNavUrl = route.monitorProductPath
+      ? `http://${route.host}:${port}${route.monitorProductPath}`
+      : pageUrl;
+    const normRepeatedNavUrl = normalizeProductUrl(repeatedNavUrl);
+    const normTabUrl = normalizeProductUrl(pageUrl);
+    if (route.monitorProductPath && normRepeatedNavUrl !== normTabUrl) {
+      assert.notEqual(
+        normRepeatedNavUrl,
+        normTabUrl,
+        `FIX-3 ${route.journey}: tgt-repeated-nav-failed cross-page must key monitor productUrl, not tab URL (${normTabUrl})`
+      );
+    }
+    for (let i = 0; i < 2; i++) {
+      await sendBg(popup, { type: 'NAV_FAILED', url: repeatedNavUrl });
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 ${route.journey}: tgt-repeated-nav-failed cycle ${i + 1} must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(cycleInQueue)}`
+      );
+      assert.ok(
+        !cycleNavLock.some((u) => normalizeProductUrl(u) === normRepeatedNavUrl),
+        `FIX-3 ${route.journey}: tgt-repeated-nav-failed cycle ${i + 1} must clear navigationLock for ${normRepeatedNavUrl}, got ${JSON.stringify(cycleNavLock)}`
+      );
+    }
+  }
+
   // WM-6: product page with no ATC element must emit NAV_FAILED (not sacred lock).
   if (invariants.includes('wm6-missing-atc-element')) {
     assert.ok(
