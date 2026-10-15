@@ -4099,7 +4099,7 @@ function runWm6PxFixtureRoutesLivePollCycleTests() {
 
 /**
  * WM-6: same-page repeated WALMART_NAV_FAILED cycles must never arm sacred lock (PX timeout).
- * Parity with FIX-3 wm6-repeated-nav-failed on /ip/mock-px/555, /ip/mock-px-captcha/556, /ip/mock-px-block/557.
+ * Parity with FIX-3 wm6-repeated-nav-failed on /ip/mock-px/555, /ip/mock-px-captcha/556, /ip/mock-px-block/557, /ip/mock-px-override/558.
  */
 function runWm6PxRepeatedNavFailedTests() {
   function assertRepeatedNavFailedScenario(productUrl, getInitialMsg, label) {
@@ -4195,6 +4195,27 @@ function runWm6PxRepeatedNavFailedTests() {
       return msgs[0];
     },
     'WM-6 PX block timeout'
+  );
+
+  const pxOverrideUrl = 'https://www.walmart.com/ip/mock-px-override/558';
+  const pxOverridePage = makePage({
+    pathname: '/ip/mock-px-override/558',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: {
+      'data-tch-fixture': 'walmart-product-px-override',
+      'data-tch-path': '/ip/mock-px-override/558',
+      'data-tch-px-timeout-ms': '750',
+    },
+  });
+  const pxOverrideTimeoutMs = wmPxTimeoutMs(pxOverridePage);
+  assertRepeatedNavFailedScenario(
+    pxOverrideUrl,
+    () => {
+      const msgs = wmPxTimeoutMessages(pxOverridePage, pxOverrideTimeoutMs, pxOverrideUrl);
+      assert.equal(msgs.length, 1, 'WM-6 PX override: timeout sends NAV_FAILED');
+      return msgs[0];
+    },
+    'WM-6 PX override timeout'
   );
 }
 

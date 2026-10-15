@@ -1945,6 +1945,10 @@ function runWm6RepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
     },
     {
+      label: 'PX timeout override (wm6-repeated-nav-failed)',
+      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-override/558',
+    },
+    {
       label: 'cross-page PX (wm6-repeated-nav-failed)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
       tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
