@@ -480,7 +480,9 @@ export const FIXTURE_E2E_ROUTES = [
     journey: 'WM-6',
     invariants: [
       'no-sacred-lock',
+      'nav-failed-releases-lock',
       'px-timeout-nav-failed',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],
@@ -494,7 +496,9 @@ export const FIXTURE_E2E_ROUTES = [
     journey: 'WM-6',
     invariants: [
       'no-sacred-lock',
+      'nav-failed-releases-lock',
       'px-timeout-nav-failed',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],
@@ -508,7 +512,9 @@ export const FIXTURE_E2E_ROUTES = [
     journey: 'WM-6',
     invariants: [
       'no-sacred-lock',
+      'nav-failed-releases-lock',
       'px-timeout-nav-failed',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],
@@ -745,6 +751,7 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'no-sacred-lock',
       'wm6-price-guard-timeout',
+      'wm6-repeated-nav-failed',
       'wm6-live-poll-cycle',
       'wm6-poll-recovery-rearm',
     ],

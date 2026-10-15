@@ -3392,6 +3392,91 @@ function runWm6PriceGuardLivePollCycleTests() {
 }
 
 /**
+ * WM-6: same-page repeated WALMART_NAV_FAILED cycles must never arm sacred lock (price-guard timeout).
+ * Parity with FIX-3 wm6-repeated-nav-failed on /ip/mock-price-guard-timeout/991 (fixture-e2e has browser coverage).
+ */
+function runWm6PriceGuardRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(productUrl, getInitialMsg, label) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'WALMART_NAV_FAILED', `${label}: message type is WALMART_NAV_FAILED`);
+    assert.equal(
+      normalizeProductUrl(initialMsg.url),
+      normUrl,
+      `${label}: NAV_FAILED must key monitor productUrl`
+    );
+
+    navigationLock.add(normUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normUrl);
+      bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: productUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 price-guard timeout does not arm it`
+    );
+  }
+
+  const productUrl = 'https://www.walmart.com/ip/mock-price-guard-timeout/991';
+  const settings = { walmartMaxPrice: 50, productUrl };
+  const priceGuardPage = makePage({
+    pathname: '/ip/mock-price-guard-timeout/991',
+    docAttrs: {
+      'data-tch-fixture': 'walmart-product-price-guard-timeout',
+      'data-tch-price-guard-timeout-ms': '750',
+    },
+    elements: [
+      {
+        selectors: ['[itemprop="price"]'],
+        tag: 'span',
+        text: '$99.99',
+        content: '99.99',
+      },
+      {
+        selectors: ['[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        tag: 'button',
+      },
+    ],
+  });
+  assertRepeatedNavFailedScenario(
+    productUrl,
+    () => {
+      const msgs = wmPriceGuardTimeoutMessages(priceGuardPage, settings, productUrl, 750);
+      assert.equal(msgs.length, 1, 'WM-6 price-guard: timeout sends NAV_FAILED');
+      return msgs[0];
+    },
+    'WM-6 price-guard timeout'
+  );
+}
+
+/**
  * WM-6: cross-page repeated WALMART_NAV_FAILED cycles must never arm sacred lock (price-guard timeout).
  * Parity with FIX-3 wm6-repeated-nav-failed on /ip/mock-price-guard-cross/993 (fixture-e2e has browser coverage).
  */
@@ -4010,6 +4095,107 @@ function runWm6PxFixtureRoutesLivePollCycleTests() {
     timeoutMs: wmPxTimeoutMs(pxBlockPage),
     label: 'WM-6 PX block live poll',
   });
+}
+
+/**
+ * WM-6: same-page repeated WALMART_NAV_FAILED cycles must never arm sacred lock (PX timeout).
+ * Parity with FIX-3 wm6-repeated-nav-failed on /ip/mock-px/555, /ip/mock-px-captcha/556, /ip/mock-px-block/557.
+ */
+function runWm6PxRepeatedNavFailedTests() {
+  function assertRepeatedNavFailedScenario(productUrl, getInitialMsg, label) {
+    const normUrl = normalizeProductUrl(productUrl);
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    const initialMsg = getInitialMsg();
+    assert.ok(initialMsg, `${label}: initial NAV_FAILED message`);
+    assert.equal(initialMsg.type, 'WALMART_NAV_FAILED', `${label}: message type is WALMART_NAV_FAILED`);
+    assert.equal(normalizeProductUrl(initialMsg.url), normUrl, `${label}: NAV_FAILED keys productUrl`);
+
+    navigationLock.add(normUrl);
+    bgApplyWalmartNavFailed(navigationLock, inQueueUrls, initialMsg);
+    assert.equal(inQueueUrls.size, 0, `${label} cycle 1 must not arm inQueueUrls`);
+    assert.ok(!navigationLock.has(normUrl), `${label} cycle 1 must clear navigationLock`);
+
+    for (let i = 0; i < 2; i++) {
+      navigationLock.add(normUrl);
+      bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: productUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} repeated NAV_FAILED cycle ${i + 2} must not arm inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normUrl),
+        `${label} repeated NAV_FAILED cycle ${i + 2} must clear navigationLock`
+      );
+      assert.ok(
+        !bgPollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+        `${label} repeated NAV_FAILED cycle ${i + 2} allows poll retry (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normUrl]);
+    assert.ok(
+      bgPollWouldSkipNavigation(normUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 PX timeout does not arm it`
+    );
+  }
+
+  const hangTightUrl = 'https://www.walmart.com/ip/mock-px/555';
+  const hangTightPage = makePage({
+    pathname: '/ip/mock-px/555',
+    bodyText: "Hang tight! We're loading your experience.",
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px', 'data-tch-path': '/ip/mock-px/555' },
+  });
+  const hangTightTimeoutMs = wmPxTimeoutMs(hangTightPage);
+  assertRepeatedNavFailedScenario(
+    hangTightUrl,
+    () => {
+      const msgs = wmPxTimeoutMessages(hangTightPage, hangTightTimeoutMs, hangTightUrl);
+      assert.equal(msgs.length, 1, 'WM-6 PX hang-tight: timeout sends NAV_FAILED');
+      return msgs[0];
+    },
+    'WM-6 PX hang-tight timeout'
+  );
+
+  const pxCaptchaUrl = 'https://www.walmart.com/ip/mock-px-captcha/556';
+  const pxCaptchaPage = makePage({
+    pathname: '/ip/mock-px-captcha/556',
+    elements: [{ selectors: ['#px-captcha'], tag: 'div' }],
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px-captcha', 'data-tch-path': '/ip/mock-px-captcha/556' },
+  });
+  const pxCaptchaTimeoutMs = wmPxTimeoutMs(pxCaptchaPage);
+  assertRepeatedNavFailedScenario(
+    pxCaptchaUrl,
+    () => {
+      const msgs = wmPxTimeoutMessages(pxCaptchaPage, pxCaptchaTimeoutMs, pxCaptchaUrl);
+      assert.equal(msgs.length, 1, 'WM-6 PX captcha: timeout sends NAV_FAILED');
+      return msgs[0];
+    },
+    'WM-6 PX captcha timeout'
+  );
+
+  const pxBlockUrl = 'https://www.walmart.com/ip/mock-px-block/557';
+  const pxBlockPage = makePage({
+    pathname: '/ip/mock-px-block/557',
+    bodyText: 'Access denied',
+    docAttrs: { 'data-tch-fixture': 'walmart-product-px-block', 'data-tch-path': '/ip/mock-px-block/557' },
+    elements: [{ selectors: ['[class*="px-block"]'], tag: 'div' }],
+  });
+  const pxBlockTimeoutMs = wmPxTimeoutMs(pxBlockPage);
+  assertRepeatedNavFailedScenario(
+    pxBlockUrl,
+    () => {
+      const msgs = wmPxTimeoutMessages(pxBlockPage, pxBlockTimeoutMs, pxBlockUrl);
+      assert.equal(msgs.length, 1, 'WM-6 PX block: timeout sends NAV_FAILED');
+      return msgs[0];
+    },
+    'WM-6 PX block timeout'
+  );
 }
 
 /**
@@ -6313,6 +6499,7 @@ async function main() {
   runWm6CheckoutSpaLivePollCycleTests();
   runWm6PriceGuardTimeoutTests();
   runWm6PriceGuardLivePollCycleTests();
+  runWm6PriceGuardRepeatedNavFailedTests();
   runWm6PriceGuardCrossRepeatedNavFailedTests();
   runWm6PriceGuardCrossLivePollCycleTests();
   runWm6PriceGuardCrossPollRecoveryTests();
@@ -6320,6 +6507,7 @@ async function main() {
   runWm6PxTimeoutNavFailedElementTests();
   runWm6PxLivePollCycleTests();
   runWm6PxFixtureRoutesLivePollCycleTests();
+  runWm6PxRepeatedNavFailedTests();
   runWm6PxCrossRepeatedNavFailedTests();
   runWm6PxCrossLivePollCycleTests();
   runWm6PxCrossPollRecoveryTests();
