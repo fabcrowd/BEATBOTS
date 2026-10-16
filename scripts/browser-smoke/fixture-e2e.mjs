@@ -1369,6 +1369,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       invariants.includes('sc2-repeated-nav-failed') ||
       invariants.includes('wm2-repeated-nav-failed') ||
       invariants.includes('wm6-repeated-nav-failed') ||
+      invariants.includes('wm4-repeated-nav-failed') ||
       invariants.includes('sc4-repeated-nav-failed') ||
       invariants.includes('tgt-repeated-nav-failed')
     ) {
@@ -1391,6 +1392,34 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
           `FIX-3 ${route.journey}: repeated NAV_FAILED cycle ${i + 2} must clear navigationLock for ${normRepeatedNavUrl}, got ${JSON.stringify(cycleNavLock)}`
         );
       }
+    }
+  }
+
+  // WM-4: unmonitored /qp or /checkout — repeated NAV_FAILED must not arm sacred lock (no timeout log).
+  if (
+    invariants.includes('wm4-repeated-nav-failed') &&
+    !invariants.includes('nav-failed-releases-lock')
+  ) {
+    const walmartProbePath = route.path.includes('/qp/')
+      ? '/ip/mock-wm4-qp-live/111'
+      : '/ip/mock-wm4-checkout-live/222';
+    const walmartProbeUrl = `http://${route.host}:${port}${walmartProbePath}`;
+    const normRepeatedNavUrl = normalizeProductUrl(walmartProbeUrl);
+    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED'];
+    for (let i = 0; i < navFailTypes.length; i++) {
+      await sendBg(popup, { type: navFailTypes[i], url: walmartProbeUrl });
+      const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const cycleInQueue = cycle?.inQueueUrls || [];
+      const cycleNavLock = cycle?.navigationLock || [];
+      assert.equal(
+        cycleInQueue.length,
+        0,
+        `FIX-3 ${route.journey}: wm4-repeated-nav-failed cycle ${i + 1} must not arm inQueueUrls on ${pageUrl}, got ${JSON.stringify(cycleInQueue)}`
+      );
+      assert.ok(
+        !cycleNavLock.some((u) => normalizeProductUrl(u) === normRepeatedNavUrl),
+        `FIX-3 ${route.journey}: wm4-repeated-nav-failed cycle ${i + 1} must clear navigationLock for ${normRepeatedNavUrl}, got ${JSON.stringify(cycleNavLock)}`
+      );
     }
   }
 
