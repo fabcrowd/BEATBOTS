@@ -1267,17 +1267,18 @@ async function _wmInit() {
   const allProducts = data.monitor?.products || [];
   // Optional :port supports local fixture e2e (host-resolver-rules + explicit port).
   const walmartProducts = allProducts.filter(p => /walmart\.com(?::\d+)?\/ip\//i.test(p.url));
+  const monitorActive = !!(data.monitor?.active && walmartProducts.length > 0);
   const matchedProduct = page === 'product'
-    ? walmartProducts.find(p => {
+    ? (walmartProducts.find(p => {
         try { return new URL(p.url).pathname === location.pathname; } catch { return false; }
-      })
+      }) || (monitorActive && walmartProducts.length === 1 ? walmartProducts[0] : null))
     : walmartProducts[0] || null;
   const oid = matchedProduct?.oid || null;
 
   // Data guard: don't automate if there's nothing configured — prevents ATCing
   // every Walmart /ip/ page the user browses while the extension is simply "on".
   const hasData = !!(data.shipping?.firstName || data.payment?.cardNumber || data.useSavedPayment);
-  const hasMonitor = !!(data.monitor?.active && walmartProducts.length > 0);
+  const hasMonitor = monitorActive;
   if (!hasData && !hasMonitor) {
     console.log('[WMT] No settings configured — skipping automation');
     return;
