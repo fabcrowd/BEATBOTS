@@ -629,6 +629,11 @@ function runWm5SacredRepeatedNavFailedOfflineTests() {
       pageUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
       lockUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
     },
+    {
+      label: 'wm5-sacred-repeated-nav-failed product queue cross',
+      pageUrl: 'https://www.walmart.com/ip/mock-queue-poll/457',
+      lockUrl: 'https://www.walmart.com/ip/mock-queue/456',
+    },
   ];
   const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
 

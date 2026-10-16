@@ -244,6 +244,10 @@ async function assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs) 
     `FIX-3 WM-5: pre-timeout live poll expects sacred lock on ${normLockUrl} before QUEUE_TIMEOUT, got inQueueUrls=${JSON.stringify(initialInQueue)}`
   );
 
+  if ((route.invariants || []).includes('wm5-sacred-repeated-nav-failed')) {
+    await assertWm5SacredRepeatedNavFailed(popup, route, port);
+  }
+
   // Page reload during live poll (with productUrl) must re-arm sacred lock before QUEUE_TIMEOUT.
   await new Promise((r) => setTimeout(r, 50));
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -3367,7 +3371,10 @@ async function main() {
       await assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs);
     }
 
-    if (route.invariants?.includes('wm5-sacred-repeated-nav-failed')) {
+    if (
+      route.invariants?.includes('wm5-sacred-repeated-nav-failed') &&
+      !route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')
+    ) {
       await assertWm5SacredRepeatedNavFailed(popup, route, port);
     }
 
