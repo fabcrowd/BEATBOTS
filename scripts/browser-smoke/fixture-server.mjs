@@ -365,7 +365,12 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartQpRoom,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['no-sacred-lock', 'wm4-qp-no-producturl', 'wm4-live-poll-cycle'],
+    invariants: [
+      'no-sacred-lock',
+      'wm4-qp-no-producturl',
+      'wm4-repeated-nav-failed',
+      'wm4-live-poll-cycle',
+    ],
   },
   {
     host: 'www.walmart.com',
@@ -421,6 +426,7 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'no-sacred-lock',
       'wm4-checkout-no-producturl',
+      'wm4-repeated-nav-failed',
       'wm4-live-poll-cycle',
       'mon2-samsclub-live-poll-cycle',
       'mon2-target-live-poll-cycle',
