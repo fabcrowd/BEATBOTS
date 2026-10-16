@@ -926,6 +926,7 @@ export const FIXTURE_E2E_ROUTES = [
     invariants: [
       'wm5-checkout-spa-timeout-clears-sacred-lock',
       'wm5-checkout-spa-live-poll-cycle',
+      'wm5-sacred-repeated-nav-failed',
       'wm5-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-checkout-spa-sacred/996',
@@ -942,6 +943,7 @@ export const FIXTURE_E2E_ROUTES = [
       'wm5-checkout-spa-timeout-clears-sacred-lock',
       'wm5-checkout-spa-live-poll-cycle',
       'wm5-checkout-spa-cross-live-poll-cycle',
+      'wm5-sacred-repeated-nav-failed',
       'wm5-poll-recovery-rearm',
     ],
     monitorProductPath: '/ip/mock-checkout-spa-cross-monitor/1002',

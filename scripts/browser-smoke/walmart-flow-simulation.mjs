@@ -5752,6 +5752,77 @@ function runWm5SacredSurvivesNavFailedTests() {
 }
 
 /**
+ * WM-5: repeated NAV_FAILED keyed on monitor productUrl — sacred lock survives (checkout SPA sacred cross).
+ * Parity with FIX-3 wm5-sacred-repeated-nav-failed on /checkout/spa-stall-sacred + spa-stall-sacred-cross.
+ */
+function runWm5SacredRepeatedNavFailedTests() {
+  const scenarios = [
+    {
+      label: 'checkout SPA sacred',
+      pageUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+      lockUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+    },
+    {
+      label: 'checkout SPA sacred cross',
+      pageUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
+      lockUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
+    },
+  ];
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+  for (const { label, pageUrl, lockUrl } of scenarios) {
+    const normLockUrl = normalizeProductUrl(lockUrl);
+    const normPageUrl = normalizeProductUrl(pageUrl);
+    const isCross = normPageUrl !== normLockUrl;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set();
+
+    bgApplyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+    assert.ok(inQueueUrls.has(normLockUrl), `${label}: sacred lock armed on lockUrl`);
+    if (isCross) {
+      assert.ok(
+        !inQueueUrls.has(normPageUrl),
+        `${label}: sacred lock must key monitor productUrl not tab pageUrl`
+      );
+    }
+
+    for (let i = 0; i < navFailTypes.length; i++) {
+      const failUrl = isCross ? lockUrl : pageUrl;
+      navigationLock.add(normLockUrl);
+      bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: navFailTypes[i],
+        url: failUrl,
+      });
+      if (isCross) {
+        bgApplyWalmartNavFailed(navigationLock, inQueueUrls, {
+          type: navFailTypes[i],
+          url: pageUrl,
+        });
+      }
+      assert.ok(
+        inQueueUrls.has(normLockUrl),
+        `${label}: sacred lock must survive ${navFailTypes[i]} cycle ${i + 1} on ${normLockUrl}`
+      );
+      assert.ok(
+        !navigationLock.has(normLockUrl),
+        `${label}: ${navFailTypes[i]} cycle ${i + 1} must clear navigationLock on ${normLockUrl}`
+      );
+      if (isCross) {
+        assert.ok(
+          !inQueueUrls.has(normPageUrl),
+          `${label}: cycle ${i + 1} must not sacred-lock tab pageUrl ${normPageUrl}`
+        );
+      }
+    }
+
+    assert.ok(
+      bgPollWouldSkipNavigation(normLockUrl, inQueueUrls, navigationLock),
+      `${label}: poll must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
+  }
+}
+
+/**
  * WM-5: sacred-lock live poll cycle — reload + repeated NAV_FAILED, lock persists (no QUEUE_TIMEOUT).
  * Parity with FIX-3 wm5-live-poll-cycle on product-page queue + monitored /qp + /checkout routes.
  */
@@ -6490,6 +6561,7 @@ async function main() {
   runWm5CheckoutSpaLivePollCycleTests();
   runWm5CheckoutSpaCrossLivePollCycleTests();
   runWm5SacredSurvivesNavFailedTests();
+  runWm5SacredRepeatedNavFailedTests();
   runWm5LivePollCycleTests();
   runWm4LivePollCycleTests();
   runWm4CrossLivePollCycleTests();

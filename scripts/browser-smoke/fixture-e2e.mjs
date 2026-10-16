@@ -494,6 +494,75 @@ async function assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs)
   }
 }
 
+/** WM-5: repeated NAV_FAILED keyed on monitor productUrl — sacred lock must survive (cross-page sacred routes). */
+async function assertWm5SacredRepeatedNavFailed(popup, route, port) {
+  const lockPath = route.monitorProductPath || route.sacredLockProductPath;
+  if (!lockPath) {
+    throw new Error(
+      `wm5-sacred-repeated-nav-failed requires monitorProductPath or sacredLockProductPath on ${route.path}`
+    );
+  }
+  const lockUrl = `http://${route.host}:${port}${lockPath}`;
+  const normLockUrl = normalizeProductUrl(lockUrl);
+  const pageUrl = `http://${route.host}:${port}${route.path}`;
+  const normPageUrl = normalizeProductUrl(pageUrl);
+  const isCross = normPageUrl !== normLockUrl;
+
+  let initialInQueue = [];
+  for (let i = 0; i < 16; i++) {
+    await new Promise((r) => setTimeout(r, 40));
+    const initial = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    initialInQueue = initial?.inQueueUrls || [];
+    if (initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl)) break;
+  }
+  assert.ok(
+    initialInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+    `FIX-3 WM-5: wm5-sacred-repeated-nav-failed expects sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(initialInQueue)}`
+  );
+  if (isCross) {
+    assert.notEqual(
+      normPageUrl,
+      normLockUrl,
+      `FIX-3 WM-5: wm5-sacred-repeated-nav-failed cross must key monitor productUrl not tab URL (${normPageUrl})`
+    );
+    assert.ok(
+      !initialInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+      `FIX-3 WM-5: wm5-sacred-repeated-nav-failed must not sacred-lock queue tab ${normPageUrl}`
+    );
+  }
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    const failUrl = isCross ? lockUrl : pageUrl;
+    await sendBg(popup, { type: navFailTypes[i], url: failUrl });
+    if (isCross) {
+      await sendBg(popup, { type: navFailTypes[i], url: pageUrl });
+    }
+    const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+    const cycleInQueue = cycle?.inQueueUrls || [];
+    const cycleNavLock = cycle?.navigationLock || [];
+    assert.ok(
+      cycleInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: wm5-sacred-repeated-nav-failed cycle ${i + 1} must preserve sacred lock on ${normLockUrl} after ${navFailTypes[i]}, got inQueueUrls=${JSON.stringify(cycleInQueue)}`
+    );
+    assert.ok(
+      !cycleNavLock.some((u) => normalizeProductUrl(u) === normLockUrl),
+      `FIX-3 WM-5: wm5-sacred-repeated-nav-failed cycle ${i + 1} must clear navigationLock on ${normLockUrl} after ${navFailTypes[i]}, got ${JSON.stringify(cycleNavLock)}`
+    );
+    if (isCross) {
+      assert.ok(
+        !cycleInQueue.some((u) => normalizeProductUrl(u) === normPageUrl),
+        `FIX-3 WM-5: wm5-sacred-repeated-nav-failed cycle ${i + 1} must not sacred-lock tab ${normPageUrl} after ${navFailTypes[i]}`
+      );
+    }
+    assert.equal(
+      pollWouldSkipNavigation(normLockUrl, new Set(cycleInQueue), new Set(cycleNavLock)),
+      true,
+      `FIX-3 WM-5: wm5-sacred-repeated-nav-failed cycle ${i + 1} must skip navigate while sacred lock holds on ${normLockUrl}`
+    );
+  }
+}
+
 async function assertRouteInvariants(popup, route, logs, page, port) {
   const invariants = route.invariants || [];
   if (!invariants.length) return;
@@ -3296,6 +3365,10 @@ async function main() {
 
     if (route.invariants?.includes('wm5-checkout-spa-live-poll-cycle')) {
       await assertWm5CheckoutSpaLivePollCycle(popup, route, page, port, logs);
+    }
+
+    if (route.invariants?.includes('wm5-sacred-repeated-nav-failed')) {
+      await assertWm5SacredRepeatedNavFailed(popup, route, port);
     }
 
     await new Promise((r) => setTimeout(r, routeWaitMs(route)));
