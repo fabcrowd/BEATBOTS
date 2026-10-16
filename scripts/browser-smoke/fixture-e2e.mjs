@@ -36,6 +36,17 @@ function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
   return false;
 }
 
+/** Mirrors background.js isInCheckoutFlow — poll must not navigate tabs already in checkout. */
+function isInCheckoutFlow(url) {
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return /^\/(cart|checkout|thankyou|thank-you|order-confirm)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
 async function ensurePopupExtensionContext(popup) {
   const hasChrome = await popup.evaluate(
     () => typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function'
@@ -3279,6 +3290,154 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       !afterNavLock.some((u) => normalizeProductUrl(u) === normProductUrl),
       `FIX-3 WM-6: PX timeout must clear navigationLock for ${normProductUrl}, got ${JSON.stringify(afterNavLock)}`
     );
+  }
+
+  if (invariants.includes('mon3-live-poll-cycle')) {
+    const lockPath = route.sacredLockProductPath;
+    if (lockPath && /\/checkout/i.test(route.path)) {
+      const lockUrl = `http://${route.host}:${port}${lockPath}`;
+      const normLockUrl = normalizeProductUrl(lockUrl);
+
+      await sendBg(popup, { type: 'STOP_MONITOR' }).catch(() => {});
+      await sendBg(popup, {
+        type: 'START_MONITOR',
+        products: [{ url: lockUrl, name: `Fixture MON-3 ${route.journey}`, qty: 1 }],
+        refreshInterval: 1,
+        dropExpectedAt: '',
+        walmartSkipMonitoring: true,
+      });
+      await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+
+      const checkoutUrlBefore = page.url();
+      assert.ok(
+        isInCheckoutFlow(checkoutUrlBefore),
+        `FIX-3 MON-3: checkout tab must be in checkout flow before live poll on ${pageUrl}, got ${checkoutUrlBefore}`
+      );
+
+      await new Promise((r) => setTimeout(r, 2500));
+      const checkoutUrlAfter = page.url();
+      assert.ok(
+        isInCheckoutFlow(checkoutUrlAfter),
+        `FIX-3 MON-3: live poll must not navigate away from checkout flow on ${pageUrl}, got ${checkoutUrlAfter}`
+      );
+      assert.ok(
+        checkoutUrlAfter.includes('/checkout'),
+        `FIX-3 MON-3: sacred lock + checkout flow guard must keep tab on checkout during poll on ${pageUrl}, got ${checkoutUrlAfter}`
+      );
+
+      const checkoutPoll = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      const checkoutInQueue = checkoutPoll?.inQueueUrls || [];
+      const checkoutNavLock = checkoutPoll?.navigationLock || [];
+      assert.ok(
+        checkoutInQueue.some((u) => normalizeProductUrl(u) === normLockUrl),
+        `FIX-3 MON-3: checkout live poll must keep sacred lock on ${normLockUrl}, got inQueueUrls=${JSON.stringify(checkoutInQueue)}`
+      );
+      assert.equal(
+        pollWouldSkipNavigation(
+          normLockUrl,
+          new Set(checkoutInQueue),
+          new Set(checkoutNavLock)
+        ),
+        true,
+        `FIX-3 MON-3: poll must skip navigate while inQueueUrls holds on checkout ${normLockUrl}`
+      );
+      await sendBg(popup, { type: 'STOP_MONITOR' });
+      await new Promise((r) => setTimeout(r, 300));
+    } else if (route.path === '/ip/mock-predrop/123') {
+      const productUrl = pageUrl;
+      const normProductUrl = normalizeProductUrl(productUrl);
+
+      await sendBg(popup, { type: 'STOP_MONITOR' }).catch(() => {});
+      await sendBg(popup, {
+        type: 'START_MONITOR',
+        products: [{ url: productUrl, name: `Fixture MON-3 ${route.journey}`, qty: 1 }],
+        refreshInterval: 1,
+        dropExpectedAt: '',
+        walmartSkipMonitoring: true,
+      });
+
+      let withNavLock = null;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 400));
+        const st = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+        if (
+          Array.isArray(st?.navigationLock) &&
+          st.navigationLock.some((u) => normalizeProductUrl(u) === normProductUrl)
+        ) {
+          withNavLock = st;
+          break;
+        }
+      }
+      assert.ok(
+        withNavLock,
+        `FIX-3 MON-3: live poll must set navigationLock on pre-drop ${normProductUrl}`
+      );
+      assert.equal(
+        pollWouldSkipNavigation(
+          normProductUrl,
+          new Set(withNavLock.inQueueUrls || []),
+          new Set(withNavLock.navigationLock || [])
+        ),
+        true,
+        `FIX-3 MON-3: navigationLock must block poll re-navigation on ${normProductUrl}`
+      );
+
+      await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: productUrl });
+      const afterNavFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      assert.ok(
+        !(afterNavFail?.navigationLock || []).some(
+          (u) => normalizeProductUrl(u) === normProductUrl
+        ),
+        `FIX-3 MON-3: WALMART_NAV_FAILED must clear navigationLock on ${normProductUrl}`
+      );
+      assert.equal(
+        (afterNavFail?.inQueueUrls || []).length,
+        0,
+        `FIX-3 MON-3: WALMART_NAV_FAILED must not arm inQueueUrls on pre-drop ${normProductUrl}`
+      );
+
+      await sendBg(popup, { type: 'WALMART_IN_QUEUE', url: productUrl });
+      const inQueue = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      assert.ok(
+        (inQueue?.inQueueUrls || []).some((u) => normalizeProductUrl(u) === normProductUrl),
+        `FIX-3 MON-3: WALMART_IN_QUEUE must add inQueueUrls on ${normProductUrl}`
+      );
+      assert.equal(
+        pollWouldSkipNavigation(
+          normProductUrl,
+          new Set(inQueue?.inQueueUrls || []),
+          new Set(inQueue?.navigationLock || [])
+        ),
+        true,
+        `FIX-3 MON-3: inQueueUrls must block poll re-navigation on ${normProductUrl}`
+      );
+
+      await sendBg(popup, { type: 'WALMART_NAV_FAILED', url: productUrl });
+      const afterSacredNavFail = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      assert.ok(
+        (afterSacredNavFail?.inQueueUrls || []).some(
+          (u) => normalizeProductUrl(u) === normProductUrl
+        ),
+        `FIX-3 MON-3: WALMART_NAV_FAILED must not clear inQueueUrls (WM-5) on ${normProductUrl}`
+      );
+
+      await sendBg(popup, {
+        type: 'START_MONITOR',
+        products: [{ url: productUrl, name: `Fixture MON-3 restart ${route.journey}`, qty: 1 }],
+        refreshInterval: 1,
+        dropExpectedAt: '',
+        walmartSkipMonitoring: true,
+      });
+      const afterRestart = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
+      assert.ok(
+        !(afterRestart?.inQueueUrls || []).some(
+          (u) => normalizeProductUrl(u) === normProductUrl
+        ),
+        `FIX-3 MON-3: START_MONITOR must clear prior inQueueUrls on ${normProductUrl}`
+      );
+      await sendBg(popup, { type: 'STOP_MONITOR' });
+      await new Promise((r) => setTimeout(r, 300));
+    }
   }
 }
 
