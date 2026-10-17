@@ -30,6 +30,17 @@ function pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock) {
   return false;
 }
 
+/** Mirrors background.js WM-5 checkout-flow guard before poll navigate. */
+function pollWouldHoldCheckoutTab(tabUrl, normUrl, inQueueUrls) {
+  return isInCheckoutFlow(tabUrl) && inQueueUrls.has(normUrl);
+}
+
+/** Mirrors background.js stopMonitor — clears sacred lock and navigation lock. */
+function simulateStopMonitor(inQueueUrls, navigationLock) {
+  inQueueUrls.clear();
+  navigationLock.clear();
+}
+
 /** Mirrors background.js isInCheckoutFlow — poll must not navigate tabs already in checkout. */
 function isInCheckoutFlow(url) {
   if (!url) return false;
@@ -1923,6 +1934,83 @@ function runWm2LivePollCycleElementOfflineTests() {
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'wm2-live-poll-cycle: contrast WM-5 — sacred lock would block poll; pre-drop WM-2 does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for mon3-live-poll-cycle (fixture-e2e browser coverage).
+ * MON-3: navigationLock + inQueueUrls skip poll; checkout-flow guard with sacred lock.
+ */
+function runMon3LivePollCycleOfflineTests() {
+  const bgSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/background.js'),
+    'utf8'
+  );
+  assert.match(bgSrc, /function isInCheckoutFlow/, 'mon3-live-poll-cycle: isInCheckoutFlow in background');
+  assert.match(
+    bgSrc,
+    /in checkout flow with sacred lock/,
+    'mon3-live-poll-cycle: checkout-flow sacred lock guard in background'
+  );
+  assert.match(
+    bgSrc,
+    /Skipping \$\{normUrl\} — in queue/,
+    'mon3-live-poll-cycle: inQueueUrls poll skip log in background'
+  );
+  assert.match(
+    bgSrc,
+    /Skipping \$\{normUrl\} — navigation in progress/,
+    'mon3-live-poll-cycle: navigationLock poll skip log in background'
+  );
+
+  const productUrl = 'https://www.walmart.com/ip/mock-predrop/123';
+  const normProductUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  navigationLock.add(normProductUrl);
+  assert.ok(
+    pollWouldSkipNavigation(normProductUrl, inQueueUrls, navigationLock),
+    'mon3-live-poll-cycle: navigationLock must block poll re-navigation on pre-drop'
+  );
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: productUrl });
+  assert.ok(
+    !navigationLock.has(normProductUrl),
+    'mon3-live-poll-cycle: WALMART_NAV_FAILED must clear navigationLock on pre-drop'
+  );
+  assert.equal(inQueueUrls.size, 0, 'mon3-live-poll-cycle: pre-drop NAV_FAILED must not arm inQueueUrls');
+
+  inQueueUrls.add(normProductUrl);
+  assert.ok(
+    pollWouldSkipNavigation(normProductUrl, inQueueUrls, navigationLock),
+    'mon3-live-poll-cycle: inQueueUrls must block poll re-navigation'
+  );
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: productUrl });
+  assert.ok(
+    inQueueUrls.has(normProductUrl),
+    'mon3-live-poll-cycle: WALMART_NAV_FAILED must not clear inQueueUrls (WM-5)'
+  );
+
+  simulateStopMonitor(inQueueUrls, navigationLock);
+  assert.equal(inQueueUrls.size, 0, 'mon3-live-poll-cycle: START_MONITOR restart clears prior inQueueUrls');
+
+  const lockUrl = 'https://www.walmart.com/ip/mock-checkout-sacred-lock/555';
+  const normLockUrl = normalizeProductUrl(lockUrl);
+  const checkoutTabUrl = 'https://www.walmart.com/checkout';
+  assert.ok(isInCheckoutFlow(checkoutTabUrl), 'mon3-live-poll-cycle: walmart checkout is checkout flow');
+  assert.ok(!isInCheckoutFlow(productUrl), 'mon3-live-poll-cycle: product page is not checkout flow');
+  assert.ok(!isInCheckoutFlow('https://www.walmart.com/qp'), 'mon3-live-poll-cycle: /qp is not checkout-flow guard');
+
+  inQueueUrls.add(normLockUrl);
+  assert.ok(
+    pollWouldHoldCheckoutTab(checkoutTabUrl, normLockUrl, inQueueUrls),
+    'mon3-live-poll-cycle: sacred lock must hold checkout tab during live poll'
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normLockUrl, inQueueUrls, navigationLock),
+    'mon3-live-poll-cycle: poll must skip navigate while inQueueUrls holds on checkout lock URL'
   );
 }
 
@@ -5110,6 +5198,7 @@ async function main() {
   runWm4NoProductUrlOfflineTests();
   runWm5SacredSurvivesNavFailedOfflineTests();
   runWm5SacredRepeatedNavFailedOfflineTests();
+  runMon3LivePollCycleOfflineTests();
   runWm5LivePollCycleOfflineTests();
   runWm4LivePollCycleOfflineTests();
   runWm4CrossLivePollCycleOfflineTests();
@@ -5512,7 +5601,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
