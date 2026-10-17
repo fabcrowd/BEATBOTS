@@ -21,6 +21,14 @@
     cookieDomains: ['walmart.com'],
   };
 
+  /** @type {typeof TARGET} */
+  var SAMSCLUB = {
+    id: 'samsclub',
+    label: "Sam's Club",
+    hostSuffixes: ['samsclub.com'],
+    cookieDomains: ['samsclub.com'],
+  };
+
   function hostnameFromUrl(url) {
     try {
       return new URL(url).hostname.toLowerCase();
@@ -40,30 +48,33 @@
 
   /**
    * @param {string} url
-   * @returns {'target'|'walmart'|null}
+   * @returns {'target'|'walmart'|'samsclub'|null}
    */
   function detectRetailer(url) {
     var host = hostnameFromUrl(url);
     if (!host) return null;
     if (matchesRetailer(host, TARGET)) return 'target';
     if (WALMART && matchesRetailer(host, WALMART)) return 'walmart';
+    if (SAMSCLUB && matchesRetailer(host, SAMSCLUB)) return 'samsclub';
     return null;
   }
 
   /**
    * Cookie API domain filters for a retailer id.
-   * @param {'target'|'walmart'} retailerId
+   * @param {'target'|'walmart'|'samsclub'} retailerId
    * @returns {string[]}
    */
   function cookieDomainsFor(retailerId) {
     if (retailerId === 'target') return TARGET.cookieDomains.slice();
     if (retailerId === 'walmart' && WALMART) return WALMART.cookieDomains.slice();
+    if (retailerId === 'samsclub' && SAMSCLUB) return SAMSCLUB.cookieDomains.slice();
     return [];
   }
 
   root.TCH_HOSTS = {
     TARGET: TARGET,
     WALMART: WALMART,
+    SAMSCLUB: SAMSCLUB,
     detectRetailer: detectRetailer,
     cookieDomainsFor: cookieDomainsFor,
   };
