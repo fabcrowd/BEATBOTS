@@ -4264,6 +4264,35 @@ function runSc3PollRecoveryRearmOfflineTests() {
     'sc3-disabled-atc-cross-poll-recovery: poll recovery re-arms on recovery product'
   );
   assert.equal(crossInQueue.size, 0, 'sc3-disabled-atc-cross-poll-recovery: must not arm sacred lock');
+  assert.ok(
+    !crossInQueue.has(normCrossTab),
+    'sc3-disabled-atc-cross-poll-recovery: tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !crossInQueue.has(normCrossRecovery),
+    'sc3-disabled-atc-cross-poll-recovery: recovery product must not be in sacred lock'
+  );
+
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossRecovery });
+  assert.ok(
+    !crossNavLock.has(normCrossRecovery),
+    'sc3-disabled-atc-cross-poll-recovery: repeated NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(
+    crossInQueue.size,
+    0,
+    'sc3-disabled-atc-cross-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normCrossRecovery, crossInQueue, crossNavLock),
+    'sc3-disabled-atc-cross-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const crossWmSacredLock = new Set([normCrossRecovery]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossRecovery, crossWmSacredLock, new Set()),
+    'sc3-disabled-atc-cross-poll-recovery: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
 }
 
 /**
