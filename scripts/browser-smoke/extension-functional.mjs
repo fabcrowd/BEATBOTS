@@ -4331,19 +4331,56 @@ function runSc3DisabledAtcLivePollCycleOfflineTests() {
   const normCrossTab = normalizeProductUrl('https://www.samsclub.com/p/mock-fcfs-disabled-cross/810');
   const crossInQueue = new Set();
   const crossNavLock = new Set();
+  const crossLiveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+
+  assert.equal(crossInQueue.size, 0, 'sc3-disabled-atc-cross live poll: must not arm sacred lock on start');
+  assert.ok(!crossInQueue.has(normCrossTab), 'sc3-disabled-atc-cross live poll: tab URL must not be sacred lock key');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc3-disabled-atc-cross live poll: monitor URL differs from tab');
+
   crossNavLock.add(normCrossMonitor);
   applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
   assert.equal(crossInQueue.size, 0, 'sc3-disabled-atc-cross live poll: timeout must not arm sacred lock');
-  assert.notEqual(normCrossMonitor, normCrossTab, 'sc3-disabled-atc-cross live poll: monitor URL differs from tab');
-  for (const sig of ['SAMS_NAV_FAILED', 'ATC_SUCCESS']) {
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc3-disabled-atc-cross live poll: timeout releases navigationLock');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc3-disabled-atc-cross live poll: reload must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc3-disabled-atc-cross live poll: reload timeout releases navigationLock');
+
+  for (let i = 0; i < crossLiveSignalTypes.length; i++) {
+    const sig = crossLiveSignalTypes[i];
     crossNavLock.add(normCrossMonitor);
     if (sig === 'ATC_SUCCESS') {
       applyAtcSuccess(crossNavLock, crossInQueue, { type: 'ATC_SUCCESS', url: crossMonitor });
     } else {
       applyNavFailed(crossNavLock, crossInQueue, { type: sig, url: crossMonitor });
     }
-    assert.equal(crossInQueue.size, 0, `sc3-disabled-atc-cross live poll: ${sig} must not arm sacred lock`);
+    assert.equal(
+      crossInQueue.size,
+      0,
+      `sc3-disabled-atc-cross live poll cycle ${i + 1} must not arm inQueueUrls after ${sig}`
+    );
+    assert.ok(
+      !crossInQueue.has(normCrossTab),
+      `sc3-disabled-atc-cross live poll cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+    );
+    if (crossNavLock.has(normCrossMonitor)) {
+      assert.ok(
+        !crossInQueue.has(normCrossMonitor),
+        `sc3-disabled-atc-cross live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${sig}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, crossInQueue, crossNavLock),
+      `sc3-disabled-atc-cross live poll cycle ${i + 1} allows poll retry after ${sig} (no sacred lock)`
+    );
   }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'sc3-disabled-atc-cross live poll: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  );
 }
 
 /**
@@ -4628,6 +4665,11 @@ function runSc6LivePollCycleOfflineTests() {
       label: 'cross-page restock (sc5-sc6-live-poll-cycle)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross-monitor/806',
       tabUrl: 'https://www.samsclub.com/p/mock-fcfs-restock-cross/807',
+    },
+    {
+      label: 'cross-page disabled ATC (sc3-disabled-atc-live-poll-cycle)',
+      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
+      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810',
     },
     {
       label: 'cart checkout-missing (sc6-cart-live-poll-cycle)',
