@@ -181,6 +181,16 @@ function runNavFailedReleasesLockOfflineTests() {
       url: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
       label: 'Sam\'s invisible ATC (sc6-invisible-atc)',
     },
+    {
+      type: 'SAMS_NAV_FAILED',
+      url: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
+      label: 'Sam\'s cross-page disabled ATC (sc3-disabled-atc-cross)',
+    },
+    {
+      type: 'SAMS_NAV_FAILED',
+      url: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802',
+      label: 'Sam\'s cross-page invisible ATC (sc6-invisible-atc-cross)',
+    },
   ];
 
   for (const { type, url, label } of fixtureCases) {
@@ -322,6 +332,16 @@ function runNoSacredLockOfflineTests() {
       apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
       msg: { type: 'SAMS_NAV_FAILED', url: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792' },
       label: 'Sam\'s cart checkout-missing (SC-6)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'SAMS_NAV_FAILED', url: 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809' },
+      label: 'Sam\'s cross-page disabled ATC (sc3-disabled-atc-cross)',
+    },
+    {
+      apply: (navLock, inQueue, msg) => applyNavFailed(navLock, inQueue, msg),
+      msg: { type: 'SAMS_NAV_FAILED', url: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802' },
+      label: 'Sam\'s cross-page invisible ATC (sc6-invisible-atc-cross)',
     },
     {
       apply: (navLock, inQueue, msg) => applyAtcSuccess(navLock, inQueue, msg),
@@ -3542,23 +3562,69 @@ function runSc3DisabledAtcElementOfflineTests() {
     'sc3-disabled-atc: Sam\'s product page must not emit Walmart queue semantics'
   );
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled/792';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const inQueueUrls = new Set();
-  const navigationLock = new Set([normMonitorUrl]);
+  const disabledFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-disabled.html'),
+    'utf8'
+  );
+  assert.match(
+    disabledFixture,
+    /data-tch-fixture="samsclub-product-fcfs-disabled"/,
+    'sc3-disabled-atc: disabled ATC fixture marker'
+  );
+  assert.match(disabledFixture, /disabled/, 'sc3-disabled-atc: disabled ATC fixture control');
 
-  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-  assert.equal(inQueueUrls.size, 0, 'sc3-disabled-atc: must not arm sacred lock');
-  assert.ok(!navigationLock.has(normMonitorUrl), 'sc3-disabled-atc: releases navigationLock');
-  assert.ok(
-    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-    'sc3-disabled-atc: poll may retry after NAV_FAILED (no sacred lock)'
+  const disabledCrossTabFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-disabled-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    disabledCrossTabFixture,
+    /data-tch-fixture="samsclub-product-fcfs-disabled-cross"/,
+    'sc3-disabled-atc-cross: cross-page tab fixture marker'
+  );
+  assert.match(
+    disabledCrossTabFixture,
+    /data-tch-path="\/p\/mock-fcfs-disabled-cross\/810"/,
+    'sc3-disabled-atc-cross: cross-page tab fixture path'
   );
 
-  const wmSacredLock = new Set([normMonitorUrl]);
-  assert.ok(
-    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc3-disabled-atc: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it'
+  function assertSc3DisabledAtcElementOffline(monitorProductUrl, tabProductUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabProductUrl ? normalizeProductUrl(tabProductUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+
+    assert.equal(inQueueUrls.size, 0, `${label}: product page must not populate inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+    }
+
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: releases navigationLock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it`
+    );
+  }
+
+  assertSc3DisabledAtcElementOffline(
+    'https://www.samsclub.com/p/mock-fcfs-disabled/792',
+    null,
+    'sc3-disabled-atc'
+  );
+  assertSc3DisabledAtcElementOffline(
+    'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
+    'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810',
+    'sc3-disabled-atc-cross'
   );
 }
 
@@ -3589,23 +3655,69 @@ function runSc6InvisibleAtcElementOfflineTests() {
     'sc6-invisible-atc: Sam\'s product page must not emit Walmart queue semantics'
   );
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const inQueueUrls = new Set();
-  const navigationLock = new Set([normMonitorUrl]);
+  const invisibleFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-invisible-atc.html'),
+    'utf8'
+  );
+  assert.match(
+    invisibleFixture,
+    /data-tch-fixture="samsclub-product-fcfs-invisible-atc"/,
+    'sc6-invisible-atc: invisible ATC fixture marker'
+  );
+  assert.match(invisibleFixture, /display:\s*none/, 'sc6-invisible-atc: invisible ATC fixture control');
 
-  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-  assert.equal(inQueueUrls.size, 0, 'sc6-invisible-atc: must not arm sacred lock');
-  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-invisible-atc: releases navigationLock');
-  assert.ok(
-    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-    'sc6-invisible-atc: poll may retry after NAV_FAILED (no sacred lock)'
+  const invisibleCrossTabFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-invisible-atc-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    invisibleCrossTabFixture,
+    /data-tch-fixture="samsclub-product-fcfs-invisible-atc-cross"/,
+    'sc6-invisible-atc-cross: cross-page tab fixture marker'
+  );
+  assert.match(
+    invisibleCrossTabFixture,
+    /data-tch-path="\/p\/mock-fcfs-invisible-atc-cross\/803"/,
+    'sc6-invisible-atc-cross: cross-page tab fixture path'
   );
 
-  const wmSacredLock = new Set([normMonitorUrl]);
-  assert.ok(
-    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc6-invisible-atc: contrast WM-5 — sacred lock would block poll; invisible ATC wait does not arm it'
+  function assertSc6InvisibleAtcElementOffline(monitorProductUrl, tabProductUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = tabProductUrl ? normalizeProductUrl(tabProductUrl) : null;
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+
+    assert.equal(inQueueUrls.size, 0, `${label}: product page must not populate inQueueUrls`);
+    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+    }
+
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: releases navigationLock`);
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: poll may retry after NAV_FAILED (no sacred lock)`
+    );
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; invisible ATC wait does not arm it`
+    );
+  }
+
+  assertSc6InvisibleAtcElementOffline(
+    'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    null,
+    'sc6-invisible-atc'
+  );
+  assertSc6InvisibleAtcElementOffline(
+    'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802',
+    'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803',
+    'sc6-invisible-atc-cross'
   );
 }
 
