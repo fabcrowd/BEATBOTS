@@ -2474,6 +2474,228 @@ function runWm6CartCheckoutMissingElementOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for wm6-missing-atc-element named tag (element-only, not live-poll-cycle).
+ * WM-6: product page with no ATC DOM → WALMART_NAV_FAILED after wait cap, no sacred lock.
+ */
+function runWm6MissingAtcElementOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /ATC button not found or disabled/,
+    'wm6-missing-atc-element: timeout log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmAtcWaitTimeoutMs/,
+    'wm6-missing-atc-element: ATC wait helper in source'
+  );
+  assert.match(
+    walmartSrc,
+    /data-tch-atc-wait-ms/,
+    'wm6-missing-atc-element: fixture wait override in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmShouldEnterSacredQueueWait/,
+    'wm6-missing-atc-element: sacred queue gate in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalNavFailed\(settings\?\.productUrl \|\| location\.href\)/,
+    'wm6-missing-atc-element: timeout uses settings.productUrl for poll recovery'
+  );
+
+  const noAtcFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-no-atc.html'),
+    'utf8'
+  );
+  assert.match(
+    noAtcFixture,
+    /data-tch-fixture="walmart-product-no-atc"/,
+    'wm6-missing-atc-element: fixture marker'
+  );
+  assert.match(
+    noAtcFixture,
+    /data-tch-atc-wait-ms="750"/,
+    'wm6-missing-atc-element: fixture ATC wait override'
+  );
+  const noAtcCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-no-atc-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    noAtcCrossFixture,
+    /data-tch-fixture="walmart-product-no-atc-cross"/,
+    'wm6-missing-atc-element: cross-page fixture marker'
+  );
+
+  function assertMissingAtcNavFailed(monitorProductUrl, tabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = normalizeProductUrl(tabUrl);
+    if (normMonitorUrl !== normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+    }
+
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} cycle ${i + 1}: missing ATC must not arm inQueueUrls`
+      );
+      assert.ok(
+        !inQueueUrls.has(normTabUrl),
+        `${label} cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} cycle ${i + 1}: missing ATC must clear navigationLock`
+      );
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} cycle ${i + 1}: poll may retry after missing ATC timeout (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; missing ATC does not arm it`
+    );
+  }
+
+  assertMissingAtcNavFailed(
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'missing ATC (wm6-missing-atc-element)'
+  );
+  assertMissingAtcNavFailed(
+    'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+    'https://www.walmart.com/ip/mock-no-atc-cross/998',
+    'cross-page missing ATC (wm6-missing-atc-element)'
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-price-guard-timeout named tag (element-only, not live-poll-cycle).
+ * WM-6: price above max — wait cap → WALMART_NAV_FAILED, no sacred lock (WM-2 contrast).
+ */
+function runWm6PriceGuardTimeoutElementOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmPriceGuardTimeoutMs/,
+    'wm6-price-guard-timeout: timeout helper in source'
+  );
+  assert.match(
+    walmartSrc,
+    /data-tch-price-guard-timeout-ms/,
+    'wm6-price-guard-timeout: fixture override in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Price guard wait — no sacred lock/,
+    'wm6-price-guard-timeout: no-sacred-lock log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Price guard wait timed out/,
+    'wm6-price-guard-timeout: timeout log in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmSignalNavFailed\(settings\?\.productUrl \|\| location\.href\)/,
+    'wm6-price-guard-timeout: timeout uses settings.productUrl for poll recovery'
+  );
+
+  const priceGuardFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-price-guard-timeout.html'),
+    'utf8'
+  );
+  assert.match(
+    priceGuardFixture,
+    /data-tch-fixture="walmart-product-price-guard-timeout"/,
+    'wm6-price-guard-timeout: fixture marker'
+  );
+  assert.match(
+    priceGuardFixture,
+    /data-tch-price-guard-timeout-ms="750"/,
+    'wm6-price-guard-timeout: fixture timeout override'
+  );
+  const priceGuardCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-price-guard-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    priceGuardCrossFixture,
+    /data-tch-fixture="walmart-product-price-guard-cross"/,
+    'wm6-price-guard-timeout: cross-page fixture marker'
+  );
+
+  function assertPriceGuardNavFailed(monitorProductUrl, tabUrl, label) {
+    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+    const normTabUrl = normalizeProductUrl(tabUrl);
+    if (normMonitorUrl !== normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+    }
+
+    for (let i = 0; i < 3; i++) {
+      const inQueueUrls = new Set();
+      const navigationLock = new Set([normMonitorUrl]);
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: 'WALMART_NAV_FAILED',
+        url: monitorProductUrl,
+      });
+      assert.equal(
+        inQueueUrls.size,
+        0,
+        `${label} cycle ${i + 1}: price-guard timeout must not arm inQueueUrls`
+      );
+      assert.ok(
+        !inQueueUrls.has(normTabUrl),
+        `${label} cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+      );
+      assert.ok(
+        !navigationLock.has(normMonitorUrl),
+        `${label} cycle ${i + 1}: price-guard timeout must clear navigationLock`
+      );
+      assert.ok(
+        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+        `${label} cycle ${i + 1}: poll may retry after price-guard timeout (no sacred lock)`
+      );
+    }
+
+    const wmSacredLock = new Set([normMonitorUrl]);
+    assert.ok(
+      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+      `${label}: contrast WM-5 — sacred lock would block poll; price-guard wait does not arm it`
+    );
+  }
+
+  assertPriceGuardNavFailed(
+    'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    'price guard timeout (wm6-price-guard-timeout)'
+  );
+  assertPriceGuardNavFailed(
+    'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+    'https://www.walmart.com/ip/mock-price-guard-cross/993',
+    'cross-page price guard timeout (wm6-price-guard-timeout)'
+  );
+}
+
+/**
  * FIX-3 parity for wm6-checkout-spa-timeout named tag (element-only, not live-poll-cycle).
  * WM-6: checkout SPA stall timeout → QUEUE_TIMEOUT when productUrl set, no sacred lock.
  */
@@ -5288,6 +5510,8 @@ async function main() {
   runWm6LivePollCycleOfflineTests();
   runWm6PollRecoveryRearmOfflineTests();
   runWm6CartCheckoutMissingElementOfflineTests();
+  runWm6MissingAtcElementOfflineTests();
+  runWm6PriceGuardTimeoutElementOfflineTests();
   runWm6CheckoutSpaTimeoutElementOfflineTests();
   runWm6PxTimeoutNavFailedElementOfflineTests();
   runWm6PxTimeoutMsOverrideElementOfflineTests();
@@ -5672,7 +5896,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-missing-atc-element + wm6-price-guard-timeout + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc6-invisible-atc + sc6-invisible-atc-live-poll-cycle + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
