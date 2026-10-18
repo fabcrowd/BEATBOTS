@@ -3880,6 +3880,215 @@ function runSc6InvisibleAtcLivePollCycleOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc6-restock named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-6: disabled ATC restock wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
+ */
+function runSc6RestockElementOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc6-restock: restock wait log in source');
+  assert.match(
+    samsSrc,
+    /ATC button not found or disabled/,
+    'sc6-restock: timeout log in source'
+  );
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc6-restock: ATC wait helper in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc6-restock: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc6-restock: Sam\'s product page must not emit Walmart queue semantics'
+  );
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-restock/790';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock: must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-restock: releases navigationLock');
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'sc6-restock: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc6-restock: contrast WM-5 — sacred lock would block poll; restock wait does not arm it'
+  );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-restock-cross-monitor/806';
+  const crossRecovery = 'https://www.samsclub.com/p/mock-fcfs-restock-cross-recovery/808';
+  const crossTab = 'https://www.samsclub.com/p/mock-fcfs-restock-cross/807';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossRecovery = normalizeProductUrl(crossRecovery);
+  const normCrossTab = normalizeProductUrl(crossTab);
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-restock-cross-poll-recovery: NAV_FAILED releases monitor lock');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc6-restock-cross-poll-recovery: monitor URL differs from tab');
+  crossNavLock.add(normCrossRecovery);
+  assert.ok(
+    crossNavLock.has(normCrossRecovery),
+    'sc6-restock-cross-poll-recovery: poll recovery re-arms on recovery product'
+  );
+  assert.equal(crossInQueue.size, 0, 'sc6-restock-cross-poll-recovery: must not arm sacred lock');
+  assert.ok(
+    !crossInQueue.has(normCrossTab),
+    'sc6-restock-cross-poll-recovery: tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !crossInQueue.has(normCrossRecovery),
+    'sc6-restock-cross-poll-recovery: recovery product must not be in sacred lock'
+  );
+
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossRecovery });
+  assert.ok(
+    !crossNavLock.has(normCrossRecovery),
+    'sc6-restock-cross-poll-recovery: repeated NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(
+    crossInQueue.size,
+    0,
+    'sc6-restock-cross-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normCrossRecovery, crossInQueue, crossNavLock),
+    'sc6-restock-cross-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const crossWmSacredLock = new Set([normCrossRecovery]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossRecovery, crossWmSacredLock, new Set()),
+    'sc6-restock-cross-poll-recovery: contrast WM-5 — sacred lock would block poll; restock wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc6-restock-live-poll-cycle named tag.
+ * Sam's Club SC-6: restock reload + repeated SAMS_NAV_FAILED during live poll, no sacred lock.
+ */
+function runSc6RestockLivePollCycleOfflineTests() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc6-restock-live-poll-cycle: restock wait log in source');
+  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc6-restock-live-poll-cycle: ATC wait helper in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-restock/790';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const navFailTypes = ['SAMS_NAV_FAILED', 'NAV_FAILED', 'SAMS_NAV_FAILED', 'NAV_FAILED'];
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-live-poll-cycle: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-live-poll-cycle: timeout must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-restock-live-poll-cycle: timeout releases navigationLock');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-live-poll-cycle: reload must not arm sacred lock');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-restock-live-poll-cycle: reload timeout releases navigationLock');
+
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc6-restock-live-poll-cycle: cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `sc6-restock-live-poll-cycle: cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `sc6-restock-live-poll-cycle: cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'sc6-restock-live-poll-cycle: contrast WM-5 — sacred lock would block poll; restock wait does not arm it'
+  );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-restock-cross-monitor/806';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.samsclub.com/p/mock-fcfs-restock-cross/807');
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+  const crossLiveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+
+  assert.equal(crossInQueue.size, 0, 'sc6-restock-cross live poll: must not arm sacred lock on start');
+  assert.ok(!crossInQueue.has(normCrossTab), 'sc6-restock-cross live poll: tab URL must not be sacred lock key');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc6-restock-cross live poll: monitor URL differs from tab');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc6-restock-cross live poll: timeout must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-restock-cross live poll: timeout releases navigationLock');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc6-restock-cross live poll: reload must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-restock-cross live poll: reload timeout releases navigationLock');
+
+  for (let i = 0; i < crossLiveSignalTypes.length; i++) {
+    const sig = crossLiveSignalTypes[i];
+    crossNavLock.add(normCrossMonitor);
+    if (sig === 'ATC_SUCCESS') {
+      applyAtcSuccess(crossNavLock, crossInQueue, { type: 'ATC_SUCCESS', url: crossMonitor });
+    } else {
+      applyNavFailed(crossNavLock, crossInQueue, { type: sig, url: crossMonitor });
+    }
+    assert.equal(
+      crossInQueue.size,
+      0,
+      `sc6-restock-cross live poll cycle ${i + 1} must not arm inQueueUrls after ${sig}`
+    );
+    assert.ok(
+      !crossInQueue.has(normCrossTab),
+      `sc6-restock-cross live poll cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+    );
+    if (crossNavLock.has(normCrossMonitor)) {
+      assert.ok(
+        !crossInQueue.has(normCrossMonitor),
+        `sc6-restock-cross live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${sig}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, crossInQueue, crossNavLock),
+      `sc6-restock-cross live poll cycle ${i + 1} allows poll retry after ${sig} (no sacred lock)`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'sc6-restock-cross live poll: contrast WM-5 — sacred lock would block poll; restock wait does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc5-repeated-atc-success named tag (element-only, not live-poll-cycle).
  * SC-5: repeated ATC_SUCCESS on FCFS product must never arm sacred lock.
  */
@@ -5516,6 +5725,8 @@ async function main() {
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc6InvisibleAtcLivePollCycleOfflineTests();
+  runSc6RestockElementOfflineTests();
+  runSc6RestockLivePollCycleOfflineTests();
   runSc5RepeatedAtcSuccessElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
   runSc4ShippingPaymentReviewElementOfflineTests();
