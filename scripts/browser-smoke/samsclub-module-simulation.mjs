@@ -1206,6 +1206,13 @@ function scInvisibleAtcTimeoutMessages(page, productUrl) {
   return [{ type: 'SAMS_NAV_FAILED', url: productUrl }];
 }
 
+/** SC-3: disabled ATC wait timeout — keys monitor productUrl (not tab pathname). */
+function scDisabledAtcTimeoutMessages(page, productUrl) {
+  const wait = scSimulateWaitForDisabledAtc(page);
+  if (wait.action === 'proceed_atc') return [];
+  return [{ type: 'SAMS_NAV_FAILED', url: productUrl }];
+}
+
 function testSc6Source() {
   assert.ok(SC_SRC.includes('scSignalNavFailed'), 'SC-6: scSignalNavFailed defined');
   assert.ok(
@@ -2378,6 +2385,55 @@ function runSc3DisabledAtcElementTests() {
 }
 
 /**
+ * SC-3: cross-page disabled ATC element — timeout keys monitor productUrl, not tab pathname.
+ * Parity with FIX-3 sc3-disabled-atc-cross on /p/mock-fcfs-disabled-cross/810 (fixture-e2e has browser coverage).
+ */
+function runSc3DisabledAtcCrossElementTests() {
+  assert.match(SC_SRC, /data-tch-atc-wait-ms/, 'SC-3 disabled-atc cross: fixture wait override in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809';
+  const tabProductUrl = 'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabProductUrl);
+
+  const disabledPage = makePage({
+    pathname: '/p/mock-fcfs-disabled-cross/810',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: true,
+      },
+    ],
+    docAttrs: {
+      'data-tch-fixture': 'samsclub-product-fcfs-disabled-cross',
+      'data-tch-atc-wait-ms': '750',
+    },
+  });
+
+  const timeoutMsgs = scDisabledAtcTimeoutMessages(disabledPage, monitorProductUrl);
+  assert.equal(timeoutMsgs.length, 1, 'SC-3 disabled-atc cross: wait timeout sends NAV_FAILED');
+  const timeoutMsg = timeoutMsgs[0];
+  assert.equal(timeoutMsg.url, monitorProductUrl, 'SC-3 disabled-atc cross: NAV_FAILED uses monitor productUrl');
+  assert.notEqual(
+    normalizeProductUrl(timeoutMsg.url),
+    normTabUrl,
+    'SC-3 disabled-atc cross: NAV_FAILED must not key tab URL'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, timeoutMsg);
+  assert.equal(inQueueUrls.size, 0, 'SC-3 disabled-atc cross: must not arm sacred lock');
+  assert.ok(!inQueueUrls.has(normTabUrl), 'SC-3 disabled-atc cross: tab URL must not be sacred lock key');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-3 disabled-atc cross: releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'SC-3 disabled-atc cross: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+}
+
+/**
  * SC-3: disabled ATC wait timeout → poll recovery rearm — no sacred lock.
  * Parity with FIX-3 sc3-poll-recovery-rearm (fixture-e2e has browser coverage).
  */
@@ -2561,7 +2617,7 @@ function testSc3DisabledAtcCrossPagePollRecovery() {
     ],
   });
 
-  const navFail = scInvisibleAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
+  const navFail = scDisabledAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
   assert.ok(navFail, 'SC-3 disabled-atc cross: sends SAMS_NAV_FAILED');
   assert.equal(navFail.url, monitorProductUrl, 'SC-3 disabled-atc cross: NAV_FAILED uses monitor productUrl');
   assert.notEqual(normalizeProductUrl(navFail.url), normTabUrl, 'SC-3 disabled-atc cross: NAV_FAILED must not key tab URL');
@@ -2626,7 +2682,7 @@ function runSc3DisabledAtcCrossLivePollCycleTests() {
   let atcTimeoutCycles = 0;
   const simulateDisabledAtcTimeout = () => {
     atcTimeoutCycles += 1;
-    const msgs = scInvisibleAtcTimeoutMessages(disabledPage, monitorProductUrl);
+    const msgs = scDisabledAtcTimeoutMessages(disabledPage, monitorProductUrl);
     assert.equal(msgs.length, 1, 'SC-3: cross-page disabled-atc live poll sends NAV_FAILED');
     assert.equal(msgs[0].url, monitorProductUrl, 'SC-3: cross-page disabled-atc NAV_FAILED uses monitor productUrl');
     assert.notEqual(normalizeProductUrl(msgs[0].url), normTabUrl, 'SC-3: cross-page disabled-atc NAV_FAILED must not key tab URL');
@@ -2691,7 +2747,7 @@ function runSc3DisabledAtcRepeatedNavFailedTests() {
     ],
   });
 
-  const initialMsg = scInvisibleAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
+  const initialMsg = scDisabledAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
   assert.ok(initialMsg, 'SC-3 disabled-atc repeated: initial NAV_FAILED message');
   assert.equal(initialMsg.url, monitorProductUrl, 'SC-3 disabled-atc repeated: keys monitor productUrl');
 
@@ -2741,7 +2797,7 @@ function runSc3DisabledAtcCrossRepeatedNavFailedTests() {
     ],
   });
 
-  const initialMsg = scInvisibleAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
+  const initialMsg = scDisabledAtcTimeoutMessages(disabledPage, monitorProductUrl)[0];
   assert.ok(initialMsg, 'SC-3 disabled-atc cross repeated: initial NAV_FAILED message');
   assert.equal(initialMsg.url, monitorProductUrl, 'SC-3 disabled-atc cross repeated: keys monitor productUrl');
   assert.notEqual(normalizeProductUrl(initialMsg.url), normTabUrl, 'SC-3 disabled-atc cross repeated: must not key tab URL');
@@ -4478,6 +4534,7 @@ function main() {
   testSc3ProductPageNavigateCartFallback();
   runSc3PollRecoveryRearmTests();
   runSc3DisabledAtcElementTests();
+  runSc3DisabledAtcCrossElementTests();
   runSc3DisabledAtcLivePollCycleTests();
   testSc3DisabledAtcCrossPagePollRecovery();
   runSc3DisabledAtcCrossLivePollCycleTests();
@@ -4528,7 +4585,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, cross-page review poll recovery, cross-page review live poll cycle, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc live poll cycle, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, cross-page invisible-atc poll recovery, cross-page invisible-atc live poll cycle, cross-page invisible-atc repeated NAV_FAILED, cross-page restock poll recovery, cross-page restock live poll cycle, cross-page restock repeated NAV_FAILED, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, cross-page review poll recovery, cross-page review live poll cycle, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc cross element, SC-3 disabled-atc live poll cycle, cross-page disabled-atc poll recovery, cross-page disabled-atc live poll cycle, cross-page disabled-atc repeated NAV_FAILED, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, cross-page invisible-atc poll recovery, cross-page invisible-atc live poll cycle, cross-page invisible-atc repeated NAV_FAILED, cross-page restock poll recovery, cross-page restock live poll cycle, cross-page restock repeated NAV_FAILED, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
