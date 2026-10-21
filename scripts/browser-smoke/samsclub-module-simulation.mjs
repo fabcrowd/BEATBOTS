@@ -3474,6 +3474,57 @@ function runSc6InvisibleAtcElementTests() {
 }
 
 /**
+ * SC-6: cross-page invisible ATC element — timeout keys monitor productUrl, not tab pathname.
+ * Parity with FIX-3 sc6-invisible-atc-cross on /p/mock-fcfs-invisible-atc-cross/803 (fixture-e2e has browser coverage).
+ */
+function runSc6InvisibleAtcCrossElementTests() {
+  assert.match(SC_SRC, /data-tch-atc-wait-ms/, 'SC-6 invisible-atc cross: fixture wait override in source');
+  assert.match(SC_SRC, /scIsVisible/, 'SC-6 invisible-atc cross: visibility check in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802';
+  const tabProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabProductUrl);
+
+  const invisiblePage = makePage({
+    pathname: '/p/mock-fcfs-invisible-atc-cross/803',
+    elements: [
+      {
+        selectors: ['button[data-automation-id="add-to-cart-btn"]'],
+        text: 'Add to cart',
+        disabled: false,
+        visible: false,
+      },
+    ],
+    docAttrs: {
+      'data-tch-fixture': 'samsclub-product-fcfs-invisible-atc-cross',
+      'data-tch-atc-wait-ms': '750',
+    },
+  });
+
+  const timeoutMsgs = scInvisibleAtcTimeoutMessages(invisiblePage, monitorProductUrl);
+  assert.equal(timeoutMsgs.length, 1, 'SC-6 invisible-atc cross: wait timeout sends NAV_FAILED');
+  const timeoutMsg = timeoutMsgs[0];
+  assert.equal(timeoutMsg.url, monitorProductUrl, 'SC-6 invisible-atc cross: NAV_FAILED uses monitor productUrl');
+  assert.notEqual(
+    normalizeProductUrl(timeoutMsg.url),
+    normTabUrl,
+    'SC-6 invisible-atc cross: NAV_FAILED must not key tab URL'
+  );
+
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
+  bgApplyNavFailed(navigationLock, inQueueUrls, timeoutMsg);
+  assert.equal(inQueueUrls.size, 0, 'SC-6 invisible-atc cross: must not arm sacred lock');
+  assert.ok(!inQueueUrls.has(normTabUrl), 'SC-6 invisible-atc cross: tab URL must not be sacred lock key');
+  assert.ok(!navigationLock.has(normMonitorUrl), 'SC-6 invisible-atc cross: releases navigationLock');
+  assert.ok(
+    !bgPollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    'SC-6 invisible-atc cross: poll may retry after NAV_FAILED (no sacred lock)'
+  );
+}
+
+/**
  * SC-6: invisible-ATC product page live poll cycle — reload + repeated NAV_FAILED during poll, no sacred lock.
  * Parity with FIX-3 sc5-sc6-live-poll-cycle on /p/mock-fcfs-invisible-atc/791 (fixture-e2e has browser coverage).
  */
@@ -4551,6 +4602,7 @@ function main() {
   runSc6RepeatedNavFailedTests();
   runSc6RestockElementTests();
   runSc6InvisibleAtcElementTests();
+  runSc6InvisibleAtcCrossElementTests();
   runSc6InvisibleAtcLivePollCycleTests();
   runSc6InvisibleAtcCrossLivePollCycleTests();
   runSc6InvisibleAtcCrossRepeatedNavFailedTests();
@@ -4585,7 +4637,7 @@ function main() {
   runSc6CartRepeatedNavFailedTests();
   runSc6CartCrossLivePollCycleTests();
   console.log(
-    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, cross-page review poll recovery, cross-page review live poll cycle, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc cross element, SC-3 disabled-atc live poll cycle, cross-page disabled-atc poll recovery, cross-page disabled-atc live poll cycle, cross-page disabled-atc repeated NAV_FAILED, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc live poll cycle, cross-page invisible-atc poll recovery, cross-page invisible-atc live poll cycle, cross-page invisible-atc repeated NAV_FAILED, cross-page restock poll recovery, cross-page restock live poll cycle, cross-page restock repeated NAV_FAILED, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
+    "samsclub-module-simulation PASS (SC-1 + SC-2 + SC-3 + SC-4 + SC-5 + SC-6): hosts, manifest, FCFS cart→checkout, SC-2 cart element, SC-2 cart live poll cycle, SC-2 cart checkout-missing element, SC-2 cart checkout-missing cross element, SC-2 cart poll recovery rearm, SC-2 cart cross poll recovery rearm, SC-2 cart repeated NAV_FAILED, SC-2 cart cross repeated NAV_FAILED, SC-4 checkout review element, SC-4 checkout review cross element, cross-page review poll recovery, cross-page review live poll cycle, checkout review, shipping-payment-review SPA happy path, product-page ATC, SC-3 poll recovery rearm, SC-3 disabled-atc element, SC-3 disabled-atc cross element, SC-3 disabled-atc live poll cycle, cross-page disabled-atc poll recovery, cross-page disabled-atc live poll cycle, cross-page disabled-atc repeated NAV_FAILED, SC-4 checkout SPA timeout + poll recovery rearm + live poll cycle + repeated NAV_FAILED + cross-page checkout SPA repeated NAV_FAILED, SC-5 FCFS element, SC-5 repeated ATC success, SC-5/SC-6 live poll cycle, SC-6 poll recovery rearm, SC-6 repeated NAV_FAILED, restock element, invisible-atc element, invisible-atc cross element, invisible-atc live poll cycle, cross-page invisible-atc poll recovery, cross-page invisible-atc live poll cycle, cross-page invisible-atc repeated NAV_FAILED, cross-page restock poll recovery, cross-page restock live poll cycle, cross-page restock repeated NAV_FAILED, restock live poll cycle, cart poll recovery, cross-page cart poll recovery, cart repeated NAV_FAILED, cross-page cart repeated NAV_FAILED, cross-page checkout SPA poll recovery, no sacred lock, error-path hardening, checkout SPA live poll cycle, cross-page checkout SPA live poll cycle, cart live poll cycle, cross-page cart live poll cycle"
   );
 }
 
