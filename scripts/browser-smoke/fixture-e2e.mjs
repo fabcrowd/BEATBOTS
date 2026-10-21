@@ -631,7 +631,10 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
     );
   }
 
-  if (invariants.includes('wm4-qp-no-producturl')) {
+  if (
+    invariants.includes('wm4-qp-no-producturl') &&
+    !invariants.includes('wm4-qp-cross-live-poll-cycle')
+  ) {
     assert.ok(
       logs.some((l) => l.includes('no productUrl in settings')),
       `FIX-3 WM-4: /qp without monitor must warn about missing productUrl on ${pageUrl}, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
@@ -3517,6 +3520,21 @@ async function main() {
 
     if (route.invariants?.includes('wm5-pre-timeout-live-poll-cycle')) {
       await assertWm5PreTimeoutLivePollCycle(popup, route, page, port, logs);
+    }
+
+    if (
+      route.invariants?.includes('wm4-qp-no-producturl') &&
+      route.invariants?.includes('wm4-qp-cross-live-poll-cycle')
+    ) {
+      await new Promise((r) => setTimeout(r, routeWaitMs(route)));
+      assert.ok(
+        logs.some((l) => l.includes('no productUrl in settings')),
+        `FIX-3 WM-4: /qp without monitor must warn about missing productUrl on ${url} before cross live poll, got: ${logs.slice(0, 10).join(' | ') || '(none)'}`
+      );
+      assert.ok(
+        logs.some((l) => l.includes('/qp waiting room detected')),
+        `FIX-3 WM-4: expected /qp waiting room log on ${url} before cross live poll`
+      );
     }
 
     if (
