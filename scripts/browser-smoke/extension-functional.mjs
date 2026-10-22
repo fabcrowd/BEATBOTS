@@ -4160,7 +4160,7 @@ function runSc6InvisibleAtcLivePollCycleOfflineTests() {
 }
 
 /**
- * FIX-3 parity for sc6-restock-live-poll-cycle on /p/mock-fcfs-restock/790 and cross-page restock.
+ * FIX-3 parity for sc6-restock-live-poll-cycle on /p/mock-fcfs-restock/790 named tag.
  * Sam's Club SC-6: restock (disabled ATC) reload + repeated NAV_FAILED during live poll, no sacred lock.
  */
 function runSc6RestockLivePollCycleOfflineTests() {
@@ -4184,15 +4184,6 @@ function runSc6RestockLivePollCycleOfflineTests() {
     restockFixture,
     /data-tch-fixture="samsclub-product-fcfs-restock"/,
     'sc6-restock-live-poll-cycle: fixture marker'
-  );
-  const restockCrossFixture = fs.readFileSync(
-    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-restock-cross.html'),
-    'utf8'
-  );
-  assert.match(
-    restockCrossFixture,
-    /data-tch-fixture="samsclub-product-fcfs-restock-cross"/,
-    'sc6-restock-cross-live-poll-cycle: cross-page fixture marker'
   );
 
   const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-restock/790';
@@ -4241,6 +4232,22 @@ function runSc6RestockLivePollCycleOfflineTests() {
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'sc6-restock-live-poll-cycle: contrast WM-4 — sacred lock would block poll; restock wait does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc6-restock-cross-live-poll-cycle on /p/mock-fcfs-restock-cross/807 named tag.
+ * Sam's Club SC-6: cross-page restock reload + repeated NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
+ */
+function runSc6RestockCrossLivePollCycleOfflineTests() {
+  const restockCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-restock-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    restockCrossFixture,
+    /data-tch-fixture="samsclub-product-fcfs-restock-cross"/,
+    'sc6-restock-cross-live-poll-cycle: cross-page fixture marker'
   );
 
   const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-restock-cross-monitor/806';
@@ -5957,6 +5964,7 @@ async function main() {
   runSc6RestockElementOfflineTests();
   runSc6InvisibleAtcLivePollCycleOfflineTests();
   runSc6RestockLivePollCycleOfflineTests();
+  runSc6RestockCrossLivePollCycleOfflineTests();
   runSc5RepeatedAtcSuccessElementOfflineTests();
   runSc4ManualReviewElementOfflineTests();
   runSc4ShippingPaymentReviewElementOfflineTests();
