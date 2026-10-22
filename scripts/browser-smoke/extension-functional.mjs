@@ -4095,7 +4095,13 @@ function runSc6InvisibleAtcLivePollCycleOfflineTests() {
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'sc6-invisible-atc-live-poll-cycle: contrast WM-5 — sacred lock would block poll; invisible ATC does not arm it'
   );
+}
 
+/**
+ * FIX-3 parity for sc6-invisible-atc-cross-live-poll-cycle on /p/mock-fcfs-invisible-atc-cross/803 named tag.
+ * Sam's Club SC-6: cross-page invisible ATC reload + repeated SAMS_NAV_FAILED during live poll, no sacred lock.
+ */
+function runSc6InvisibleAtcCrossLivePollCycleOfflineTests() {
   const invisibleCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-invisible-atc-cross.html'),
     'utf8'
@@ -5963,6 +5969,7 @@ async function main() {
   runSc6InvisibleAtcElementOfflineTests();
   runSc6RestockElementOfflineTests();
   runSc6InvisibleAtcLivePollCycleOfflineTests();
+  runSc6InvisibleAtcCrossLivePollCycleOfflineTests();
   runSc6RestockLivePollCycleOfflineTests();
   runSc6RestockCrossLivePollCycleOfflineTests();
   runSc5RepeatedAtcSuccessElementOfflineTests();
