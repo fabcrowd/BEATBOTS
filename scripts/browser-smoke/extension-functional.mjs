@@ -5238,6 +5238,132 @@ function runSc6DisabledAtcCrossRepeatedNavFailedOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc6-cart-live-poll-cycle on /cart/no-checkout-cross named tag.
+ * Sam's Club SC-6: cross-page cart checkout-missing reload + repeated SAMS_NAV_FAILED during live poll, no sacred lock.
+ */
+function runSc6CartCrossLivePollCycleOfflineTests() {
+  const cartCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-cart-no-checkout-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    cartCrossFixture,
+    /data-tch-fixture="samsclub-cart-no-checkout-cross"/,
+    'sc6-cart-cross-live-poll-cycle: cross-page fixture marker'
+  );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.samsclub.com/cart/no-checkout-cross');
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+  const crossLiveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+
+  assert.equal(crossInQueue.size, 0, 'sc6-cart-cross-live-poll-cycle: must not arm sacred lock on start');
+  assert.ok(!crossInQueue.has(normCrossTab), 'sc6-cart-cross-live-poll-cycle: tab URL must not be sacred lock key');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc6-cart-cross-live-poll-cycle: monitor URL differs from tab');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc6-cart-cross-live-poll-cycle: timeout must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-cart-cross-live-poll-cycle: timeout releases navigationLock');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc6-cart-cross-live-poll-cycle: reload must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-cart-cross-live-poll-cycle: reload timeout releases navigationLock');
+
+  for (let i = 0; i < crossLiveSignalTypes.length; i++) {
+    const sig = crossLiveSignalTypes[i];
+    crossNavLock.add(normCrossMonitor);
+    if (sig === 'ATC_SUCCESS') {
+      applyAtcSuccess(crossNavLock, crossInQueue, { type: 'ATC_SUCCESS', url: crossMonitor });
+    } else {
+      applyNavFailed(crossNavLock, crossInQueue, { type: sig, url: crossMonitor });
+    }
+    assert.equal(
+      crossInQueue.size,
+      0,
+      `sc6-cart-cross-live-poll-cycle cycle ${i + 1} must not arm inQueueUrls after ${sig}`
+    );
+    assert.ok(
+      !crossInQueue.has(normCrossTab),
+      `sc6-cart-cross-live-poll-cycle cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+    );
+    if (crossNavLock.has(normCrossMonitor)) {
+      assert.ok(
+        !crossInQueue.has(normCrossMonitor),
+        `sc6-cart-cross-live-poll-cycle cycle ${i + 1} navigationLock alone must not imply sacred lock after ${sig}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, crossInQueue, crossNavLock),
+      `sc6-cart-cross-live-poll-cycle cycle ${i + 1} allows poll retry after ${sig} (no sacred lock)`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'sc6-cart-cross-live-poll-cycle: contrast WM-5 — sacred lock would block poll; cart checkout-missing does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc6-repeated-nav-failed on /cart/no-checkout-cross named tag.
+ * Sam's Club SC-6: cross-page cart checkout-missing repeated SAMS_NAV_FAILED, no sacred lock.
+ */
+function runSc6CartCrossRepeatedNavFailedOfflineTests() {
+  const cartCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-cart-no-checkout-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    cartCrossFixture,
+    /data-tch-fixture="samsclub-cart-no-checkout-cross"/,
+    'sc6-cart-cross-repeated-nav-failed: cross-page fixture marker'
+  );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.samsclub.com/cart/no-checkout-cross');
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normCrossMonitor]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `sc6-cart-cross-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normCrossMonitor),
+      `sc6-cart-cross-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, inQueueUrls, navigationLock),
+      `sc6-cart-cross-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normCrossMonitor,
+      normCrossTab,
+      `sc6-cart-cross-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCrossTab),
+      `sc6-cart-cross-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'sc6-cart-cross-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; cart checkout-missing does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc4-live-poll-cycle named tag.
  * Sam's Club SC-4: checkout review reload + SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
  */
@@ -5396,11 +5522,6 @@ function runSc6RepeatedNavFailedOfflineTests() {
       tabUrl: 'https://www.samsclub.com/cart/no-checkout',
     },
     {
-      label: 'cross-page cart checkout-missing (sc6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
-      tabUrl: 'https://www.samsclub.com/cart/no-checkout-cross',
-    },
-    {
       label: 'checkout SPA timeout (sc4-repeated-nav-failed)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-checkout-spa-stall/793',
       tabUrl: 'https://www.samsclub.com/checkout/spa-stall',
@@ -5504,11 +5625,6 @@ function runSc6LivePollCycleOfflineTests() {
       label: 'cart checkout-missing (sc6-cart-live-poll-cycle)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
       tabUrl: 'https://www.samsclub.com/cart/no-checkout',
-    },
-    {
-      label: 'cross-page cart checkout-missing (sc6-cart-live-poll-cycle)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
-      tabUrl: 'https://www.samsclub.com/cart/no-checkout-cross',
     },
     {
       label: 'checkout SPA timeout (sc6-checkout-spa-live-poll-cycle)',
@@ -6124,6 +6240,8 @@ async function main() {
   runSc3DisabledAtcLivePollCycleOfflineTests();
   runSc3DisabledAtcCrossLivePollCycleOfflineTests();
   runSc6DisabledAtcCrossRepeatedNavFailedOfflineTests();
+  runSc6CartCrossLivePollCycleOfflineTests();
+  runSc6CartCrossRepeatedNavFailedOfflineTests();
   runSc4LivePollCycleOfflineTests();
   runSc6RepeatedNavFailedOfflineTests();
   runSc6LivePollCycleOfflineTests();
@@ -6482,7 +6600,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-missing-atc-element + wm6-price-guard-timeout + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc3-disabled-atc-cross + sc6-restock + sc6-restock-cross + sc6-restock-live-poll-cycle + sc6-restock-cross-live-poll-cycle + sc6-restock-cross-repeated-nav-failed + sc6-invisible-atc + sc6-invisible-atc-cross + sc6-invisible-atc-live-poll-cycle + sc6-invisible-atc-cross-live-poll-cycle + sc6-invisible-atc-cross-repeated-nav-failed + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc3-disabled-atc-cross-live-poll-cycle + sc6-disabled-atc-cross-repeated-nav-failed + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-missing-atc-element + wm6-price-guard-timeout + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc3-disabled-atc-cross + sc6-restock + sc6-restock-cross + sc6-restock-live-poll-cycle + sc6-restock-cross-live-poll-cycle + sc6-restock-cross-repeated-nav-failed + sc6-invisible-atc + sc6-invisible-atc-cross + sc6-invisible-atc-live-poll-cycle + sc6-invisible-atc-cross-live-poll-cycle + sc6-invisible-atc-cross-repeated-nav-failed + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc3-disabled-atc-cross-live-poll-cycle + sc6-disabled-atc-cross-repeated-nav-failed + sc6-cart-cross-live-poll-cycle + sc6-cart-cross-repeated-nav-failed + sc4-live-poll-cycle + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
   );
 }
 
