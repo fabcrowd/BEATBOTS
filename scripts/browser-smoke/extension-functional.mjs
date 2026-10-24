@@ -2259,6 +2259,65 @@ function runWm6LivePollCycleOfflineTests() {
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
     assertWm6LivePollCycle(monitorProductUrl, label, tabUrl);
   }
+
+  assert.match(
+    walmartSrc,
+    /ATC button not found or disabled/,
+    'wm6-no-atc-cross live poll: missing ATC user-facing log in source'
+  );
+  assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-no-atc-cross live poll: ATC wait helper in source');
+
+  const crossMonitor = 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.walmart.com/ip/mock-no-atc-cross/998');
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+  const crossNavFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+  assert.equal(crossInQueue.size, 0, 'wm6-no-atc-cross live poll: must not arm sacred lock on start');
+  assert.ok(!crossInQueue.has(normCrossTab), 'wm6-no-atc-cross live poll: tab URL must not be sacred lock key');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'wm6-no-atc-cross live poll: monitor URL differs from tab');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'WALMART_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'wm6-no-atc-cross live poll: timeout must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'wm6-no-atc-cross live poll: timeout releases navigationLock');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'WALMART_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'wm6-no-atc-cross live poll: reload must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'wm6-no-atc-cross live poll: reload timeout releases navigationLock');
+
+  for (let i = 0; i < crossNavFailTypes.length; i++) {
+    const sig = crossNavFailTypes[i];
+    crossNavLock.add(normCrossMonitor);
+    applyNavFailed(crossNavLock, crossInQueue, { type: sig, url: crossMonitor });
+    assert.equal(
+      crossInQueue.size,
+      0,
+      `wm6-no-atc-cross live poll cycle ${i + 1} must not arm inQueueUrls after ${sig}`
+    );
+    assert.ok(
+      !crossInQueue.has(normCrossTab),
+      `wm6-no-atc-cross live poll cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+    );
+    if (crossNavLock.has(normCrossMonitor)) {
+      assert.ok(
+        !crossInQueue.has(normCrossMonitor),
+        `wm6-no-atc-cross live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${sig}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, crossInQueue, crossNavLock),
+      `wm6-no-atc-cross live poll cycle ${i + 1} allows poll retry after ${sig} (no sacred lock)`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'wm6-no-atc-cross live poll: contrast WM-5 — sacred lock would block poll; missing ATC wait does not arm it'
+  );
 }
 
 /**
@@ -2407,6 +2466,55 @@ function runWm6PollRecoveryRearmOfflineTests() {
   for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
     assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
   }
+
+  const crossMonitor = 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999';
+  const crossRecovery = 'https://www.walmart.com/ip/mock-no-atc-cross-recovery/1000';
+  const crossTab = 'https://www.walmart.com/ip/mock-no-atc-cross/998';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossRecovery = normalizeProductUrl(crossRecovery);
+  const normCrossTab = normalizeProductUrl(crossTab);
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'WALMART_NAV_FAILED', url: crossMonitor });
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'wm6-no-atc-cross-poll-recovery: NAV_FAILED releases monitor lock');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'wm6-no-atc-cross-poll-recovery: monitor URL differs from tab');
+  crossNavLock.add(normCrossRecovery);
+  assert.ok(
+    crossNavLock.has(normCrossRecovery),
+    'wm6-no-atc-cross-poll-recovery: poll recovery re-arms on recovery product'
+  );
+  assert.equal(crossInQueue.size, 0, 'wm6-no-atc-cross-poll-recovery: must not arm sacred lock');
+  assert.ok(
+    !crossInQueue.has(normCrossTab),
+    'wm6-no-atc-cross-poll-recovery: tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !crossInQueue.has(normCrossRecovery),
+    'wm6-no-atc-cross-poll-recovery: recovery product must not be in sacred lock'
+  );
+
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'WALMART_NAV_FAILED', url: crossRecovery });
+  assert.ok(
+    !crossNavLock.has(normCrossRecovery),
+    'wm6-no-atc-cross-poll-recovery: repeated NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(
+    crossInQueue.size,
+    0,
+    'wm6-no-atc-cross-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normCrossRecovery, crossInQueue, crossNavLock),
+    'wm6-no-atc-cross-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const crossWmSacredLock = new Set([normCrossRecovery]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossRecovery, crossWmSacredLock, new Set()),
+    'wm6-no-atc-cross-poll-recovery: contrast WM-5 — sacred lock would block poll; missing ATC wait does not arm it'
+  );
 }
 
 /**
@@ -4038,6 +4146,55 @@ function runSc6RestockElementOfflineTests() {
     'https://www.samsclub.com/p/mock-fcfs-restock-cross/807',
     'cross-page restock (sc6-restock-cross)'
   );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802';
+  const crossRecovery = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-recovery/804';
+  const crossTab = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossRecovery = normalizeProductUrl(crossRecovery);
+  const normCrossTab = normalizeProductUrl(crossTab);
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-invisible-atc-cross-poll-recovery: NAV_FAILED releases monitor lock');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc6-invisible-atc-cross-poll-recovery: monitor URL differs from tab');
+  crossNavLock.add(normCrossRecovery);
+  assert.ok(
+    crossNavLock.has(normCrossRecovery),
+    'sc6-invisible-atc-cross-poll-recovery: poll recovery re-arms on recovery product'
+  );
+  assert.equal(crossInQueue.size, 0, 'sc6-invisible-atc-cross-poll-recovery: must not arm sacred lock');
+  assert.ok(
+    !crossInQueue.has(normCrossTab),
+    'sc6-invisible-atc-cross-poll-recovery: tab URL must not be sacred lock key'
+  );
+  assert.ok(
+    !crossInQueue.has(normCrossRecovery),
+    'sc6-invisible-atc-cross-poll-recovery: recovery product must not be in sacred lock'
+  );
+
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossRecovery });
+  assert.ok(
+    !crossNavLock.has(normCrossRecovery),
+    'sc6-invisible-atc-cross-poll-recovery: repeated NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(
+    crossInQueue.size,
+    0,
+    'sc6-invisible-atc-cross-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock'
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normCrossRecovery, crossInQueue, crossNavLock),
+    'sc6-invisible-atc-cross-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const crossWmSacredLock = new Set([normCrossRecovery]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossRecovery, crossWmSacredLock, new Set()),
+    'sc6-invisible-atc-cross-poll-recovery: contrast WM-5 — sacred lock would block poll; invisible ATC wait does not arm it'
+  );
 }
 
 /**
@@ -4094,6 +4251,62 @@ function runSc6InvisibleAtcLivePollCycleOfflineTests() {
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
     'sc6-invisible-atc-live-poll-cycle: contrast WM-5 — sacred lock would block poll; invisible ATC does not arm it'
+  );
+
+  const crossMonitor = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803');
+  const crossInQueue = new Set();
+  const crossNavLock = new Set();
+  const crossLiveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
+
+  assert.equal(crossInQueue.size, 0, 'sc6-invisible-atc-cross live poll: must not arm sacred lock on start');
+  assert.ok(!crossInQueue.has(normCrossTab), 'sc6-invisible-atc-cross live poll: tab URL must not be sacred lock key');
+  assert.notEqual(normCrossMonitor, normCrossTab, 'sc6-invisible-atc-cross live poll: monitor URL differs from tab');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc6-invisible-atc-cross live poll: timeout must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-invisible-atc-cross live poll: timeout releases navigationLock');
+
+  crossNavLock.add(normCrossMonitor);
+  applyNavFailed(crossNavLock, crossInQueue, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
+  assert.equal(crossInQueue.size, 0, 'sc6-invisible-atc-cross live poll: reload must not arm sacred lock');
+  assert.ok(!crossNavLock.has(normCrossMonitor), 'sc6-invisible-atc-cross live poll: reload timeout releases navigationLock');
+
+  for (let i = 0; i < crossLiveSignalTypes.length; i++) {
+    const sig = crossLiveSignalTypes[i];
+    crossNavLock.add(normCrossMonitor);
+    if (sig === 'ATC_SUCCESS') {
+      applyAtcSuccess(crossNavLock, crossInQueue, { type: 'ATC_SUCCESS', url: crossMonitor });
+    } else {
+      applyNavFailed(crossNavLock, crossInQueue, { type: sig, url: crossMonitor });
+    }
+    assert.equal(
+      crossInQueue.size,
+      0,
+      `sc6-invisible-atc-cross live poll cycle ${i + 1} must not arm inQueueUrls after ${sig}`
+    );
+    assert.ok(
+      !crossInQueue.has(normCrossTab),
+      `sc6-invisible-atc-cross live poll cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+    );
+    if (crossNavLock.has(normCrossMonitor)) {
+      assert.ok(
+        !crossInQueue.has(normCrossMonitor),
+        `sc6-invisible-atc-cross live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${sig}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, crossInQueue, crossNavLock),
+      `sc6-invisible-atc-cross live poll cycle ${i + 1} allows poll retry after ${sig} (no sacred lock)`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'sc6-invisible-atc-cross live poll: contrast WM-5 — sacred lock would block poll; invisible ATC wait does not arm it'
   );
 }
 
