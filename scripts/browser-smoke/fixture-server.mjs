@@ -374,7 +374,8 @@ export const FIXTURE_E2E_ROUTES = [
     file: MOCK_URLS.walmartQpRoom,
     initLog: '[WMT] init',
     journey: 'WM-4',
-    invariants: ['no-sacred-lock', 'wm4-qp-no-producturl', 'wm4-qp-cross-live-poll-cycle'],
+    // wm4-qp-no-producturl is asserted on /qp/waiting-room; cross live poll arms monitor productUrl before FIX-3 asserts run.
+    invariants: ['no-sacred-lock', 'wm4-qp-cross-live-poll-cycle'],
     crossMonitorProductPath: '/ip/mock-wm4-qp-cross-monitor/112',
   },
   {
