@@ -4857,6 +4857,76 @@ function runSc6CheckoutSpaCrossRepeatedNavFailedOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc6-poll-recovery-rearm on cart (same-page tab) named tag.
+ * Sam's Club SC-6: cart checkout-missing SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
+ */
+function runSc6CartPollRecoveryRearmOfflineTests() {
+  const cartFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-cart-no-checkout.html'),
+    'utf8'
+  );
+  assert.match(
+    cartFixture,
+    /data-tch-fixture="samsclub-cart-no-checkout"/,
+    'sc6-cart-poll-recovery: cart checkout-missing fixture marker'
+  );
+
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc6-cart-poll-recovery: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.match(samsSrc, /Checkout button not found/, 'sc6-cart-poll-recovery: cart checkout-missing log in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792';
+  const recoveryProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
+  const tabUrl = 'https://www.samsclub.com/cart/no-checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc6-cart-poll-recovery: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-cart-poll-recovery: NAV_FAILED releases navigationLock on monitor product');
+  assert.equal(inQueueUrls.size, 0, 'sc6-cart-poll-recovery: NAV_FAILED must not arm sacred lock');
+  assert.notEqual(normMonitorUrl, normTabUrl, 'sc6-cart-poll-recovery: monitor productUrl must differ from tab URL');
+  assert.ok(!inQueueUrls.has(normTabUrl), 'sc6-cart-poll-recovery: tab URL must not be sacred lock key');
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'sc6-cart-poll-recovery: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc6-cart-poll-recovery: poll recovery must not arm sacred lock');
+  assert.ok(!inQueueUrls.has(normRecoveryUrl), 'sc6-cart-poll-recovery: recovery product must not be in sacred lock');
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'sc6-cart-poll-recovery: NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc6-cart-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+    'sc6-cart-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normRecoveryUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+    'sc6-cart-poll-recovery: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc6-cart-cross-poll-recovery named tag.
  * Sam's Club SC-6: cross-page cart checkout-missing SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
  */
@@ -6506,7 +6576,7 @@ function runSc4PollRecoveryRearmOfflineTests() {
 }
 
 /**
- * FIX-3 parity for sc6-poll-recovery-rearm named tag.
+ * FIX-3 parity for sc6-poll-recovery-rearm named tag (restock + invisible ATC; cart has dedicated runner).
  * Sam's Club FCFS error-path SAMS_NAV_FAILED → poll re-arms navigationLock (no sacred lock).
  */
 function runSc6PollRecoveryRearmOfflineTests() {
@@ -6574,12 +6644,6 @@ function runSc6PollRecoveryRearmOfflineTests() {
       label: 'invisible ATC (sc6-poll-recovery-rearm)',
       monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
       recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
-    },
-    {
-      label: 'cart checkout-missing (sc6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
-      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
-      tabUrl: 'https://www.samsclub.com/cart/no-checkout',
     },
   ];
 
@@ -7053,6 +7117,7 @@ async function main() {
   runSc6CheckoutSpaLivePollCycleOfflineTests();
   runSc6CheckoutSpaCrossLivePollCycleOfflineTests();
   runSc6CheckoutSpaCrossRepeatedNavFailedOfflineTests();
+  runSc6CartPollRecoveryRearmOfflineTests();
   runSc6CartCrossPollRecoveryRearmOfflineTests();
   runSc6InvisibleAtcCrossPollRecoveryRearmOfflineTests();
   runSc6RestockCrossPollRecoveryRearmOfflineTests();
