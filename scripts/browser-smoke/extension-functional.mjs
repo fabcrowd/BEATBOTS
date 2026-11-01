@@ -4927,6 +4927,138 @@ function runSc6CartPollRecoveryRearmOfflineTests() {
 }
 
 /**
+ * FIX-3 parity for sc6-poll-recovery-rearm on restock (same-page) named tag.
+ * Sam's Club SC-6: FCFS restock wait SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
+ */
+function runSc6RestockPollRecoveryRearmOfflineTests() {
+  const restockFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-restock.html'),
+    'utf8'
+  );
+  assert.match(
+    restockFixture,
+    /data-tch-fixture="samsclub-product-fcfs-restock"/,
+    'sc6-restock-poll-recovery: restock fixture marker'
+  );
+
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc6-restock-poll-recovery: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.match(samsSrc, /FCFS restock wait/, 'sc6-restock-poll-recovery: restock wait log in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-restock/790';
+  const recoveryProductUrl = monitorProductUrl;
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-poll-recovery: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-restock-poll-recovery: NAV_FAILED releases navigationLock on monitor product');
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-poll-recovery: NAV_FAILED must not arm sacred lock');
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'sc6-restock-poll-recovery: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-poll-recovery: poll recovery must not arm sacred lock');
+  assert.ok(!inQueueUrls.has(normRecoveryUrl), 'sc6-restock-poll-recovery: recovery product must not be in sacred lock');
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'sc6-restock-poll-recovery: NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc6-restock-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+    'sc6-restock-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normRecoveryUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+    'sc6-restock-poll-recovery: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for sc6-poll-recovery-rearm on invisible ATC (same-page) named tag.
+ * Sam's Club SC-6: invisible ATC wait SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
+ */
+function runSc6InvisibleAtcPollRecoveryRearmOfflineTests() {
+  const invisibleFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-invisible-atc.html'),
+    'utf8'
+  );
+  assert.match(
+    invisibleFixture,
+    /data-tch-fixture="samsclub-product-fcfs-invisible-atc"/,
+    'sc6-invisible-atc-poll-recovery: invisible ATC fixture marker'
+  );
+
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc6-invisible-atc-poll-recovery: timeout uses settings.productUrl for poll recovery'
+  );
+  assert.match(samsSrc, /scIsVisible/, 'sc6-invisible-atc-poll-recovery: visibility check in source');
+
+  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
+  const recoveryProductUrl = monitorProductUrl;
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, 'sc6-invisible-atc-poll-recovery: must not arm sacred lock on start');
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), 'sc6-invisible-atc-poll-recovery: NAV_FAILED releases navigationLock on monitor product');
+  assert.equal(inQueueUrls.size, 0, 'sc6-invisible-atc-poll-recovery: NAV_FAILED must not arm sacred lock');
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    'sc6-invisible-atc-poll-recovery: poll recovery re-arms navigationLock on recovery product'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc6-invisible-atc-poll-recovery: poll recovery must not arm sacred lock');
+  assert.ok(!inQueueUrls.has(normRecoveryUrl), 'sc6-invisible-atc-poll-recovery: recovery product must not be in sacred lock');
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    'sc6-invisible-atc-poll-recovery: NAV_FAILED during poll recovery releases recovery lock for retry'
+  );
+  assert.equal(inQueueUrls.size, 0, 'sc6-invisible-atc-poll-recovery: poll recovery NAV_FAILED must not arm sacred lock');
+  assert.ok(
+    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+    'sc6-invisible-atc-poll-recovery: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
+  );
+
+  const wmSacredLock = new Set([normRecoveryUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+    'sc6-invisible-atc-poll-recovery: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it'
+  );
+}
+
+/**
  * FIX-3 parity for sc6-cart-cross-poll-recovery named tag.
  * Sam's Club SC-6: cross-page cart checkout-missing SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
  */
@@ -6415,91 +6547,6 @@ function runSc6RepeatedNavFailedOfflineTests() {
 }
 
 /**
- * FIX-3 parity for sc5-sc6-live-poll-cycle and bundled FCFS live poll scenarios (not cart/checkout SPA named tags).
- * Sam's Club FCFS: reload + repeated SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
- */
-function runSc6LivePollCycleOfflineTests() {
-  const samsSrc = fs.readFileSync(
-    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
-    'utf8'
-  );
-  assert.match(samsSrc, /scAtcWaitTimeoutMs/, 'sc6-live-poll-cycle: ATC wait helper in source');
-  assert.match(samsSrc, /scCartCheckoutWaitMs/, 'sc6-live-poll-cycle: cart checkout wait helper in source');
-
-  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
-
-  function assertSc6LivePollCycle(monitorProductUrl, label, tabUrl) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-    if (normTabUrl) {
-      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
-    }
-
-    navigationLock.add(normMonitorUrl);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-    assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
-
-    for (let i = 0; i < liveSignalTypes.length; i++) {
-      navigationLock.add(normMonitorUrl);
-      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
-        applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
-      } else {
-        applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
-      }
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
-      );
-      if (navigationLock.has(normMonitorUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normMonitorUrl),
-          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label}: live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
-      );
-      if (normTabUrl) {
-        assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
-      }
-    }
-
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it`
-    );
-  }
-
-  const scenarios = [
-    {
-      label: 'restock (sc5-sc6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
-    },
-    {
-      label: 'invisible ATC (sc5-sc6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
-    },
-    {
-      label: 'cross-page invisible ATC (sc6-invisible-atc-live-poll-cycle)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross-monitor/802',
-      tabUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc-cross/803',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertSc6LivePollCycle(monitorProductUrl, label, tabUrl);
-  }
-}
-
-/**
  * FIX-3 parity for sc4-poll-recovery-rearm named tag.
  * Sam's Club SC-4: checkout SPA stall SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
  */
@@ -6573,83 +6620,6 @@ function runSc4PollRecoveryRearmOfflineTests() {
     pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
     'sc4-poll-recovery-rearm: contrast WM-5 — sacred lock would block poll; SC-4 checkout SPA timeout does not arm it'
   );
-}
-
-/**
- * FIX-3 parity for sc6-poll-recovery-rearm named tag (restock + invisible ATC; cart has dedicated runner).
- * Sam's Club FCFS error-path SAMS_NAV_FAILED → poll re-arms navigationLock (no sacred lock).
- */
-function runSc6PollRecoveryRearmOfflineTests() {
-  const samsSrc = fs.readFileSync(
-    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
-    'utf8'
-  );
-  assert.match(
-    samsSrc,
-    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
-    'sc6-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
-  );
-
-  function assertSc6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
-    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-
-    navigationLock.add(normMonitorUrl);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
-    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
-    if (normTabUrl) {
-      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
-      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
-    }
-
-    navigationLock.add(normRecoveryUrl);
-    assert.ok(
-      navigationLock.has(normRecoveryUrl),
-      `${label}: poll recovery re-arms navigationLock on recovery product`
-    );
-    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
-    assert.ok(!inQueueUrls.has(normRecoveryUrl), `${label}: recovery product must not be in sacred lock`);
-
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
-    assert.ok(
-      !navigationLock.has(normRecoveryUrl),
-      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
-    );
-    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
-    assert.ok(
-      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
-      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
-    );
-
-    const wmSacredLock = new Set([normRecoveryUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; SC-6 error path does not arm it`
-    );
-  }
-
-  const scenarios = [
-    {
-      label: 'restock (sc6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
-      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-restock/790',
-    },
-    {
-      label: 'invisible ATC (sc6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
-      recoveryProductUrl: 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
-    assertSc6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
-  }
 }
 
 /**
@@ -7118,6 +7088,8 @@ async function main() {
   runSc6CheckoutSpaCrossLivePollCycleOfflineTests();
   runSc6CheckoutSpaCrossRepeatedNavFailedOfflineTests();
   runSc6CartPollRecoveryRearmOfflineTests();
+  runSc6RestockPollRecoveryRearmOfflineTests();
+  runSc6InvisibleAtcPollRecoveryRearmOfflineTests();
   runSc6CartCrossPollRecoveryRearmOfflineTests();
   runSc6InvisibleAtcCrossPollRecoveryRearmOfflineTests();
   runSc6RestockCrossPollRecoveryRearmOfflineTests();
@@ -7142,8 +7114,6 @@ async function main() {
   runSc4LivePollCycleOfflineTests();
   runSc4PollRecoveryRearmOfflineTests();
   runSc6RepeatedNavFailedOfflineTests();
-  runSc6LivePollCycleOfflineTests();
-  runSc6PollRecoveryRearmOfflineTests();
   runMon2LivePollCycleOfflineTests();
   runMon2SamsclubLivePollCycleOfflineTests();
   runMon2WalmartLivePollCycleOfflineTests();
@@ -7498,7 +7468,7 @@ async function main() {
   assert.ok(tch.some((l) => l.includes('[TCH] init')), 'Target [TCH] init after popup save flow');
 
   console.log(
-    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-missing-atc-element + wm6-price-guard-timeout + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc3-disabled-atc-cross + sc6-restock + sc6-restock-cross + sc6-restock-live-poll-cycle + sc6-restock-cross-live-poll-cycle + sc6-restock-cross-repeated-nav-failed + sc6-cart-live-poll-cycle + sc6-cart-cross-live-poll-cycle + sc6-cart-cross-repeated-nav-failed + sc6-cart-cross-poll-recovery + sc6-invisible-atc-cross-poll-recovery + sc6-restock-cross-poll-recovery + sc6-checkout-spa-cross-poll-recovery + sc6-checkout-spa-live-poll-cycle + sc6-checkout-spa-cross-live-poll-cycle + sc6-checkout-spa-cross-repeated-nav-failed + sc4-review-cross-poll-recovery + sc4-review-cross-live-poll-cycle + sc4-review-cross-repeated-nav-failed + sc6-invisible-atc + sc6-invisible-atc-cross + sc6-invisible-atc-live-poll-cycle + sc6-invisible-atc-cross-live-poll-cycle + sc6-invisible-atc-cross-repeated-nav-failed + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc3-disabled-atc-cross-live-poll-cycle + sc3-disabled-atc-cross-poll-recovery + sc6-disabled-atc-cross-repeated-nav-failed + sc4-live-poll-cycle + sc4-poll-recovery-rearm + sc6-repeated-nav-failed + sc6-live-poll-cycle + sc6-poll-recovery-rearm + background messages + popup toggle/save + Target content script'
+    'FUNCTIONAL PASS: nav-failed-releases-lock + no-sacred-lock + sacred-lock + mon3-live-poll-cycle + wm4-no-producturl + wm5-sacred-survives-nav-failed + wm5-sacred-repeated-nav-failed + wm4-poll-recovery-rearm + wm5-poll-recovery-rearm + wm5-pre-timeout-live-poll-cycle + wm5-checkout-spa-timeout-clears-sacred-lock + wm5-checkout-spa-live-poll-cycle + wm5-checkout-spa-cross-live-poll-cycle + wm5-product-queue-cross-live-poll-cycle + wm4-qp-cross-live-poll-cycle + wm4-checkout-cross-live-poll-cycle + wm2-repeated-nav-failed + wm2-live-poll-cycle + wm6-repeated-nav-failed + wm6-live-poll-cycle + wm6-poll-recovery-rearm + wm6-cart-checkout-missing + wm6-missing-atc-element + wm6-price-guard-timeout + wm6-checkout-spa-timeout + px-timeout-nav-failed + px-timeout-ms-override + wm7-offer-id-ready + tgt-repeated-nav-failed + tgt-live-poll-cycle + tgt-cart-checkout-missing + tgt-poll-recovery-rearm + tgt-checkout-signin + tgt4-checkout-spa-timeout + tgt4-live-poll-cycle + sc3-disabled-atc + sc3-disabled-atc-cross + sc6-restock + sc6-restock-cross + sc6-restock-live-poll-cycle + sc6-restock-cross-live-poll-cycle + sc6-restock-cross-repeated-nav-failed + sc6-restock-poll-recovery + sc6-cart-live-poll-cycle + sc6-cart-cross-live-poll-cycle + sc6-cart-cross-repeated-nav-failed + sc6-cart-cross-poll-recovery + sc6-invisible-atc-cross-poll-recovery + sc6-invisible-atc-poll-recovery + sc6-restock-cross-poll-recovery + sc6-checkout-spa-cross-poll-recovery + sc6-checkout-spa-live-poll-cycle + sc6-checkout-spa-cross-live-poll-cycle + sc6-checkout-spa-cross-repeated-nav-failed + sc4-review-cross-poll-recovery + sc4-review-cross-live-poll-cycle + sc4-review-cross-repeated-nav-failed + sc6-invisible-atc + sc6-invisible-atc-cross + sc6-invisible-atc-live-poll-cycle + sc6-invisible-atc-cross-live-poll-cycle + sc6-invisible-atc-cross-repeated-nav-failed + sc5-repeated-atc-success + sc4-manual-review + sc4-shipping-payment-review + sc2-cart-checkout + sc2-cart-live-poll-cycle + sc2-cart-checkout-missing + sc2-cart-poll-recovery-rearm + sc2-repeated-nav-failed + sc3-poll-recovery-rearm + sc3-disabled-atc-live-poll-cycle + sc3-disabled-atc-cross-live-poll-cycle + sc3-disabled-atc-cross-poll-recovery + sc6-disabled-atc-cross-repeated-nav-failed + sc4-live-poll-cycle + sc4-poll-recovery-rearm + sc6-repeated-nav-failed + background messages + popup toggle/save + Target content script'
   );
 }
 
