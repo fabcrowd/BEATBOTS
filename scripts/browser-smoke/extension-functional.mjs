@@ -3315,51 +3315,483 @@ function runTgtRepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
       tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
     },
-    {
-      label: 'cart checkout-missing (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/-/A-88888888',
-      tabUrl: 'https://www.target.com/cart/no-checkout',
-    },
-    {
-      label: 'cross-page cart checkout-missing (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-cart-cross-monitor/A-880088',
-      tabUrl: 'https://www.target.com/cart/no-checkout-cross',
-    },
-    {
-      label: 'checkout SPA timeout (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
-      tabUrl: 'https://www.target.com/checkout/spa-stall',
-    },
-    {
-      label: 'cross-page checkout SPA timeout (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
-      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
-    },
-    {
-      label: 'review manual stop (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-product',
-      tabUrl: 'https://www.target.com/checkout',
-    },
-    {
-      label: 'cross-page review manual stop (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
-      tabUrl: 'https://www.target.com/checkout/review-cross',
-    },
-    {
-      label: 'signin gate (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-product',
-      tabUrl: 'https://www.target.com/checkout/signin-gate',
-    },
-    {
-      label: 'cross-page signin gate (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
-      tabUrl: 'https://www.target.com/checkout/signin-gate-cross',
-    },
   ];
 
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
     assertTgtRepeatedNavFailed(monitorProductUrl, label, tabUrl);
   }
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /cart/no-checkout named tag.
+ * Target: cart checkout-missing repeated NAV_FAILED, no sacred lock.
+ */
+function runTgtCartRepeatedNavFailedOfflineTests() {
+  const cartFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-cart-no-checkout.html'),
+    'utf8'
+  );
+  assert.match(
+    cartFixture,
+    /data-tch-fixture="target-cart-no-checkout"/,
+    'tgt-cart-repeated-nav-failed: cart checkout-missing fixture marker'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /Checkout button not found on cart page — releasing navigation lock/,
+    'tgt-cart-repeated-nav-failed: cart checkout-missing log in source'
+  );
+
+  const monitorProductUrl = 'https://www.target.com/p/-/A-88888888';
+  const tabUrl = 'https://www.target.com/cart/no-checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-cart-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `tgt-cart-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `tgt-cart-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normMonitorUrl,
+      normTabUrl,
+      `tgt-cart-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normTabUrl),
+      `tgt-cart-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'tgt-cart-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; cart checkout-missing does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /cart/no-checkout-cross named tag.
+ * Target: cross-page cart checkout-missing repeated NAV_FAILED, no sacred lock.
+ */
+function runTgtCartCrossRepeatedNavFailedOfflineTests() {
+  const cartCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-cart-no-checkout-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    cartCrossFixture,
+    /data-tch-fixture="target-cart-no-checkout-cross"/,
+    'tgt-cart-cross-repeated-nav-failed: cross-page cart fixture marker'
+  );
+
+  const crossMonitor = 'https://www.target.com/p/mock-cart-cross-monitor/A-880088';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.target.com/cart/no-checkout-cross');
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normCrossMonitor]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: crossMonitor });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-cart-cross-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normCrossMonitor),
+      `tgt-cart-cross-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, inQueueUrls, navigationLock),
+      `tgt-cart-cross-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normCrossMonitor,
+      normCrossTab,
+      `tgt-cart-cross-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCrossTab),
+      `tgt-cart-cross-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'tgt-cart-cross-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; cart checkout-missing does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /checkout/spa-stall named tag.
+ * Target: checkout SPA timeout repeated NAV_FAILED, no sacred lock.
+ */
+function runTgtCheckoutSpaRepeatedNavFailedOfflineTests() {
+  const checkoutSpaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-spa-timeout.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaFixture,
+    /data-tch-fixture="target-checkout-spa-timeout"/,
+    'tgt-checkout-spa-repeated-nav-failed: checkout SPA stall fixture marker'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /handleCheckoutStall timed out — releasing navigation lock/,
+    'tgt-checkout-spa-repeated-nav-failed: checkout SPA timeout log in source'
+  );
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-checkout-spa-stall/794';
+  const tabUrl = 'https://www.target.com/checkout/spa-stall';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-checkout-spa-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `tgt-checkout-spa-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `tgt-checkout-spa-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normMonitorUrl,
+      normTabUrl,
+      `tgt-checkout-spa-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normTabUrl),
+      `tgt-checkout-spa-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'tgt-checkout-spa-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; checkout SPA timeout does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /checkout/spa-stall-cross named tag.
+ * Target: cross-page checkout SPA timeout repeated NAV_FAILED, no sacred lock.
+ */
+function runTgtCheckoutSpaCrossRepeatedNavFailedOfflineTests() {
+  const checkoutSpaCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-spa-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaCrossFixture,
+    /data-tch-fixture="target-checkout-spa-cross"/,
+    'tgt-checkout-spa-cross-repeated-nav-failed: cross-page checkout SPA fixture marker'
+  );
+
+  const crossMonitor = 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.target.com/checkout/spa-stall-cross');
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normCrossMonitor]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: crossMonitor });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-checkout-spa-cross-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normCrossMonitor),
+      `tgt-checkout-spa-cross-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, inQueueUrls, navigationLock),
+      `tgt-checkout-spa-cross-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normCrossMonitor,
+      normCrossTab,
+      `tgt-checkout-spa-cross-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCrossTab),
+      `tgt-checkout-spa-cross-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'tgt-checkout-spa-cross-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; checkout SPA timeout does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /checkout review named tag.
+ * Target TGT-4: review manual stop repeated NAV_FAILED keyed on monitor productUrl, no sacred lock.
+ */
+function runTgtReviewRepeatedNavFailedOfflineTests() {
+  const reviewFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-review.html'),
+    'utf8'
+  );
+  assert.match(
+    reviewFixture,
+    /data-tch-fixture="target-checkout-review"/,
+    'tgt-review-repeated-nav-failed: review fixture marker'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /handleReviewStep/, 'tgt-review-repeated-nav-failed: handleReviewStep in source');
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const tabUrl = 'https://www.target.com/checkout';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-review-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `tgt-review-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `tgt-review-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normMonitorUrl,
+      normTabUrl,
+      `tgt-review-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normTabUrl),
+      `tgt-review-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'tgt-review-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; review manual stop does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /checkout/review-cross named tag.
+ * Target TGT-4: cross-page review manual stop repeated NAV_FAILED, no sacred lock.
+ */
+function runTgtReviewCrossRepeatedNavFailedOfflineTests() {
+  const reviewCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-review-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    reviewCrossFixture,
+    /data-tch-fixture="target-checkout-review-cross"/,
+    'tgt-review-cross-repeated-nav-failed: cross-page review fixture marker'
+  );
+
+  const crossMonitor = 'https://www.target.com/p/mock-review-cross-monitor/A-880101';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.target.com/checkout/review-cross');
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normCrossMonitor]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: crossMonitor });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-review-cross-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normCrossMonitor),
+      `tgt-review-cross-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, inQueueUrls, navigationLock),
+      `tgt-review-cross-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normCrossMonitor,
+      normCrossTab,
+      `tgt-review-cross-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCrossTab),
+      `tgt-review-cross-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'tgt-review-cross-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; review manual stop does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /checkout/signin-gate named tag.
+ * Target: signin gate repeated NAV_FAILED keyed on monitor productUrl, no sacred lock.
+ */
+function runTgtSigninRepeatedNavFailedOfflineTests() {
+  const signinFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-signin.html'),
+    'utf8'
+  );
+  assert.match(
+    signinFixture,
+    /data-tch-fixture="target-checkout-signin"/,
+    'tgt-signin-repeated-nav-failed: signin gate fixture marker'
+  );
+
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(
+    targetSrc,
+    /handleCheckoutPendingStep/,
+    'tgt-signin-repeated-nav-failed: handleCheckoutPendingStep in source'
+  );
+
+  const monitorProductUrl = 'https://www.target.com/p/mock-product';
+  const tabUrl = 'https://www.target.com/checkout/signin-gate';
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-signin-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `tgt-signin-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `tgt-signin-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normMonitorUrl,
+      normTabUrl,
+      `tgt-signin-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normTabUrl),
+      `tgt-signin-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    'tgt-signin-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /checkout/signin-gate-cross named tag.
+ * Target: cross-page signin gate repeated NAV_FAILED, no sacred lock.
+ */
+function runTgtSigninCrossRepeatedNavFailedOfflineTests() {
+  const signinCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-signin-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    signinCrossFixture,
+    /data-tch-fixture="target-checkout-signin-cross"/,
+    'tgt-signin-cross-repeated-nav-failed: cross-page signin gate fixture marker'
+  );
+
+  const crossMonitor = 'https://www.target.com/p/mock-signin-cross-monitor/A-880097';
+  const normCrossMonitor = normalizeProductUrl(crossMonitor);
+  const normCrossTab = normalizeProductUrl('https://www.target.com/checkout/signin-gate-cross');
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normCrossMonitor]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: crossMonitor });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `tgt-signin-cross-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normCrossMonitor),
+      `tgt-signin-cross-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossMonitor, inQueueUrls, navigationLock),
+      `tgt-signin-cross-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
+    );
+    assert.notEqual(
+      normCrossMonitor,
+      normCrossTab,
+      `tgt-signin-cross-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCrossTab),
+      `tgt-signin-cross-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
+    );
+  }
+
+  const crossWmSacredLock = new Set([normCrossMonitor]);
+  assert.ok(
+    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
+    'tgt-signin-cross-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; signin gate does not arm it'
+  );
 }
 
 /**
@@ -7677,6 +8109,14 @@ async function main() {
   runWm6PxTimeoutMsOverrideElementOfflineTests();
   runWm7OfferIdReadyElementOfflineTests();
   runTgtRepeatedNavFailedOfflineTests();
+  runTgtCartRepeatedNavFailedOfflineTests();
+  runTgtCartCrossRepeatedNavFailedOfflineTests();
+  runTgtCheckoutSpaRepeatedNavFailedOfflineTests();
+  runTgtCheckoutSpaCrossRepeatedNavFailedOfflineTests();
+  runTgtReviewRepeatedNavFailedOfflineTests();
+  runTgtReviewCrossRepeatedNavFailedOfflineTests();
+  runTgtSigninRepeatedNavFailedOfflineTests();
+  runTgtSigninCrossRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
   runTgtCartCheckoutMissingElementOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
