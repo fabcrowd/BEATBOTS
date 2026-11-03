@@ -2362,6 +2362,57 @@ function runWm6CheckoutSpaCrossRepeatedNavFailedOfflineTests() {
   );
 }
 
+const WM6_LIVE_POLL_NAV_FAIL_TYPES = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+
+function assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+  if (normTabUrl) {
+    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
+  }
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
+
+  for (let i = 0; i < WM6_LIVE_POLL_NAV_FAIL_TYPES.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, {
+      type: WM6_LIVE_POLL_NAV_FAIL_TYPES[i],
+      url: monitorProductUrl,
+    });
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${WM6_LIVE_POLL_NAV_FAIL_TYPES[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${WM6_LIVE_POLL_NAV_FAIL_TYPES[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: live poll cycle ${i + 1} allows poll retry after ${WM6_LIVE_POLL_NAV_FAIL_TYPES[i]} (no sacred lock)`
+    );
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
+    }
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; WM-6 error path does not arm it`
+  );
+}
+
 /**
  * FIX-3 parity for wm6-live-poll-cycle named tag.
  * WM-6 error paths: reload + repeated NAV_FAILED during live poll, no sacred lock.
@@ -2373,54 +2424,6 @@ function runWm6LivePollCycleOfflineTests() {
   );
   assert.match(walmartSrc, /Price guard wait — no sacred lock/, 'wm6-live-poll-cycle: price-guard log in source');
   assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-live-poll-cycle: PX timeout helper in source');
-
-  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
-
-  function assertWm6LivePollCycle(monitorProductUrl, label, tabUrl) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-    if (normTabUrl) {
-      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
-    }
-
-    navigationLock.add(normMonitorUrl);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: monitorProductUrl });
-    assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
-
-    for (let i = 0; i < navFailTypes.length; i++) {
-      navigationLock.add(normMonitorUrl);
-      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
-      );
-      if (navigationLock.has(normMonitorUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normMonitorUrl),
-          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label}: live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
-      );
-      if (normTabUrl) {
-        assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
-      }
-    }
-
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; WM-6 error path does not arm it`
-    );
-  }
 
   const scenarios = [
     {
@@ -2458,31 +2461,91 @@ function runWm6LivePollCycleOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
       tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
     },
-    {
-      label: 'cart checkout-missing (wm6-cart-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-missing/888',
-      tabUrl: 'https://www.walmart.com/cart/no-checkout',
-    },
-    {
-      label: 'cross-page cart checkout-missing (wm6-cart-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
-      tabUrl: 'https://www.walmart.com/cart/no-checkout-cross',
-    },
-    {
-      label: 'checkout SPA timeout (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
-      tabUrl: 'https://www.walmart.com/checkout/spa-stall',
-    },
-    {
-      label: 'cross-page checkout SPA timeout (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
-      tabUrl: 'https://www.walmart.com/checkout/spa-stall-cross',
-    },
   ];
 
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertWm6LivePollCycle(monitorProductUrl, label, tabUrl);
+    assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl);
   }
+}
+
+/**
+ * FIX-3 parity for wm6-cart-live-poll-cycle on /cart/no-checkout named tag.
+ */
+function runWm6CartLivePollCycleOfflineTests() {
+  const cartFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-cart-no-checkout.html'),
+    'utf8'
+  );
+  assert.match(
+    cartFixture,
+    /data-tch-fixture="walmart-cart-no-checkout"/,
+    'wm6-cart-live-poll-cycle: cart checkout-missing fixture marker'
+  );
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-cart-missing/888',
+    'cart checkout-missing (wm6-cart-live-poll-cycle)',
+    'https://www.walmart.com/cart/no-checkout'
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-cart-live-poll-cycle on /cart/no-checkout-cross named tag.
+ */
+function runWm6CartCrossLivePollCycleOfflineTests() {
+  const cartCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-cart-no-checkout-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    cartCrossFixture,
+    /data-tch-fixture="walmart-cart-no-checkout-cross"/,
+    'wm6-cart-cross-live-poll-cycle: cross-page cart fixture marker'
+  );
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
+    'cross-page cart checkout-missing (wm6-cart-live-poll-cycle)',
+    'https://www.walmart.com/cart/no-checkout-cross'
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle on /checkout/spa-stall named tag.
+ */
+function runWm6CheckoutSpaLivePollCycleOfflineTests() {
+  const checkoutSpaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-checkout-spa-timeout.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaFixture,
+    /data-tch-fixture="walmart-checkout-spa-timeout"/,
+    'wm6-checkout-spa-live-poll-cycle: checkout SPA stall fixture marker'
+  );
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-checkout-spa/992',
+    'checkout SPA timeout (wm6-live-poll-cycle)',
+    'https://www.walmart.com/checkout/spa-stall'
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle on /checkout/spa-stall-cross named tag.
+ */
+function runWm6CheckoutSpaCrossLivePollCycleOfflineTests() {
+  const checkoutSpaCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-checkout-spa-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaCrossFixture,
+    /data-tch-fixture="walmart-checkout-spa-cross"/,
+    'wm6-checkout-spa-cross-live-poll-cycle: cross-page checkout SPA fixture marker'
+  );
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
+    'cross-page checkout SPA timeout (wm6-live-poll-cycle)',
+    'https://www.walmart.com/checkout/spa-stall-cross'
+  );
 }
 
 /**
@@ -3794,6 +3857,61 @@ function runTgtSigninCrossRepeatedNavFailedOfflineTests() {
   );
 }
 
+const TGT_LIVE_POLL_NAV_FAIL_TYPES = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+
+function assertTgtLivePollCycleScenario(monitorProductUrl, label, tabUrl) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+  if (normTabUrl) {
+    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
+  }
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
+
+  for (let i = 0; i < TGT_LIVE_POLL_NAV_FAIL_TYPES.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (TGT_LIVE_POLL_NAV_FAIL_TYPES[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, {
+        type: TGT_LIVE_POLL_NAV_FAIL_TYPES[i],
+        url: monitorProductUrl,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${TGT_LIVE_POLL_NAV_FAIL_TYPES[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${TGT_LIVE_POLL_NAV_FAIL_TYPES[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label}: live poll cycle ${i + 1} allows poll retry after ${TGT_LIVE_POLL_NAV_FAIL_TYPES[i]} (no sacred lock)`
+    );
+    if (normTabUrl) {
+      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
+    }
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
+  );
+}
+
 /**
  * FIX-3 parity for tgt-live-poll-cycle named tag.
  * Target error paths: reload + repeated NAV_FAILED during live poll, no sacred lock.
@@ -3804,59 +3922,6 @@ function runTgtLivePollCycleOfflineTests() {
     'utf8'
   );
   assert.match(targetSrc, /productAtcWaitMs/, 'tgt-live-poll-cycle: ATC wait helper in source');
-  assert.match(targetSrc, /cartCheckoutWaitMs/, 'tgt-live-poll-cycle: cart checkout wait helper in source');
-
-  const navFailTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
-
-  function assertTgtLivePollCycle(monitorProductUrl, label, tabUrl) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-    if (normTabUrl) {
-      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key on start`);
-    }
-
-    navigationLock.add(normMonitorUrl);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
-    assert.equal(inQueueUrls.size, 0, `${label}: reload timeout must not arm sacred lock`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload timeout releases navigationLock`);
-
-    for (let i = 0; i < navFailTypes.length; i++) {
-      navigationLock.add(normMonitorUrl);
-      if (navFailTypes[i] === 'ATC_SUCCESS') {
-        applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
-      } else {
-        applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
-      }
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
-      );
-      if (navigationLock.has(normMonitorUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normMonitorUrl),
-          `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${navFailTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label}: live poll cycle ${i + 1} allows poll retry after ${navFailTypes[i]} (no sacred lock)`
-      );
-      if (normTabUrl) {
-        assert.notEqual(normMonitorUrl, normTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
-      }
-    }
-
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
-    );
-  }
 
   const scenarios = [
     {
@@ -3872,41 +3937,136 @@ function runTgtLivePollCycleOfflineTests() {
       monitorProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
       tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
     },
-    {
-      label: 'cart checkout-missing (tgt-cart-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/-/A-88888888',
-      tabUrl: 'https://www.target.com/cart/no-checkout',
-    },
-    {
-      label: 'cross-page cart checkout-missing (tgt-cart-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-cart-cross-monitor/A-880088',
-      tabUrl: 'https://www.target.com/cart/no-checkout-cross',
-    },
-    {
-      label: 'checkout SPA timeout (tgt4-checkout-spa-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
-      tabUrl: 'https://www.target.com/checkout/spa-stall',
-    },
-    {
-      label: 'cross-page checkout SPA timeout (tgt4-checkout-spa-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
-      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
-    },
-    {
-      label: 'signin gate (tgt-signin-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-product',
-      tabUrl: 'https://www.target.com/checkout/signin-gate',
-    },
-    {
-      label: 'cross-page signin gate (tgt-signin-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
-      tabUrl: 'https://www.target.com/checkout/signin-gate-cross',
-    },
   ];
 
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertTgtLivePollCycle(monitorProductUrl, label, tabUrl);
+    assertTgtLivePollCycleScenario(monitorProductUrl, label, tabUrl);
   }
+}
+
+/**
+ * FIX-3 parity for tgt-cart-live-poll-cycle on /cart/no-checkout named tag.
+ */
+function runTgtCartLivePollCycleOfflineTests() {
+  const cartFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-cart-no-checkout.html'),
+    'utf8'
+  );
+  assert.match(
+    cartFixture,
+    /data-tch-fixture="target-cart-no-checkout"/,
+    'tgt-cart-live-poll-cycle: cart checkout-missing fixture marker'
+  );
+  assert.match(
+    fs.readFileSync(path.resolve(__dirname, '../../target-checkout-helper/content.js'), 'utf8'),
+    /cartCheckoutWaitMs/,
+    'tgt-cart-live-poll-cycle: cart checkout wait helper in source'
+  );
+  assertTgtLivePollCycleScenario(
+    'https://www.target.com/p/-/A-88888888',
+    'cart checkout-missing (tgt-cart-live-poll-cycle)',
+    'https://www.target.com/cart/no-checkout'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-cart-live-poll-cycle on /cart/no-checkout-cross named tag.
+ */
+function runTgtCartCrossLivePollCycleOfflineTests() {
+  const cartCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-cart-no-checkout-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    cartCrossFixture,
+    /data-tch-fixture="target-cart-no-checkout-cross"/,
+    'tgt-cart-cross-live-poll-cycle: cross-page cart fixture marker'
+  );
+  assertTgtLivePollCycleScenario(
+    'https://www.target.com/p/mock-cart-cross-monitor/A-880088',
+    'cross-page cart checkout-missing (tgt-cart-live-poll-cycle)',
+    'https://www.target.com/cart/no-checkout-cross'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt4-checkout-spa-live-poll-cycle on /checkout/spa-stall named tag.
+ */
+function runTgtCheckoutSpaLivePollCycleOfflineTests() {
+  const checkoutSpaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-spa-timeout.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaFixture,
+    /data-tch-fixture="target-checkout-spa-timeout"/,
+    'tgt4-checkout-spa-live-poll-cycle: checkout SPA stall fixture marker'
+  );
+  assertTgtLivePollCycleScenario(
+    'https://www.target.com/p/mock-checkout-spa-stall/794',
+    'checkout SPA timeout (tgt4-checkout-spa-live-poll-cycle)',
+    'https://www.target.com/checkout/spa-stall'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt4-checkout-spa-live-poll-cycle on /checkout/spa-stall-cross named tag.
+ */
+function runTgtCheckoutSpaCrossLivePollCycleOfflineTests() {
+  const checkoutSpaCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-spa-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaCrossFixture,
+    /data-tch-fixture="target-checkout-spa-cross"/,
+    'tgt4-checkout-spa-cross-live-poll-cycle: cross-page checkout SPA fixture marker'
+  );
+  assertTgtLivePollCycleScenario(
+    'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
+    'cross-page checkout SPA timeout (tgt4-checkout-spa-live-poll-cycle)',
+    'https://www.target.com/checkout/spa-stall-cross'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-signin-live-poll-cycle on /checkout/signin-gate named tag.
+ */
+function runTgtSigninLivePollCycleOfflineTests() {
+  const signinFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-signin.html'),
+    'utf8'
+  );
+  assert.match(
+    signinFixture,
+    /data-tch-fixture="target-checkout-signin"/,
+    'tgt-signin-live-poll-cycle: signin gate fixture marker'
+  );
+  assertTgtLivePollCycleScenario(
+    'https://www.target.com/p/mock-product',
+    'signin gate (tgt-signin-live-poll-cycle)',
+    'https://www.target.com/checkout/signin-gate'
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-signin-live-poll-cycle on /checkout/signin-gate-cross named tag.
+ */
+function runTgtSigninCrossLivePollCycleOfflineTests() {
+  const signinCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-signin-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    signinCrossFixture,
+    /data-tch-fixture="target-checkout-signin-cross"/,
+    'tgt-signin-cross-live-poll-cycle: cross-page signin gate fixture marker'
+  );
+  assertTgtLivePollCycleScenario(
+    'https://www.target.com/p/mock-signin-cross-monitor/A-880097',
+    'cross-page signin gate (tgt-signin-live-poll-cycle)',
+    'https://www.target.com/checkout/signin-gate-cross'
+  );
 }
 
 /**
@@ -8100,6 +8260,10 @@ async function main() {
   runWm6CheckoutSpaRepeatedNavFailedOfflineTests();
   runWm6CheckoutSpaCrossRepeatedNavFailedOfflineTests();
   runWm6LivePollCycleOfflineTests();
+  runWm6CartLivePollCycleOfflineTests();
+  runWm6CartCrossLivePollCycleOfflineTests();
+  runWm6CheckoutSpaLivePollCycleOfflineTests();
+  runWm6CheckoutSpaCrossLivePollCycleOfflineTests();
   runWm6PollRecoveryRearmOfflineTests();
   runWm6CartCheckoutMissingElementOfflineTests();
   runWm6MissingAtcElementOfflineTests();
@@ -8118,6 +8282,12 @@ async function main() {
   runTgtSigninRepeatedNavFailedOfflineTests();
   runTgtSigninCrossRepeatedNavFailedOfflineTests();
   runTgtLivePollCycleOfflineTests();
+  runTgtCartLivePollCycleOfflineTests();
+  runTgtCartCrossLivePollCycleOfflineTests();
+  runTgtCheckoutSpaLivePollCycleOfflineTests();
+  runTgtCheckoutSpaCrossLivePollCycleOfflineTests();
+  runTgtSigninLivePollCycleOfflineTests();
+  runTgtSigninCrossLivePollCycleOfflineTests();
   runTgtCartCheckoutMissingElementOfflineTests();
   runTgtPollRecoveryRearmOfflineTests();
   runTgt4CheckoutSigninElementOfflineTests();
