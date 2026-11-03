@@ -2014,24 +2014,7 @@ function runMon3LivePollCycleOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for wm6-repeated-nav-failed named tag.
- * WM-6 error paths: repeated WALMART_NAV_FAILED must never arm sacred lock.
- */
-function runWm6RepeatedNavFailedOfflineTests() {
-  const walmartSrc = fs.readFileSync(
-    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
-    'utf8'
-  );
-  assert.match(walmartSrc, /wmSignalNavFailed/, 'wm6-repeated-nav-failed: nav failed signal in source');
-  assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-repeated-nav-failed: ATC wait helper in source');
-  assert.match(
-    walmartSrc,
-    /wmHandleCheckout timed out — releasing navigation lock/,
-    'wm6-repeated-nav-failed: checkout SPA timeout NAV_FAILED path in source'
-  );
-
-  function assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl) {
+function assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl) {
     const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
     const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
 
@@ -2073,7 +2056,24 @@ function runWm6RepeatedNavFailedOfflineTests() {
       pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
       `${label}: contrast WM-5 — sacred lock would block poll; WM-6 error path does not arm it`
     );
-  }
+}
+
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed named tag.
+ * WM-6 error paths: repeated WALMART_NAV_FAILED must never arm sacred lock.
+ */
+function runWm6RepeatedNavFailedOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /wmSignalNavFailed/, 'wm6-repeated-nav-failed: nav failed signal in source');
+  assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-repeated-nav-failed: ATC wait helper in source');
+  assert.match(
+    walmartSrc,
+    /wmHandleCheckout timed out — releasing navigation lock/,
+    'wm6-repeated-nav-failed: checkout SPA timeout NAV_FAILED path in source'
+  );
 
   const scenarios = [
     {
@@ -2090,6 +2090,70 @@ function runWm6RepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
       tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
     },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed on PX hang-tight + captcha + block + override + cross-page PX named tags.
+ */
+function runWm6PxRepeatedNavFailedOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-px-repeated-nav-failed: PX timeout helper in source');
+
+  const pxFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px.html'),
+    'utf8'
+  );
+  assert.match(pxFixture, /data-tch-fixture="walmart-product-px"/, 'wm6-px-repeated-nav-failed: PX hang-tight fixture marker');
+
+  const pxCaptchaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-captcha.html'),
+    'utf8'
+  );
+  assert.match(
+    pxCaptchaFixture,
+    /data-tch-fixture="walmart-product-px-captcha"/,
+    'wm6-px-repeated-nav-failed: PX captcha fixture marker'
+  );
+
+  const pxBlockFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-block.html'),
+    'utf8'
+  );
+  assert.match(
+    pxBlockFixture,
+    /data-tch-fixture="walmart-product-px-block"/,
+    'wm6-px-repeated-nav-failed: PX block fixture marker'
+  );
+
+  const pxOverrideFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-override.html'),
+    'utf8'
+  );
+  assert.match(
+    pxOverrideFixture,
+    /data-tch-fixture="walmart-product-px-override"/,
+    'wm6-px-repeated-nav-failed: PX timeout override fixture marker'
+  );
+
+  const pxCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    pxCrossFixture,
+    /data-tch-fixture="walmart-product-px-cross"/,
+    'wm6-px-repeated-nav-failed: cross-page PX fixture marker'
+  );
+
+  const scenarios = [
     {
       label: 'PX hang-tight (wm6-repeated-nav-failed)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
@@ -2414,15 +2478,34 @@ function assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl) {
 }
 
 /**
- * FIX-3 parity for wm6-live-poll-cycle named tag.
- * WM-6 error paths: reload + repeated NAV_FAILED during live poll, no sacred lock.
+ * FIX-3 parity for wm6-live-poll-cycle on missing ATC + cross-page missing ATC named tags.
  */
-function runWm6LivePollCycleOfflineTests() {
+function runWm6MissingAtcLivePollCycleOfflineTests() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
-  assert.match(walmartSrc, /Price guard wait — no sacred lock/, 'wm6-live-poll-cycle: price-guard log in source');
+  assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-missing-atc-live-poll-cycle: ATC wait helper in source');
+
+  const noAtcFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-no-atc.html'),
+    'utf8'
+  );
+  assert.match(
+    noAtcFixture,
+    /data-tch-fixture="walmart-product-no-atc"/,
+    'wm6-missing-atc-live-poll-cycle: missing ATC fixture marker'
+  );
+
+  const noAtcCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-no-atc-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    noAtcCrossFixture,
+    /data-tch-fixture="walmart-product-no-atc-cross"/,
+    'wm6-missing-atc-live-poll-cycle: cross-page missing ATC fixture marker'
+  );
 
   const scenarios = [
     {
@@ -2434,6 +2517,44 @@ function runWm6LivePollCycleOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
       tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
     },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle on price guard + cross-page price guard named tags.
+ */
+function runWm6PriceGuardLivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /Price guard wait — no sacred lock/, 'wm6-price-guard-live-poll-cycle: price-guard log in source');
+
+  const priceGuardFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-price-guard-timeout.html'),
+    'utf8'
+  );
+  assert.match(
+    priceGuardFixture,
+    /data-tch-fixture="walmart-product-price-guard-timeout"/,
+    'wm6-price-guard-live-poll-cycle: price guard fixture marker'
+  );
+
+  const priceGuardCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-price-guard-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    priceGuardCrossFixture,
+    /data-tch-fixture="walmart-product-price-guard-cross"/,
+    'wm6-price-guard-live-poll-cycle: cross-page price guard fixture marker'
+  );
+
+  const scenarios = [
     {
       label: 'price guard (wm6-live-poll-cycle)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
@@ -8321,11 +8442,13 @@ async function main() {
   runWm2RepeatedNavFailedElementOfflineTests();
   runWm2LivePollCycleElementOfflineTests();
   runWm6RepeatedNavFailedOfflineTests();
+  runWm6PxRepeatedNavFailedOfflineTests();
   runWm6CartRepeatedNavFailedOfflineTests();
   runWm6CartCrossRepeatedNavFailedOfflineTests();
   runWm6CheckoutSpaRepeatedNavFailedOfflineTests();
   runWm6CheckoutSpaCrossRepeatedNavFailedOfflineTests();
-  runWm6LivePollCycleOfflineTests();
+  runWm6MissingAtcLivePollCycleOfflineTests();
+  runWm6PriceGuardLivePollCycleOfflineTests();
   runWm6PxLivePollCycleOfflineTests();
   runWm6CartLivePollCycleOfflineTests();
   runWm6CartCrossLivePollCycleOfflineTests();
