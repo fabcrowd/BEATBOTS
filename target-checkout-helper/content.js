@@ -186,7 +186,7 @@ async function handleSignInPage(settings, opts = {}) {
   }
   try {
   // Detect Target's login inputs (standalone page or checkout auth gate modal).
-  const { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
+  let { emailInput, passInput, submitBtn } = findVisibleSignInInputs();
 
   if (getPageType() === 'checkout') {
     if (isCheckoutSignedInConfirm()) {
@@ -202,6 +202,7 @@ async function handleSignInPage(settings, opts = {}) {
       await signInClickAndType(passInput, settings.targetPassword);
       await sleep(Math.floor(Math.random() * 200) + 200);
       await signInCdpClick(loginBtn);
+      await waitForCheckoutAuthGateToClear(settings);
       return;
     }
   }
@@ -265,6 +266,7 @@ async function handleSignInPage(settings, opts = {}) {
     await sleep(Math.floor(Math.random() * 200) + 200);
     showToast('Auto sign-in: submitting…');
     await signInCdpClick(submitBtn);
+    await waitForCheckoutAuthGateToClear(settings);
     return;
   }
 
@@ -368,6 +370,24 @@ async function waitForSignInPasswordStep(settings, timeoutMs = 15000) {
       resolve();
     }, timeoutMs);
   });
+}
+
+/** After password submit, hold autoSignInInFlight until auth modal closes or OTP flow starts. */
+async function waitForCheckoutAuthGateToClear(settings, timeoutMs = 25000) {
+  if (getPageType() !== 'checkout') return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const otpInput = document.querySelector(
+      'input[autocomplete="one-time-code"],input[inputmode="numeric"][maxlength="6"],' +
+      'input[name*="otp"],input[name*="code"],input[id*="otp"],input[id*="verif"]'
+    );
+    if (otpInput && isVisible(otpInput)) {
+      await waitForSignInPasswordStep(settings, Math.max(5000, deadline - Date.now()));
+      return;
+    }
+    if (!hasCheckoutAuthGate()) return;
+    await sleep(400);
+  }
 }
 
 /** Snapshot cookies immediately after ATC — the highest-value harvest moment. Fire-and-forget. */
