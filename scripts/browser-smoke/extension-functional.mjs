@@ -4462,8 +4462,63 @@ function runTgt4ManualReviewElementOfflineTests() {
   );
 }
 
+const TGT4_LIVE_POLL_SIGNAL_TYPES = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
+
+function assertTgt4LivePollCycleScenario(monitorProductUrl, checkoutTabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+  assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, `${label}: reload during live poll must not arm inQueueUrls`);
+
+  for (let i = 0; i < TGT4_LIVE_POLL_SIGNAL_TYPES.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    const signalUrl = monitorProductUrl;
+    if (TGT4_LIVE_POLL_SIGNAL_TYPES[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, {
+        type: TGT4_LIVE_POLL_SIGNAL_TYPES[i],
+        url: signalUrl,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label} live poll cycle ${i + 1} must not arm inQueueUrls after ${TGT4_LIVE_POLL_SIGNAL_TYPES[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `${label} live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${TGT4_LIVE_POLL_SIGNAL_TYPES[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label} live poll cycle ${i + 1} allows poll retry after ${TGT4_LIVE_POLL_SIGNAL_TYPES[i]} (no sacred lock)`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCheckoutTabUrl),
+      `${label} live poll cycle ${i + 1}: checkout tab URL must not become sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; Target review step does not arm it`
+  );
+}
+
 /**
- * FIX-3 parity for tgt4-live-poll-cycle named tag.
+ * FIX-3 parity for tgt4-live-poll-cycle on /checkout review named tag.
  * Target TGT-4: checkout review reload + NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
  */
 function runTgt4LivePollCycleOfflineTests() {
@@ -4484,73 +4539,31 @@ function runTgt4LivePollCycleOfflineTests() {
     'tgt4-live-poll-cycle: Target checkout must not emit Walmart queue semantics'
   );
 
-  function assertTgt4LivePollCycle(monitorProductUrl, checkoutTabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
+  assertTgt4LivePollCycleScenario(
+    'https://www.target.com/p/mock-product',
+    'https://www.target.com/checkout',
+    'checkout review (tgt4-live-poll-cycle)'
+  );
+}
 
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
-    assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
-    assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
-
-    navigationLock.add(normMonitorUrl);
-    assert.equal(inQueueUrls.size, 0, `${label}: reload during live poll must not arm inQueueUrls`);
-
-    for (let i = 0; i < liveSignalTypes.length; i++) {
-      navigationLock.add(normMonitorUrl);
-      const signalUrl = monitorProductUrl;
-      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
-        applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
-      } else {
-        applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: signalUrl });
-      }
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `${label} live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
-      );
-      if (navigationLock.has(normMonitorUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normMonitorUrl),
-          `${label} live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label} live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
-      );
-      assert.ok(
-        !inQueueUrls.has(normCheckoutTabUrl),
-        `${label} live poll cycle ${i + 1}: checkout tab URL must not become sacred lock key`
-      );
-    }
-
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; Target review step does not arm it`
-    );
-  }
-
-  const scenarios = [
-    {
-      label: 'checkout review (tgt4-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-product',
-      checkoutTabUrl: 'https://www.target.com/checkout',
-    },
-    {
-      label: 'cross-page checkout review (tgt4-live-poll-cycle)',
-      monitorProductUrl: 'https://www.target.com/p/mock-review-cross-monitor/A-880101',
-      checkoutTabUrl: 'https://www.target.com/checkout/review-cross',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, checkoutTabUrl } of scenarios) {
-    assertTgt4LivePollCycle(monitorProductUrl, checkoutTabUrl, label);
-  }
+/**
+ * FIX-3 parity for tgt4-live-poll-cycle on /checkout/review-cross named tag.
+ */
+function runTgt4ReviewCrossLivePollCycleOfflineTests() {
+  const reviewCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-review-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    reviewCrossFixture,
+    /data-tch-fixture="target-checkout-review-cross"/,
+    'tgt4-review-cross-live-poll-cycle: cross-page review fixture marker'
+  );
+  assertTgt4LivePollCycleScenario(
+    'https://www.target.com/p/mock-review-cross-monitor/A-880101',
+    'https://www.target.com/checkout/review-cross',
+    'cross-page checkout review (tgt4-live-poll-cycle)'
+  );
 }
 
 /**
@@ -8294,6 +8307,7 @@ async function main() {
   runTgt4CheckoutSpaTimeoutElementOfflineTests();
   runTgt4ManualReviewElementOfflineTests();
   runTgt4LivePollCycleOfflineTests();
+  runTgt4ReviewCrossLivePollCycleOfflineTests();
   runSc3DisabledAtcElementOfflineTests();
   runSc6InvisibleAtcElementOfflineTests();
   runSc6RestockElementOfflineTests();
