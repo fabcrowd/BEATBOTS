@@ -2423,7 +2423,6 @@ function runWm6LivePollCycleOfflineTests() {
     'utf8'
   );
   assert.match(walmartSrc, /Price guard wait — no sacred lock/, 'wm6-live-poll-cycle: price-guard log in source');
-  assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-live-poll-cycle: PX timeout helper in source');
 
   const scenarios = [
     {
@@ -2444,6 +2443,60 @@ function runWm6LivePollCycleOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
       tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
     },
+  ];
+
+  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
+    assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle on PX hang-tight + #px-captcha + px-block + cross-page PX named tags.
+ */
+function runWm6PxLivePollCycleOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-px-live-poll-cycle: PX timeout helper in source');
+
+  const pxFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px.html'),
+    'utf8'
+  );
+  assert.match(pxFixture, /data-tch-fixture="walmart-product-px"/, 'wm6-px-live-poll-cycle: PX hang-tight fixture marker');
+
+  const pxCaptchaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-captcha.html'),
+    'utf8'
+  );
+  assert.match(
+    pxCaptchaFixture,
+    /data-tch-fixture="walmart-product-px-captcha"/,
+    'wm6-px-live-poll-cycle: PX captcha fixture marker'
+  );
+
+  const pxBlockFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-block.html'),
+    'utf8'
+  );
+  assert.match(
+    pxBlockFixture,
+    /data-tch-fixture="walmart-product-px-block"/,
+    'wm6-px-live-poll-cycle: PX block fixture marker'
+  );
+
+  const pxCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-px-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    pxCrossFixture,
+    /data-tch-fixture="walmart-product-px-cross"/,
+    'wm6-px-live-poll-cycle: cross-page PX fixture marker'
+  );
+
+  const scenarios = [
     {
       label: 'PX hang-tight (wm6-live-poll-cycle)',
       monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
@@ -8273,6 +8326,7 @@ async function main() {
   runWm6CheckoutSpaRepeatedNavFailedOfflineTests();
   runWm6CheckoutSpaCrossRepeatedNavFailedOfflineTests();
   runWm6LivePollCycleOfflineTests();
+  runWm6PxLivePollCycleOfflineTests();
   runWm6CartLivePollCycleOfflineTests();
   runWm6CartCrossLivePollCycleOfflineTests();
   runWm6CheckoutSpaLivePollCycleOfflineTests();
