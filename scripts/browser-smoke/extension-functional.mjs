@@ -1014,11 +1014,63 @@ function runWm4UnmonitoredQueueTimeoutOfflineTests() {
   }
 }
 
-/**
- * FIX-3 parity for wm4-poll-recovery-rearm named tag.
- * Unmonitored queue timeout NAV_FAILED → poll re-arms navigationLock on recovery product (no sacred lock).
- */
-function runWm4PollRecoveryRearmOfflineTests() {
+function assertWm4PollRecoveryRearm(pageUrl, recoveryProductUrl, label) {
+  const normPageUrl = normalizeProductUrl(pageUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: unmonitored queue must not arm sacred lock on start`);
+
+  navigationLock.add(normPageUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: pageUrl });
+  assert.ok(
+    !navigationLock.has(normPageUrl),
+    `${label}: timeout NAV_FAILED releases navigationLock on queue page`
+  );
+  assert.equal(inQueueUrls.size, 0, `${label}: timeout must not arm sacred lock`);
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    `${label}: poll recovery re-arms navigationLock on recovery product after timeout NAV_FAILED`
+  );
+  assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+  assert.ok(
+    !inQueueUrls.has(normRecoveryUrl),
+    `${label}: recovery product must not be in sacred lock`
+  );
+
+  applyNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: recoveryProductUrl,
+  });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    `${label}: repeated NAV_FAILED during poll recovery releases recovery lock for retry`
+  );
+  assert.ok(
+    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+    `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+  );
+
+  const wmSacredLock = new Set([normRecoveryUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; unmonitored timeout recovery does not arm it`
+  );
+}
+
+function assertWm4PollRecoveryRearmScenario({ label, pageUrl, recoveryProductUrl, lockMessages }) {
+  assert.deepEqual(
+    lockMessages(),
+    [],
+    `${label}: no productUrl must not send WALMART_IN_QUEUE on queue entry`
+  );
+  assertWm4PollRecoveryRearm(pageUrl, recoveryProductUrl, label);
+}
+
+function assertWm4PollRecoveryRearmSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -1033,77 +1085,32 @@ function runWm4PollRecoveryRearmOfflineTests() {
     /Queue timeout — no productUrl — releasing navigation lock/,
     'wm4-poll-recovery-rearm: unmonitored checkout timeout NAV_FAILED path in source'
   );
+}
 
-  function assertWm4PollRecoveryRearm(pageUrl, recoveryProductUrl, label) {
-    const normPageUrl = normalizeProductUrl(pageUrl);
-    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
+/**
+ * FIX-3 parity for wm4-poll-recovery-rearm on unmonitored /qp timeout named tag.
+ */
+function runWm4QpPollRecoveryRearmOfflineTests() {
+  assertWm4PollRecoveryRearmSource();
+  assertWm4PollRecoveryRearmScenario({
+    label: '/qp unmonitored timeout (wm4-poll-recovery-rearm)',
+    pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
+    recoveryProductUrl: 'https://www.walmart.com/ip/mock-qp-unmonitored-recovery/996',
+    lockMessages: () => wmQueueRoomSacredLockMessages({}),
+  });
+}
 
-    assert.equal(inQueueUrls.size, 0, `${label}: unmonitored queue must not arm sacred lock on start`);
-
-    navigationLock.add(normPageUrl);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'WALMART_NAV_FAILED', url: pageUrl });
-    assert.ok(
-      !navigationLock.has(normPageUrl),
-      `${label}: timeout NAV_FAILED releases navigationLock on queue page`
-    );
-    assert.equal(inQueueUrls.size, 0, `${label}: timeout must not arm sacred lock`);
-
-    navigationLock.add(normRecoveryUrl);
-    assert.ok(
-      navigationLock.has(normRecoveryUrl),
-      `${label}: poll recovery re-arms navigationLock on recovery product after timeout NAV_FAILED`
-    );
-    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
-    assert.ok(
-      !inQueueUrls.has(normRecoveryUrl),
-      `${label}: recovery product must not be in sacred lock`
-    );
-
-    applyNavFailed(navigationLock, inQueueUrls, {
-      type: 'WALMART_NAV_FAILED',
-      url: recoveryProductUrl,
-    });
-    assert.ok(
-      !navigationLock.has(normRecoveryUrl),
-      `${label}: repeated NAV_FAILED during poll recovery releases recovery lock for retry`
-    );
-    assert.ok(
-      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
-      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
-    );
-
-    const wmSacredLock = new Set([normRecoveryUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; unmonitored timeout recovery does not arm it`
-    );
-  }
-
-  const scenarios = [
-    {
-      label: '/qp unmonitored timeout (wm4-poll-recovery-rearm)',
-      pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-qp-unmonitored-recovery/996',
-      lockMessages: () => wmQueueRoomSacredLockMessages({}),
-    },
-    {
-      label: '/checkout unmonitored timeout (wm4-poll-recovery-rearm)',
-      pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-unmonitored-recovery/997',
-      lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
-    },
-  ];
-
-  for (const { label, pageUrl, recoveryProductUrl, lockMessages } of scenarios) {
-    assert.deepEqual(
-      lockMessages(),
-      [],
-      `${label}: no productUrl must not send WALMART_IN_QUEUE on queue entry`
-    );
-    assertWm4PollRecoveryRearm(pageUrl, recoveryProductUrl, label);
-  }
+/**
+ * FIX-3 parity for wm4-poll-recovery-rearm on unmonitored /checkout timeout named tag.
+ */
+function runWm4CheckoutPollRecoveryRearmOfflineTests() {
+  assertWm4PollRecoveryRearmSource();
+  assertWm4PollRecoveryRearmScenario({
+    label: '/checkout unmonitored timeout (wm4-poll-recovery-rearm)',
+    pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
+    recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-unmonitored-recovery/997',
+    lockMessages: () => wmCheckoutQueueSacredLockMessages({}),
+  });
 }
 
 /**
@@ -4480,11 +4487,51 @@ function runTgtCartCheckoutMissingElementOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for tgt-poll-recovery-rearm named tag.
- * Target error-path NAV_FAILED → poll re-arms navigationLock on recovery product (no sacred lock).
- */
-function runTgtPollRecoveryRearmOfflineTests() {
+function assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
+  assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
+  if (normTabUrl) {
+    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+  }
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    `${label}: poll recovery re-arms navigationLock on recovery product`
+  );
+  assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+  assert.ok(!inQueueUrls.has(normRecoveryUrl), `${label}: recovery product must not be in sacred lock`);
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+  );
+  assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+  assert.ok(
+    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+    `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+  );
+
+  const wmSacredLock = new Set([normRecoveryUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
+  );
+}
+
+function assertTgtPollRecoveryRearmSource() {
   const targetSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/content.js'),
     'utf8'
@@ -4494,51 +4541,13 @@ function runTgtPollRecoveryRearmOfflineTests() {
     /signalNavFailed\(settings\.productUrl/,
     'tgt-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
   );
+}
 
-  function assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
-    const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-
-    navigationLock.add(normMonitorUrl);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
-    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
-    if (normTabUrl) {
-      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
-      assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
-    }
-
-    navigationLock.add(normRecoveryUrl);
-    assert.ok(
-      navigationLock.has(normRecoveryUrl),
-      `${label}: poll recovery re-arms navigationLock on recovery product`
-    );
-    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
-    assert.ok(!inQueueUrls.has(normRecoveryUrl), `${label}: recovery product must not be in sacred lock`);
-
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: recoveryProductUrl });
-    assert.ok(
-      !navigationLock.has(normRecoveryUrl),
-      `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
-    );
-    assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
-    assert.ok(
-      !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
-      `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
-    );
-
-    const wmSacredLock = new Set([normRecoveryUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
-    );
-  }
-
+/**
+ * FIX-3 parity for tgt-poll-recovery-rearm on missing ATC named tags.
+ */
+function runTgtMissingAtcPollRecoveryRearmOfflineTests() {
+  assertTgtPollRecoveryRearmSource();
   const scenarios = [
     {
       label: 'missing ATC (tgt-poll-recovery-rearm)',
@@ -4551,6 +4560,18 @@ function runTgtPollRecoveryRearmOfflineTests() {
       recoveryProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-recovery/A-880096',
       tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
     },
+  ];
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-poll-recovery-rearm on review manual-stop named tags.
+ */
+function runTgtReviewPollRecoveryRearmOfflineTests() {
+  assertTgtPollRecoveryRearmSource();
+  const scenarios = [
     {
       label: 'review manual stop (tgt-poll-recovery-rearm)',
       monitorProductUrl: 'https://www.target.com/p/mock-product',
@@ -4563,6 +4584,18 @@ function runTgtPollRecoveryRearmOfflineTests() {
       recoveryProductUrl: 'https://www.target.com/p/mock-review-cross-recovery/A-880102',
       tabUrl: 'https://www.target.com/checkout/review-cross',
     },
+  ];
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-poll-recovery-rearm on checkout signin-gate named tags.
+ */
+function runTgtSigninPollRecoveryRearmOfflineTests() {
+  assertTgtPollRecoveryRearmSource();
+  const scenarios = [
     {
       label: 'signin gate (tgt-poll-recovery-rearm)',
       monitorProductUrl: 'https://www.target.com/p/mock-product',
@@ -4575,6 +4608,18 @@ function runTgtPollRecoveryRearmOfflineTests() {
       recoveryProductUrl: 'https://www.target.com/p/mock-signin-cross-recovery/A-880098',
       tabUrl: 'https://www.target.com/checkout/signin-gate-cross',
     },
+  ];
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-poll-recovery-rearm on cart checkout-missing named tags.
+ */
+function runTgtCartPollRecoveryRearmOfflineTests() {
+  assertTgtPollRecoveryRearmSource();
+  const scenarios = [
     {
       label: 'cart checkout-missing (tgt-cart-checkout-missing)',
       monitorProductUrl: 'https://www.target.com/p/-/A-88888888',
@@ -4587,6 +4632,18 @@ function runTgtPollRecoveryRearmOfflineTests() {
       recoveryProductUrl: 'https://www.target.com/p/mock-cart-cross-recovery/A-880089',
       tabUrl: 'https://www.target.com/cart/no-checkout-cross',
     },
+  ];
+  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
+    assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
+  }
+}
+
+/**
+ * FIX-3 parity for tgt-poll-recovery-rearm on checkout SPA stall timeout named tags.
+ */
+function runTgtCheckoutSpaPollRecoveryRearmOfflineTests() {
+  assertTgtPollRecoveryRearmSource();
+  const scenarios = [
     {
       label: 'checkout SPA timeout (tgt-poll-recovery-rearm)',
       monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
@@ -4600,7 +4657,6 @@ function runTgtPollRecoveryRearmOfflineTests() {
       tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
     },
   ];
-
   for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
     assertTgtPollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
   }
@@ -8607,7 +8663,8 @@ async function main() {
   runWm4LivePollCycleOfflineTests();
   runWm4CrossLivePollCycleOfflineTests();
   runWm4UnmonitoredQueueTimeoutOfflineTests();
-  runWm4PollRecoveryRearmOfflineTests();
+  runWm4QpPollRecoveryRearmOfflineTests();
+  runWm4CheckoutPollRecoveryRearmOfflineTests();
   runWm5PreTimeoutLivePollCycleOfflineTests();
   runWm5QpCheckoutPollRecoveryRearmOfflineTests();
   runWm5ProductQueuePollRecoveryRearmOfflineTests();
@@ -8663,7 +8720,11 @@ async function main() {
   runTgtSigninLivePollCycleOfflineTests();
   runTgtSigninCrossLivePollCycleOfflineTests();
   runTgtCartCheckoutMissingElementOfflineTests();
-  runTgtPollRecoveryRearmOfflineTests();
+  runTgtMissingAtcPollRecoveryRearmOfflineTests();
+  runTgtReviewPollRecoveryRearmOfflineTests();
+  runTgtSigninPollRecoveryRearmOfflineTests();
+  runTgtCartPollRecoveryRearmOfflineTests();
+  runTgtCheckoutSpaPollRecoveryRearmOfflineTests();
   runTgt4CheckoutSigninElementOfflineTests();
   runTgt4CheckoutSpaTimeoutElementOfflineTests();
   runTgt4ManualReviewElementOfflineTests();
