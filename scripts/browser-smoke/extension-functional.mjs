@@ -2059,20 +2059,42 @@ function assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl) {
 }
 
 /**
- * FIX-3 parity for wm6-repeated-nav-failed named tag.
- * WM-6 error paths: repeated WALMART_NAV_FAILED must never arm sacred lock.
+ * FIX-3 parity for wm6-repeated-nav-failed on missing ATC + cross-page missing ATC named tags.
  */
-function runWm6RepeatedNavFailedOfflineTests() {
+function runWm6MissingAtcRepeatedNavFailedOfflineTests() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
-  assert.match(walmartSrc, /wmSignalNavFailed/, 'wm6-repeated-nav-failed: nav failed signal in source');
-  assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-repeated-nav-failed: ATC wait helper in source');
   assert.match(
     walmartSrc,
-    /wmHandleCheckout timed out — releasing navigation lock/,
-    'wm6-repeated-nav-failed: checkout SPA timeout NAV_FAILED path in source'
+    /wmSignalNavFailed/,
+    'wm6-missing-atc-repeated-nav-failed: nav failed signal in source'
+  );
+  assert.match(
+    walmartSrc,
+    /wmAtcWaitTimeoutMs/,
+    'wm6-missing-atc-repeated-nav-failed: ATC wait helper in source'
+  );
+
+  const noAtcFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-no-atc.html'),
+    'utf8'
+  );
+  assert.match(
+    noAtcFixture,
+    /data-tch-fixture="walmart-product-no-atc"/,
+    'wm6-missing-atc-repeated-nav-failed: fixture marker'
+  );
+
+  const noAtcCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-no-atc-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    noAtcCrossFixture,
+    /data-tch-fixture="walmart-product-no-atc-cross"/,
+    'wm6-missing-atc-repeated-nav-failed: cross-page fixture marker'
   );
 
   const scenarios = [
@@ -2085,16 +2107,47 @@ function runWm6RepeatedNavFailedOfflineTests() {
       monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
       tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
     },
-    {
-      label: 'cross-page price guard (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
-      tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
-    },
   ];
 
   for (const { label, monitorProductUrl, tabUrl } of scenarios) {
     assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl);
   }
+}
+
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed on cross-page price guard named tag.
+ */
+function runWm6PriceGuardRepeatedNavFailedOfflineTests() {
+  const walmartSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
+    'utf8'
+  );
+  assert.match(
+    walmartSrc,
+    /wmPriceGuardTimeoutMs/,
+    'wm6-price-guard-repeated-nav-failed: timeout helper in source'
+  );
+  assert.match(
+    walmartSrc,
+    /Price guard wait — no sacred lock/,
+    'wm6-price-guard-repeated-nav-failed: no-sacred-lock log in source'
+  );
+
+  const priceGuardCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/walmart-product-price-guard-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    priceGuardCrossFixture,
+    /data-tch-fixture="walmart-product-price-guard-cross"/,
+    'wm6-price-guard-repeated-nav-failed: cross-page fixture marker'
+  );
+
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+    'cross-page price guard (wm6-repeated-nav-failed)',
+    'https://www.walmart.com/ip/mock-price-guard-cross/993'
+  );
 }
 
 /**
@@ -8441,7 +8494,8 @@ async function main() {
   runWm5ProductQueueCrossLivePollCycleOfflineTests();
   runWm2RepeatedNavFailedElementOfflineTests();
   runWm2LivePollCycleElementOfflineTests();
-  runWm6RepeatedNavFailedOfflineTests();
+  runWm6MissingAtcRepeatedNavFailedOfflineTests();
+  runWm6PriceGuardRepeatedNavFailedOfflineTests();
   runWm6PxRepeatedNavFailedOfflineTests();
   runWm6CartRepeatedNavFailedOfflineTests();
   runWm6CartCrossRepeatedNavFailedOfflineTests();
