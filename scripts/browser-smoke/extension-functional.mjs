@@ -1138,11 +1138,7 @@ function runWm4CheckoutPollRecoveryRearmOfflineTests() {
   });
 }
 
-/**
- * FIX-3 parity for wm5-pre-timeout-live-poll-cycle named tag.
- * Sacred lock survives reload + NAV_FAILED before QUEUE_TIMEOUT on monitored queue routes.
- */
-function runWm5PreTimeoutLivePollCycleOfflineTests() {
+function assertWm5PreTimeoutLivePollCycleSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -1162,74 +1158,92 @@ function runWm5PreTimeoutLivePollCycleOfflineTests() {
     /Queue detected/,
     'wm5-pre-timeout-live-poll-cycle: checkout queue detection log in source'
   );
+}
 
-  const scenarios = [
-    {
-      label: 'wm5-pre-timeout-live-poll-cycle /qp monitored',
-      productUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
-    },
-    {
-      label: 'wm5-pre-timeout-live-poll-cycle /checkout monitored',
-      productUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
-    },
-    {
-      label: 'wm5-pre-timeout-live-poll-cycle product-page queue',
-      productUrl: 'https://www.walmart.com/ip/mock-product-queue-pretimeout/460',
-    },
-  ];
+function assertWm5PreTimeoutLivePollCycleScenario({ label, productUrl }) {
+  const normUrl = normalizeProductUrl(productUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
 
-  for (const { label, productUrl } of scenarios) {
-    const normUrl = normalizeProductUrl(productUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
+  applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  navigationLock.add(normUrl);
+  assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before pre-timeout poll`);
+  assert.ok(
+    pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    `${label}: poll must skip while sacred lock holds`
+  );
 
-    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: productUrl });
+  assert.ok(
+    inQueueUrls.has(normUrl),
+    `${label}: reload preserves sacred lock in background before QUEUE_TIMEOUT`
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
+    `${label}: poll must skip after reload while sacred lock holds (no navigationLock required)`
+  );
+
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
     navigationLock.add(normUrl);
-    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before pre-timeout poll`);
-    assert.ok(
-      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
-      `${label}: poll must skip while sacred lock holds`
-    );
-
+    applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: productUrl });
     assert.ok(
       inQueueUrls.has(normUrl),
-      `${label}: reload preserves sacred lock in background before QUEUE_TIMEOUT`
+      `${label}: pre-timeout cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
     );
     assert.ok(
-      pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
-      `${label}: poll must skip after reload while sacred lock holds (no navigationLock required)`
+      !navigationLock.has(normUrl),
+      `${label}: pre-timeout cycle ${i + 1} must not re-arm navigationLock after ${navFailTypes[i]}`
     );
-
-    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
-    for (let i = 0; i < navFailTypes.length; i++) {
-      navigationLock.add(normUrl);
-      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: productUrl });
-      assert.ok(
-        inQueueUrls.has(normUrl),
-        `${label}: pre-timeout cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        !navigationLock.has(normUrl),
-        `${label}: pre-timeout cycle ${i + 1} must not re-arm navigationLock after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
-        `${label}: poll still blocked after ${navFailTypes[i]} before QUEUE_TIMEOUT`
-      );
-    }
-
-    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock held before QUEUE_TIMEOUT fires`);
-
-    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
-      type: 'WALMART_QUEUE_TIMEOUT',
-      url: productUrl,
-    });
-    assert.ok(!inQueueUrls.has(normUrl), `${label}: QUEUE_TIMEOUT clears sacred lock after pre-timeout window`);
     assert.ok(
-      !pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
-      `${label}: poll may retry after QUEUE_TIMEOUT`
+      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+      `${label}: poll still blocked after ${navFailTypes[i]} before QUEUE_TIMEOUT`
     );
   }
+
+  assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock held before QUEUE_TIMEOUT fires`);
+
+  applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: productUrl,
+  });
+  assert.ok(!inQueueUrls.has(normUrl), `${label}: QUEUE_TIMEOUT clears sacred lock after pre-timeout window`);
+  assert.ok(
+    !pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    `${label}: poll may retry after QUEUE_TIMEOUT`
+  );
+}
+
+/**
+ * FIX-3 parity for wm5-pre-timeout-live-poll-cycle monitored /qp named tag.
+ */
+function runWm5QpPreTimeoutLivePollCycleOfflineTests() {
+  assertWm5PreTimeoutLivePollCycleSource();
+  assertWm5PreTimeoutLivePollCycleScenario({
+    label: 'wm5-pre-timeout-live-poll-cycle /qp monitored',
+    productUrl: 'https://www.walmart.com/ip/mock-qp-timeout-monitored/994',
+  });
+}
+
+/**
+ * FIX-3 parity for wm5-pre-timeout-live-poll-cycle monitored /checkout named tag.
+ */
+function runWm5CheckoutPreTimeoutLivePollCycleOfflineTests() {
+  assertWm5PreTimeoutLivePollCycleSource();
+  assertWm5PreTimeoutLivePollCycleScenario({
+    label: 'wm5-pre-timeout-live-poll-cycle /checkout monitored',
+    productUrl: 'https://www.walmart.com/ip/mock-checkout-timeout-monitored/995',
+  });
+}
+
+/**
+ * FIX-3 parity for wm5-pre-timeout-live-poll-cycle product-page queue named tag.
+ */
+function runWm5ProductQueuePreTimeoutLivePollCycleOfflineTests() {
+  assertWm5PreTimeoutLivePollCycleSource();
+  assertWm5PreTimeoutLivePollCycleScenario({
+    label: 'wm5-pre-timeout-live-poll-cycle product-page queue',
+    productUrl: 'https://www.walmart.com/ip/mock-product-queue-pretimeout/460',
+  });
 }
 
 function assertWm5PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label) {
@@ -8693,7 +8707,9 @@ async function main() {
   runWm4UnmonitoredQueueTimeoutOfflineTests();
   runWm4QpPollRecoveryRearmOfflineTests();
   runWm4CheckoutPollRecoveryRearmOfflineTests();
-  runWm5PreTimeoutLivePollCycleOfflineTests();
+  runWm5QpPreTimeoutLivePollCycleOfflineTests();
+  runWm5CheckoutPreTimeoutLivePollCycleOfflineTests();
+  runWm5ProductQueuePreTimeoutLivePollCycleOfflineTests();
   runWm5QpCheckoutPollRecoveryRearmOfflineTests();
   runWm5ProductQueuePollRecoveryRearmOfflineTests();
   runWm5CheckoutSpaSacredPollRecoveryRearmOfflineTests();
