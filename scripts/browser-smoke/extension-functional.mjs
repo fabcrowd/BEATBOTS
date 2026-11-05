@@ -694,11 +694,7 @@ function runWm5SacredRepeatedNavFailedOfflineTests() {
   }
 }
 
-/**
- * FIX-3 parity for wm5-live-poll-cycle named tag.
- * Sacred lock survives page reload + repeated NAV_FAILED during live poll (no QUEUE_TIMEOUT).
- */
-function runWm5LivePollCycleOfflineTests() {
+function assertWm5LivePollCycleSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -718,68 +714,86 @@ function runWm5LivePollCycleOfflineTests() {
     /Queue detected/,
     'wm5-live-poll-cycle: checkout queue detection log in source'
   );
+}
 
-  const scenarios = [
-    {
-      label: 'wm5-live-poll-cycle product-page queue',
-      lockUrl: 'https://www.walmart.com/ip/mock-queue/456',
-    },
-    {
-      label: 'wm5-live-poll-cycle /qp monitored',
-      lockUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
-    },
-    {
-      label: 'wm5-live-poll-cycle /checkout sacred',
-      lockUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
-    },
-  ];
+function assertWm5LivePollCycleScenario({ label, lockUrl }) {
+  const normUrl = normalizeProductUrl(lockUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
 
-  for (const { label, lockUrl } of scenarios) {
-    const normUrl = normalizeProductUrl(lockUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
+  applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: lockUrl });
+  assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before live poll`);
+  assert.ok(
+    pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    `${label}: poll must skip while sacred lock holds`
+  );
 
-    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: lockUrl });
-    assert.ok(inQueueUrls.has(normUrl), `${label}: sacred lock armed before live poll`);
-    assert.ok(
-      pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
-      `${label}: poll must skip while sacred lock holds`
-    );
+  // Simulated page reload — background inQueueUrls persists (no QUEUE_TIMEOUT follows).
+  assert.ok(inQueueUrls.has(normUrl), `${label}: reload preserves sacred lock during live poll`);
+  assert.ok(
+    pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
+    `${label}: poll must skip after reload while sacred lock holds`
+  );
 
-    // Simulated page reload — background inQueueUrls persists (no QUEUE_TIMEOUT follows).
-    assert.ok(inQueueUrls.has(normUrl), `${label}: reload preserves sacred lock during live poll`);
-    assert.ok(
-      pollWouldSkipNavigation(normUrl, inQueueUrls, new Set()),
-      `${label}: poll must skip after reload while sacred lock holds`
-    );
-
-    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
-    for (let i = 0; i < navFailTypes.length; i++) {
-      navigationLock.add(normUrl);
-      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: lockUrl });
-      assert.ok(
-        inQueueUrls.has(normUrl),
-        `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        !navigationLock.has(normUrl),
-        `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
-        `${label}: poll still blocked after ${navFailTypes[i]} during live poll`
-      );
-    }
-
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: lockUrl });
     assert.ok(
       inQueueUrls.has(normUrl),
-      `${label}: sacred lock must persist at end of live poll (no QUEUE_TIMEOUT)`
+      `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      !navigationLock.has(normUrl),
+      `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
     );
     assert.ok(
       pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
-      `${label}: poll must still skip navigate while sacred lock holds at end of live poll`
+      `${label}: poll still blocked after ${navFailTypes[i]} during live poll`
     );
   }
+
+  assert.ok(
+    inQueueUrls.has(normUrl),
+    `${label}: sacred lock must persist at end of live poll (no QUEUE_TIMEOUT)`
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normUrl, inQueueUrls, navigationLock),
+    `${label}: poll must still skip navigate while sacred lock holds at end of live poll`
+  );
+}
+
+/**
+ * FIX-3 parity for wm5-live-poll-cycle product-page queue named tag.
+ */
+function runWm5ProductQueueLivePollCycleOfflineTests() {
+  assertWm5LivePollCycleSource();
+  assertWm5LivePollCycleScenario({
+    label: 'wm5-live-poll-cycle product-page queue',
+    lockUrl: 'https://www.walmart.com/ip/mock-queue/456',
+  });
+}
+
+/**
+ * FIX-3 parity for wm5-live-poll-cycle monitored /qp named tag.
+ */
+function runWm5QpLivePollCycleOfflineTests() {
+  assertWm5LivePollCycleSource();
+  assertWm5LivePollCycleScenario({
+    label: 'wm5-live-poll-cycle /qp monitored',
+    lockUrl: 'https://www.walmart.com/ip/mock-qp-product/999',
+  });
+}
+
+/**
+ * FIX-3 parity for wm5-live-poll-cycle monitored /checkout sacred named tag.
+ */
+function runWm5CheckoutLivePollCycleOfflineTests() {
+  assertWm5LivePollCycleSource();
+  assertWm5LivePollCycleScenario({
+    label: 'wm5-live-poll-cycle /checkout sacred',
+    lockUrl: 'https://www.walmart.com/ip/mock-wm6-checkout/789',
+  });
 }
 
 function assertWm4LivePollCycleSource() {
@@ -8670,7 +8684,9 @@ async function main() {
   runWm5SacredSurvivesNavFailedOfflineTests();
   runWm5SacredRepeatedNavFailedOfflineTests();
   runMon3LivePollCycleOfflineTests();
-  runWm5LivePollCycleOfflineTests();
+  runWm5ProductQueueLivePollCycleOfflineTests();
+  runWm5QpLivePollCycleOfflineTests();
+  runWm5CheckoutLivePollCycleOfflineTests();
   runWm4QpLivePollCycleOfflineTests();
   runWm4CheckoutLivePollCycleOfflineTests();
   runWm4CrossLivePollCycleOfflineTests();
