@@ -2201,10 +2201,7 @@ function assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label
   );
 }
 
-/**
- * FIX-3 parity for wm6-repeated-nav-failed on missing ATC + cross-page missing ATC named tags.
- */
-function runWm6MissingAtcRepeatedNavFailedOfflineTests() {
+function assertWm6MissingAtcRepeatedNavFailedSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -2219,6 +2216,13 @@ function runWm6MissingAtcRepeatedNavFailedOfflineTests() {
     /wmAtcWaitTimeoutMs/,
     'wm6-missing-atc-repeated-nav-failed: ATC wait helper in source'
   );
+}
+
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed missing ATC on /ip/mock-no-atc/559 named tag.
+ */
+function runWm6MissingAtcRepeatedNavFailedOfflineTests() {
+  assertWm6MissingAtcRepeatedNavFailedSource();
 
   const noAtcFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-no-atc.html'),
@@ -2230,6 +2234,19 @@ function runWm6MissingAtcRepeatedNavFailedOfflineTests() {
     'wm6-missing-atc-repeated-nav-failed: fixture marker'
   );
 
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'missing ATC (wm6-repeated-nav-failed)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed cross-page missing ATC named tag.
+ */
+function runWm6MissingAtcCrossRepeatedNavFailedOfflineTests() {
+  assertWm6MissingAtcRepeatedNavFailedSource();
+
   const noAtcCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-no-atc-cross.html'),
     'utf8'
@@ -2237,24 +2254,14 @@ function runWm6MissingAtcRepeatedNavFailedOfflineTests() {
   assert.match(
     noAtcCrossFixture,
     /data-tch-fixture="walmart-product-no-atc-cross"/,
-    'wm6-missing-atc-repeated-nav-failed: cross-page fixture marker'
+    'wm6-missing-atc-cross-repeated-nav-failed: cross-page fixture marker'
   );
 
-  const scenarios = [
-    {
-      label: 'missing ATC (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
-    },
-    {
-      label: 'cross-page missing ATC (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
-      tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl);
-  }
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+    'cross-page missing ATC (wm6-repeated-nav-failed)',
+    'https://www.walmart.com/ip/mock-no-atc-cross/998'
+  );
 }
 
 /**
@@ -8734,6 +8741,7 @@ async function main() {
   runWm2RepeatedNavFailedElementOfflineTests();
   runWm2LivePollCycleElementOfflineTests();
   runWm6MissingAtcRepeatedNavFailedOfflineTests();
+  runWm6MissingAtcCrossRepeatedNavFailedOfflineTests();
   runWm6PriceGuardRepeatedNavFailedOfflineTests();
   runWm6PxRepeatedNavFailedOfflineTests();
   runWm6CartRepeatedNavFailedOfflineTests();
