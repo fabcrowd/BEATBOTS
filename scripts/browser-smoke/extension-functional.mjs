@@ -3703,11 +3703,7 @@ function runWm7OfferIdReadyElementOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for tgt-repeated-nav-failed named tag.
- * Target error paths: repeated NAV_FAILED must never arm sacred lock.
- */
-function runTgtRepeatedNavFailedOfflineTests() {
+function assertTgtRepeatedNavFailedSource() {
   const targetSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/content.js'),
     'utf8'
@@ -3718,8 +3714,9 @@ function runTgtRepeatedNavFailedOfflineTests() {
     /handleCheckoutStall timed out — releasing navigation lock/,
     'tgt-repeated-nav-failed: checkout SPA timeout NAV_FAILED path in source'
   );
+}
 
-  function assertTgtRepeatedNavFailed(monitorProductUrl, label, tabUrl) {
+function assertTgtRepeatedNavFailed(monitorProductUrl, label, tabUrl) {
     const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
     const normTabUrl = tabUrl ? normalizeProductUrl(tabUrl) : null;
 
@@ -3758,27 +3755,42 @@ function runTgtRepeatedNavFailedOfflineTests() {
       pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
       `${label}: contrast WM-5 — sacred lock would block poll; Target error path does not arm it`
     );
-  }
+}
 
-  const scenarios = [
-    {
-      label: 'product page (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-product',
-    },
-    {
-      label: 'missing ATC (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/-/A-66666666',
-    },
-    {
-      label: 'cross-page missing ATC (tgt-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
-      tabUrl: 'https://www.target.com/p/mock-missing-atc-cross/A-880095',
-    },
-  ];
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed on /p/mock-product named tag.
+ */
+function runTgtProductRepeatedNavFailedOfflineTests() {
+  assertTgtRepeatedNavFailedSource();
+  assertTgtRepeatedNavFailed(
+    'https://www.target.com/p/mock-product',
+    'product page (tgt-repeated-nav-failed)',
+    null
+  );
+}
 
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertTgtRepeatedNavFailed(monitorProductUrl, label, tabUrl);
-  }
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed missing ATC on /p/-/A-66666666 named tag.
+ */
+function runTgtMissingAtcRepeatedNavFailedOfflineTests() {
+  assertTgtRepeatedNavFailedSource();
+  assertTgtRepeatedNavFailed(
+    'https://www.target.com/p/-/A-66666666',
+    'missing ATC (tgt-repeated-nav-failed)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for tgt-repeated-nav-failed cross-page missing ATC named tag.
+ */
+function runTgtMissingAtcCrossRepeatedNavFailedOfflineTests() {
+  assertTgtRepeatedNavFailedSource();
+  assertTgtRepeatedNavFailed(
+    'https://www.target.com/p/mock-missing-atc-cross-monitor/A-880094',
+    'cross-page missing ATC (tgt-repeated-nav-failed)',
+    'https://www.target.com/p/mock-missing-atc-cross/A-880095'
+  );
 }
 
 /**
@@ -8747,7 +8759,9 @@ async function main() {
   runWm6PxTimeoutNavFailedElementOfflineTests();
   runWm6PxTimeoutMsOverrideElementOfflineTests();
   runWm7OfferIdReadyElementOfflineTests();
-  runTgtRepeatedNavFailedOfflineTests();
+  runTgtProductRepeatedNavFailedOfflineTests();
+  runTgtMissingAtcRepeatedNavFailedOfflineTests();
+  runTgtMissingAtcCrossRepeatedNavFailedOfflineTests();
   runTgtCartRepeatedNavFailedOfflineTests();
   runTgtCartCrossRepeatedNavFailedOfflineTests();
   runTgtCheckoutSpaRepeatedNavFailedOfflineTests();
