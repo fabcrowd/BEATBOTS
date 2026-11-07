@@ -8467,26 +8467,15 @@ function runMon2LivePollCycleTargetSigninCrossOfflineTests() {
   );
 }
 
-/**
- * MON-2 offline parity: samsclub-only monitor during live poll on Target/Walmart tab.
- * Parity with FIX-3 mon2-samsclub-live-poll-cycle (fixture-e2e has browser coverage).
- */
-function runMon2SamsclubLivePollCycleOfflineTests() {
-  const crossRetailerPages = [
-    { label: 'Target product', url: 'https://www.target.com/p/mock-product/A-880080' },
-    { label: 'Target checkout', url: 'https://www.target.com/checkout/review' },
-    { label: 'Target review cross', url: 'https://www.target.com/checkout/review-cross' },
-    { label: 'Target signin gate', url: 'https://www.target.com/checkout/signin-gate' },
-    { label: 'Target signin cross', url: 'https://www.target.com/checkout/signin-gate-cross' },
-    { label: 'Walmart pre-drop', url: 'https://www.walmart.com/ip/mock-predrop/333' },
-    { label: 'Walmart checkout', url: 'https://www.walmart.com/checkout/unmonitored' },
-  ];
-  const samsclubProbeUrl = 'https://www.samsclub.com/p/mock-mon2-walmart-live/444';
-  const normSamsclubProbeUrl = normalizeProductUrl(samsclubProbeUrl);
+const MON2_SAMSCLUB_PROBE_URL = 'https://www.samsclub.com/p/mock-mon2-walmart-live/444';
+const MON2_TARGET_ON_WALMART_PROBE_URL = 'https://www.target.com/p/mock-mon2-walmart-tab/777';
+const MON2_WALMART_ON_SAMS_PROBE_URL = 'https://www.walmart.com/ip/mock-mon2-samsclub-live/666';
 
+function assertMon2SamsclubOnlyMonitorProductFilter() {
+  const crossPageUrl = 'https://www.target.com/p/mock-product/A-880080';
   const allProducts = [
-    { url: crossRetailerPages[0].url, qty: 1, name: 'MON-2 Target product' },
-    { url: samsclubProbeUrl, qty: 1, name: 'MON-2 Sam probe' },
+    { url: crossPageUrl, qty: 1, name: 'MON-2 Target product' },
+    { url: MON2_SAMSCLUB_PROBE_URL, qty: 1, name: 'MON-2 Sam probe' },
   ];
   const samsclubFilter = /samsclub\.com/i;
   const samsclubOnlyProducts = filterProductsByRetailer(allProducts, samsclubFilter);
@@ -8504,92 +8493,135 @@ function runMon2SamsclubLivePollCycleOfflineTests() {
     !samsclubOnlyProducts.some((p) => /target\.com|walmart\.com/i.test(p.url)),
     'MON-2 samsclub live poll: cross-retailer URLs must be excluded from samsclub-only monitor'
   );
-
-  for (const { label, url } of crossRetailerPages) {
-    const normCrossUrl = normalizeProductUrl(url);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.ok(
-      !inQueueUrls.has(normCrossUrl),
-      `MON-2 samsclub live poll: ${label} must not be sacred lock key before poll`
-    );
-
-    // Simulated cross-retailer tab reload during samsclub-only poll — no sacred lock.
-    assert.ok(
-      !inQueueUrls.has(normCrossUrl),
-      `MON-2 samsclub live poll: ${label} reload must not arm inQueueUrls on ${normCrossUrl}`
-    );
-    assert.ok(
-      samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
-      `MON-2 samsclub live poll: samsclub-only products must hold after ${label} reload`
-    );
-
-    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
-    for (let i = 0; i < liveSignalTypes.length; i++) {
-      navigationLock.add(normSamsclubProbeUrl);
-      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
-        applyAtcSuccess(navigationLock, inQueueUrls, {
-          type: 'ATC_SUCCESS',
-          url: samsclubProbeUrl,
-        });
-      } else {
-        applyWalmartNavFailed(navigationLock, inQueueUrls, {
-          type: liveSignalTypes[i],
-          url: samsclubProbeUrl,
-        });
-      }
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `MON-2 samsclub live poll cycle ${i + 1} on ${label} must not arm inQueueUrls after ${liveSignalTypes[i]}`
-      );
-      assert.ok(
-        !inQueueUrls.has(normCrossUrl),
-        `MON-2 samsclub live poll cycle ${i + 1} must not sacred-lock ${label} ${normCrossUrl} after ${liveSignalTypes[i]}`
-      );
-      assert.ok(
-        samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
-        `MON-2 samsclub live poll cycle ${i + 1} must keep samsclub-only products on ${label} after ${liveSignalTypes[i]}`
-      );
-      if (navigationLock.has(normSamsclubProbeUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normSamsclubProbeUrl),
-          `MON-2 samsclub live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normSamsclubProbeUrl} after ${liveSignalTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normCrossUrl, inQueueUrls, navigationLock),
-        `MON-2 samsclub live poll cycle ${i + 1} must not block poll on unmonitored ${label}`
-      );
-    }
-
-    assert.equal(
-      inQueueUrls.size,
-      0,
-      `MON-2 samsclub live poll must not arm inQueueUrls on ${label}`
-    );
-  }
+  return { samsclubFilter, samsclubOnlyProducts };
 }
 
 /**
- * MON-2 offline parity: target-only monitor during live poll on Walmart tab.
- * Parity with FIX-3 mon2-target-live-poll-cycle (fixture-e2e has browser coverage).
+ * MON-2 offline parity: samsclub-only monitor during live poll on one cross-retailer tab.
+ * Parity with FIX-3 mon2-samsclub-live-poll-cycle (fixture-e2e has browser coverage).
  */
-function runMon2TargetLivePollCycleOfflineTests() {
-  const walmartPages = [
-    { label: 'pre-drop product', url: 'https://www.walmart.com/ip/mock-predrop/123' },
-    { label: 'checkout unmonitored', url: 'https://www.walmart.com/checkout/unmonitored' },
-    { label: 'cart', url: 'https://www.walmart.com/cart/no-checkout' },
-  ];
-  const targetProbeUrl = 'https://www.target.com/p/mock-mon2-walmart-tab/777';
-  const normTargetProbeUrl = normalizeProductUrl(targetProbeUrl);
-  const targetFilter = /target\.com/i;
+function assertMon2SamsclubOnlyLivePollOnCrossTab(crossUrl, routeLabel) {
+  const normCrossUrl = normalizeProductUrl(crossUrl);
+  const normSamsclubProbeUrl = normalizeProductUrl(MON2_SAMSCLUB_PROBE_URL);
+  const { samsclubFilter, samsclubOnlyProducts } = assertMon2SamsclubOnlyMonitorProductFilter();
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
 
+  assert.ok(
+    !inQueueUrls.has(normCrossUrl),
+    `MON-2 samsclub live poll (${routeLabel}): must not be sacred lock key before poll`
+  );
+  assert.ok(
+    !inQueueUrls.has(normCrossUrl),
+    `MON-2 samsclub live poll (${routeLabel}): reload must not arm inQueueUrls on ${normCrossUrl}`
+  );
+  assert.ok(
+    samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
+    `MON-2 samsclub live poll (${routeLabel}): samsclub-only products must hold after reload`
+  );
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normSamsclubProbeUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, {
+        type: 'ATC_SUCCESS',
+        url: MON2_SAMSCLUB_PROBE_URL,
+      });
+    } else {
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: liveSignalTypes[i],
+        url: MON2_SAMSCLUB_PROBE_URL,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 samsclub live poll (${routeLabel}) cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCrossUrl),
+      `MON-2 samsclub live poll (${routeLabel}) cycle ${i + 1} must not sacred-lock ${normCrossUrl} after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      samsclubOnlyProducts.every((p) => samsclubFilter.test(p.url)),
+      `MON-2 samsclub live poll (${routeLabel}) cycle ${i + 1} must keep samsclub-only products after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normSamsclubProbeUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normSamsclubProbeUrl),
+        `MON-2 samsclub live poll (${routeLabel}) cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normSamsclubProbeUrl} after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normCrossUrl, inQueueUrls, navigationLock),
+      `MON-2 samsclub live poll (${routeLabel}) cycle ${i + 1} must not block poll on unmonitored tab`
+    );
+  }
+
+  assert.equal(
+    inQueueUrls.size,
+    0,
+    `MON-2 samsclub live poll (${routeLabel}) must not arm inQueueUrls`
+  );
+}
+
+function runMon2SamsclubLivePollTargetProductOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.target.com/p/mock-product/A-880080',
+    'Target product'
+  );
+}
+
+function runMon2SamsclubLivePollTargetCheckoutOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.target.com/checkout/review',
+    'Target checkout'
+  );
+}
+
+function runMon2SamsclubLivePollTargetReviewCrossOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.target.com/checkout/review-cross',
+    'Target review cross'
+  );
+}
+
+function runMon2SamsclubLivePollTargetSigninOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.target.com/checkout/signin-gate',
+    'Target signin gate'
+  );
+}
+
+function runMon2SamsclubLivePollTargetSigninCrossOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.target.com/checkout/signin-gate-cross',
+    'Target signin cross'
+  );
+}
+
+function runMon2SamsclubLivePollWalmartPredropOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.walmart.com/ip/mock-predrop/333',
+    'Walmart pre-drop'
+  );
+}
+
+function runMon2SamsclubLivePollWalmartCheckoutOfflineTests() {
+  assertMon2SamsclubOnlyLivePollOnCrossTab(
+    'https://www.walmart.com/checkout/unmonitored',
+    'Walmart checkout'
+  );
+}
+
+function assertMon2TargetOnlyMonitorProductFilter() {
+  const walmartPageUrl = 'https://www.walmart.com/ip/mock-predrop/123';
   const allProducts = [
-    { url: walmartPages[0].url, qty: 1, name: 'MON-2 Walmart product' },
-    { url: targetProbeUrl, qty: 1, name: 'MON-2 Target probe' },
+    { url: walmartPageUrl, qty: 1, name: 'MON-2 Walmart product' },
+    { url: MON2_TARGET_ON_WALMART_PROBE_URL, qty: 1, name: 'MON-2 Target probe' },
   ];
+  const targetFilter = /target\.com/i;
   const targetOnlyProducts = filterProductsByRetailer(allProducts, targetFilter);
 
   assert.equal(targetOnlyProducts.length, 1, 'MON-2 target live poll: target-only monitor sends one product');
@@ -8601,91 +8633,107 @@ function runMon2TargetLivePollCycleOfflineTests() {
     !targetOnlyProducts.some((p) => /walmart\.com/i.test(p.url)),
     'MON-2 target live poll: walmart URL must be excluded from target-only monitor'
   );
-
-  for (const { label, url } of walmartPages) {
-    const normWalmartUrl = normalizeProductUrl(url);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.ok(
-      !inQueueUrls.has(normWalmartUrl),
-      `MON-2 target live poll: ${label} must not be sacred lock key before poll`
-    );
-
-    assert.ok(
-      !inQueueUrls.has(normWalmartUrl),
-      `MON-2 target live poll: ${label} reload must not arm inQueueUrls on ${normWalmartUrl}`
-    );
-    assert.ok(
-      targetOnlyProducts.every((p) => targetFilter.test(p.url)),
-      `MON-2 target live poll: target-only products must hold after ${label} reload`
-    );
-
-    const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
-    for (let i = 0; i < liveSignalTypes.length; i++) {
-      navigationLock.add(normTargetProbeUrl);
-      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
-        applyAtcSuccess(navigationLock, inQueueUrls, {
-          type: 'ATC_SUCCESS',
-          url: targetProbeUrl,
-        });
-      } else {
-        applyWalmartNavFailed(navigationLock, inQueueUrls, {
-          type: liveSignalTypes[i],
-          url: targetProbeUrl,
-        });
-      }
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `MON-2 target live poll cycle ${i + 1} on ${label} must not arm inQueueUrls after ${liveSignalTypes[i]}`
-      );
-      assert.ok(
-        !inQueueUrls.has(normWalmartUrl),
-        `MON-2 target live poll cycle ${i + 1} must not sacred-lock ${label} ${normWalmartUrl} after ${liveSignalTypes[i]}`
-      );
-      assert.ok(
-        targetOnlyProducts.every((p) => targetFilter.test(p.url)),
-        `MON-2 target live poll cycle ${i + 1} must keep target-only products on ${label} after ${liveSignalTypes[i]}`
-      );
-      if (navigationLock.has(normTargetProbeUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normTargetProbeUrl),
-          `MON-2 target live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normTargetProbeUrl} after ${liveSignalTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normWalmartUrl, inQueueUrls, navigationLock),
-        `MON-2 target live poll cycle ${i + 1} must not block poll on unmonitored ${label}`
-      );
-    }
-
-    assert.equal(
-      inQueueUrls.size,
-      0,
-      `MON-2 target live poll must not arm inQueueUrls on ${label}`
-    );
-  }
+  return { targetFilter, targetOnlyProducts };
 }
 
 /**
- * MON-2 offline parity: walmart-only monitor during live poll on Sam's Club tab.
- * Parity with FIX-3 mon2-walmart-live-poll-cycle (fixture-e2e has browser coverage).
+ * MON-2 offline parity: target-only monitor during live poll on one Walmart tab route.
+ * Parity with FIX-3 mon2-target-live-poll-cycle (fixture-e2e has browser coverage).
  */
-function runMon2WalmartLivePollCycleOfflineTests() {
-  const samsclubPages = [
-    { label: 'cart', url: 'https://www.samsclub.com/cart' },
-    { label: 'checkout', url: 'https://www.samsclub.com/checkout' },
-    { label: 'review cross', url: 'https://www.samsclub.com/checkout/review-cross' },
-  ];
-  const walmartProbeUrl = 'https://www.walmart.com/ip/mock-mon2-samsclub-live/666';
-  const normWalmartProbeUrl = normalizeProductUrl(walmartProbeUrl);
-  const walmartFilter = /walmart\.com/i;
+function assertMon2TargetOnlyLivePollOnWalmartTab(walmartUrl, routeLabel) {
+  const normWalmartUrl = normalizeProductUrl(walmartUrl);
+  const normTargetProbeUrl = normalizeProductUrl(MON2_TARGET_ON_WALMART_PROBE_URL);
+  const { targetFilter, targetOnlyProducts } = assertMon2TargetOnlyMonitorProductFilter();
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
 
+  assert.ok(
+    !inQueueUrls.has(normWalmartUrl),
+    `MON-2 target live poll (${routeLabel}): must not be sacred lock key before poll`
+  );
+  assert.ok(
+    !inQueueUrls.has(normWalmartUrl),
+    `MON-2 target live poll (${routeLabel}): reload must not arm inQueueUrls on ${normWalmartUrl}`
+  );
+  assert.ok(
+    targetOnlyProducts.every((p) => targetFilter.test(p.url)),
+    `MON-2 target live poll (${routeLabel}): target-only products must hold after reload`
+  );
+
+  const liveSignalTypes = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED', 'ATC_SUCCESS'];
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normTargetProbeUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, {
+        type: 'ATC_SUCCESS',
+        url: MON2_TARGET_ON_WALMART_PROBE_URL,
+      });
+    } else {
+      applyWalmartNavFailed(navigationLock, inQueueUrls, {
+        type: liveSignalTypes[i],
+        url: MON2_TARGET_ON_WALMART_PROBE_URL,
+      });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `MON-2 target live poll (${routeLabel}) cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normWalmartUrl),
+      `MON-2 target live poll (${routeLabel}) cycle ${i + 1} must not sacred-lock ${normWalmartUrl} after ${liveSignalTypes[i]}`
+    );
+    assert.ok(
+      targetOnlyProducts.every((p) => targetFilter.test(p.url)),
+      `MON-2 target live poll (${routeLabel}) cycle ${i + 1} must keep target-only products after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normTargetProbeUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normTargetProbeUrl),
+        `MON-2 target live poll (${routeLabel}) cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normTargetProbeUrl} after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normWalmartUrl, inQueueUrls, navigationLock),
+      `MON-2 target live poll (${routeLabel}) cycle ${i + 1} must not block poll on unmonitored tab`
+    );
+  }
+
+  assert.equal(
+    inQueueUrls.size,
+    0,
+    `MON-2 target live poll (${routeLabel}) must not arm inQueueUrls`
+  );
+}
+
+function runMon2TargetLivePollWalmartPredropOfflineTests() {
+  assertMon2TargetOnlyLivePollOnWalmartTab(
+    'https://www.walmart.com/ip/mock-predrop/123',
+    'pre-drop product'
+  );
+}
+
+function runMon2TargetLivePollWalmartCheckoutOfflineTests() {
+  assertMon2TargetOnlyLivePollOnWalmartTab(
+    'https://www.walmart.com/checkout/unmonitored',
+    'checkout unmonitored'
+  );
+}
+
+function runMon2TargetLivePollWalmartCartOfflineTests() {
+  assertMon2TargetOnlyLivePollOnWalmartTab(
+    'https://www.walmart.com/cart/no-checkout',
+    'cart'
+  );
+}
+
+function assertMon2WalmartOnlyOnSamsMonitorProductFilter() {
+  const samsPageUrl = 'https://www.samsclub.com/cart';
   const allProducts = [
-    { url: samsclubPages[0].url, qty: 1, name: 'MON-2 Sam product' },
-    { url: walmartProbeUrl, qty: 1, name: 'MON-2 Walmart probe' },
+    { url: samsPageUrl, qty: 1, name: 'MON-2 Sam product' },
+    { url: MON2_WALMART_ON_SAMS_PROBE_URL, qty: 1, name: 'MON-2 Walmart probe' },
   ];
+  const walmartFilter = /walmart\.com/i;
   const walmartOnlyProducts = filterProductsByRetailer(allProducts, walmartFilter);
 
   assert.equal(walmartOnlyProducts.length, 1, 'MON-2 walmart live poll: walmart-only monitor sends one product');
@@ -8697,64 +8745,85 @@ function runMon2WalmartLivePollCycleOfflineTests() {
     !walmartOnlyProducts.some((p) => /samsclub\.com/i.test(p.url)),
     'MON-2 walmart live poll: samsclub URL must be excluded from walmart-only monitor'
   );
+  return { walmartFilter, walmartOnlyProducts };
+}
 
-  for (const { label, url } of samsclubPages) {
-    const normSamsUrl = normalizeProductUrl(url);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
+/**
+ * MON-2 offline parity: walmart-only monitor during live poll on one Sam's Club tab route.
+ * Parity with FIX-3 mon2-walmart-live-poll-cycle (fixture-e2e has browser coverage).
+ */
+function assertMon2WalmartOnlyLivePollOnSamsTab(samsUrl, routeLabel) {
+  const normSamsUrl = normalizeProductUrl(samsUrl);
+  const normWalmartProbeUrl = normalizeProductUrl(MON2_WALMART_ON_SAMS_PROBE_URL);
+  const { walmartFilter, walmartOnlyProducts } = assertMon2WalmartOnlyOnSamsMonitorProductFilter();
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
 
-    assert.ok(
-      !inQueueUrls.has(normSamsUrl),
-      `MON-2 walmart live poll: ${label} must not be sacred lock key before poll`
-    );
+  assert.ok(
+    !inQueueUrls.has(normSamsUrl),
+    `MON-2 walmart live poll (${routeLabel}): must not be sacred lock key before poll`
+  );
+  assert.ok(
+    !inQueueUrls.has(normSamsUrl),
+    `MON-2 walmart live poll (${routeLabel}): reload must not arm inQueueUrls on ${normSamsUrl}`
+  );
+  assert.ok(
+    walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+    `MON-2 walmart live poll (${routeLabel}): walmart-only products must hold after reload`
+  );
 
-    assert.ok(
-      !inQueueUrls.has(normSamsUrl),
-      `MON-2 walmart live poll: ${label} reload must not arm inQueueUrls on ${normSamsUrl}`
-    );
-    assert.ok(
-      walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
-      `MON-2 walmart live poll: walmart-only products must hold after ${label} reload`
-    );
-
-    const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
-    for (let i = 0; i < navFailTypes.length; i++) {
-      navigationLock.add(normWalmartProbeUrl);
-      applyWalmartNavFailed(navigationLock, inQueueUrls, {
-        type: navFailTypes[i],
-        url: walmartProbeUrl,
-      });
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `MON-2 walmart live poll cycle ${i + 1} on ${label} must not arm inQueueUrls after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        !inQueueUrls.has(normSamsUrl),
-        `MON-2 walmart live poll cycle ${i + 1} must not sacred-lock ${label} ${normSamsUrl} after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
-        `MON-2 walmart live poll cycle ${i + 1} must keep walmart-only products on ${label} after ${navFailTypes[i]}`
-      );
-      if (navigationLock.has(normWalmartProbeUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normWalmartProbeUrl),
-          `MON-2 walmart live poll cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normSamsUrl, inQueueUrls, navigationLock),
-        `MON-2 walmart live poll cycle ${i + 1} must not block poll on unmonitored ${label}`
-      );
-    }
-
+  const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normWalmartProbeUrl);
+    applyWalmartNavFailed(navigationLock, inQueueUrls, {
+      type: navFailTypes[i],
+      url: MON2_WALMART_ON_SAMS_PROBE_URL,
+    });
     assert.equal(
       inQueueUrls.size,
       0,
-      `MON-2 walmart live poll must not arm inQueueUrls on ${label}`
+      `MON-2 walmart live poll (${routeLabel}) cycle ${i + 1} must not arm inQueueUrls after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      !inQueueUrls.has(normSamsUrl),
+      `MON-2 walmart live poll (${routeLabel}) cycle ${i + 1} must not sacred-lock ${normSamsUrl} after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      walmartOnlyProducts.every((p) => walmartFilter.test(p.url)),
+      `MON-2 walmart live poll (${routeLabel}) cycle ${i + 1} must keep walmart-only products after ${navFailTypes[i]}`
+    );
+    if (navigationLock.has(normWalmartProbeUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normWalmartProbeUrl),
+        `MON-2 walmart live poll (${routeLabel}) cycle ${i + 1} navigationLock alone must not imply sacred lock on ${normWalmartProbeUrl} after ${navFailTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normSamsUrl, inQueueUrls, navigationLock),
+      `MON-2 walmart live poll (${routeLabel}) cycle ${i + 1} must not block poll on unmonitored tab`
     );
   }
+
+  assert.equal(
+    inQueueUrls.size,
+    0,
+    `MON-2 walmart live poll (${routeLabel}) must not arm inQueueUrls`
+  );
+}
+
+function runMon2WalmartLivePollSamsCartOfflineTests() {
+  assertMon2WalmartOnlyLivePollOnSamsTab('https://www.samsclub.com/cart', 'cart');
+}
+
+function runMon2WalmartLivePollSamsCheckoutOfflineTests() {
+  assertMon2WalmartOnlyLivePollOnSamsTab('https://www.samsclub.com/checkout', 'checkout');
+}
+
+function runMon2WalmartLivePollSamsReviewCrossOfflineTests() {
+  assertMon2WalmartOnlyLivePollOnSamsTab(
+    'https://www.samsclub.com/checkout/review-cross',
+    'review cross'
+  );
 }
 
 async function sendBg(page, msg) {
@@ -8916,9 +8985,19 @@ async function main() {
   runMon2LivePollCycleTargetReviewCrossOfflineTests();
   runMon2LivePollCycleTargetSigninOfflineTests();
   runMon2LivePollCycleTargetSigninCrossOfflineTests();
-  runMon2SamsclubLivePollCycleOfflineTests();
-  runMon2WalmartLivePollCycleOfflineTests();
-  runMon2TargetLivePollCycleOfflineTests();
+  runMon2SamsclubLivePollTargetProductOfflineTests();
+  runMon2SamsclubLivePollTargetCheckoutOfflineTests();
+  runMon2SamsclubLivePollTargetReviewCrossOfflineTests();
+  runMon2SamsclubLivePollTargetSigninOfflineTests();
+  runMon2SamsclubLivePollTargetSigninCrossOfflineTests();
+  runMon2SamsclubLivePollWalmartPredropOfflineTests();
+  runMon2SamsclubLivePollWalmartCheckoutOfflineTests();
+  runMon2WalmartLivePollSamsCartOfflineTests();
+  runMon2WalmartLivePollSamsCheckoutOfflineTests();
+  runMon2WalmartLivePollSamsReviewCrossOfflineTests();
+  runMon2TargetLivePollWalmartPredropOfflineTests();
+  runMon2TargetLivePollWalmartCheckoutOfflineTests();
+  runMon2TargetLivePollWalmartCartOfflineTests();
 
   const launched = await launchWithExtension({ profilePrefix: 'tch-func-' });
   browser = launched.browser;
