@@ -2300,22 +2300,36 @@ function runWm6PriceGuardRepeatedNavFailedOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for wm6-repeated-nav-failed on PX hang-tight + captcha + block + override + cross-page PX named tags.
- */
-function runWm6PxRepeatedNavFailedOfflineTests() {
+function assertWm6PxRepeatedNavFailedSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
   assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-px-repeated-nav-failed: PX timeout helper in source');
+}
 
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed PX hang-tight named tag.
+ */
+function runWm6PxHangTightRepeatedNavFailedOfflineTests() {
+  assertWm6PxRepeatedNavFailedSource();
   const pxFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px.html'),
     'utf8'
   );
-  assert.match(pxFixture, /data-tch-fixture="walmart-product-px"/, 'wm6-px-repeated-nav-failed: PX hang-tight fixture marker');
+  assert.match(pxFixture, /data-tch-fixture="walmart-product-px"/, 'wm6-px-hang-tight-repeated-nav-failed: PX hang-tight fixture marker');
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-px/555',
+    'PX hang-tight (wm6-repeated-nav-failed)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed PX captcha named tag.
+ */
+function runWm6PxCaptchaRepeatedNavFailedOfflineTests() {
+  assertWm6PxRepeatedNavFailedSource();
   const pxCaptchaFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-captcha.html'),
     'utf8'
@@ -2323,9 +2337,20 @@ function runWm6PxRepeatedNavFailedOfflineTests() {
   assert.match(
     pxCaptchaFixture,
     /data-tch-fixture="walmart-product-px-captcha"/,
-    'wm6-px-repeated-nav-failed: PX captcha fixture marker'
+    'wm6-px-captcha-repeated-nav-failed: PX captcha fixture marker'
   );
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-px-captcha/556',
+    'PX captcha (wm6-repeated-nav-failed)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed PX block named tag.
+ */
+function runWm6PxBlockRepeatedNavFailedOfflineTests() {
+  assertWm6PxRepeatedNavFailedSource();
   const pxBlockFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-block.html'),
     'utf8'
@@ -2333,9 +2358,20 @@ function runWm6PxRepeatedNavFailedOfflineTests() {
   assert.match(
     pxBlockFixture,
     /data-tch-fixture="walmart-product-px-block"/,
-    'wm6-px-repeated-nav-failed: PX block fixture marker'
+    'wm6-px-block-repeated-nav-failed: PX block fixture marker'
   );
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-px-block/557',
+    'PX block (wm6-repeated-nav-failed)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed PX timeout override named tag.
+ */
+function runWm6PxOverrideRepeatedNavFailedOfflineTests() {
+  assertWm6PxRepeatedNavFailedSource();
   const pxOverrideFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-override.html'),
     'utf8'
@@ -2343,9 +2379,20 @@ function runWm6PxRepeatedNavFailedOfflineTests() {
   assert.match(
     pxOverrideFixture,
     /data-tch-fixture="walmart-product-px-override"/,
-    'wm6-px-repeated-nav-failed: PX timeout override fixture marker'
+    'wm6-px-override-repeated-nav-failed: PX timeout override fixture marker'
   );
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-px-override/558',
+    'PX timeout override (wm6-repeated-nav-failed)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-repeated-nav-failed cross-page PX named tag.
+ */
+function runWm6PxCrossRepeatedNavFailedOfflineTests() {
+  assertWm6PxRepeatedNavFailedSource();
   const pxCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-cross.html'),
     'utf8'
@@ -2353,36 +2400,13 @@ function runWm6PxRepeatedNavFailedOfflineTests() {
   assert.match(
     pxCrossFixture,
     /data-tch-fixture="walmart-product-px-cross"/,
-    'wm6-px-repeated-nav-failed: cross-page PX fixture marker'
+    'wm6-px-cross-repeated-nav-failed: cross-page PX fixture marker'
   );
-
-  const scenarios = [
-    {
-      label: 'PX hang-tight (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
-    },
-    {
-      label: 'PX captcha (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
-    },
-    {
-      label: 'PX block (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
-    },
-    {
-      label: 'PX timeout override (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-override/558',
-    },
-    {
-      label: 'cross-page PX (wm6-repeated-nav-failed)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
-      tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertWm6RepeatedNavFailed(monitorProductUrl, label, tabUrl);
-  }
+  assertWm6RepeatedNavFailed(
+    'https://www.walmart.com/ip/mock-px-cross-monitor/996',
+    'cross-page PX (wm6-repeated-nav-failed)',
+    'https://www.walmart.com/ip/mock-px-cross/995'
+  );
 }
 
 /**
@@ -2680,15 +2704,19 @@ function assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl) {
   );
 }
 
-/**
- * FIX-3 parity for wm6-live-poll-cycle on missing ATC + cross-page missing ATC named tags.
- */
-function runWm6MissingAtcLivePollCycleOfflineTests() {
+function assertWm6MissingAtcLivePollCycleSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
   assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-missing-atc-live-poll-cycle: ATC wait helper in source');
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle missing ATC on /ip/mock-no-atc/559 named tag.
+ */
+function runWm6MissingAtcLivePollCycleOfflineTests() {
+  assertWm6MissingAtcLivePollCycleSource();
 
   const noAtcFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-no-atc.html'),
@@ -2700,6 +2728,19 @@ function runWm6MissingAtcLivePollCycleOfflineTests() {
     'wm6-missing-atc-live-poll-cycle: missing ATC fixture marker'
   );
 
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'missing ATC (wm6-live-poll-cycle)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle cross-page missing ATC named tag.
+ */
+function runWm6MissingAtcCrossLivePollCycleOfflineTests() {
+  assertWm6MissingAtcLivePollCycleSource();
+
   const noAtcCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-no-atc-cross.html'),
     'utf8'
@@ -2707,35 +2748,29 @@ function runWm6MissingAtcLivePollCycleOfflineTests() {
   assert.match(
     noAtcCrossFixture,
     /data-tch-fixture="walmart-product-no-atc-cross"/,
-    'wm6-missing-atc-live-poll-cycle: cross-page missing ATC fixture marker'
+    'wm6-missing-atc-cross-live-poll-cycle: cross-page missing ATC fixture marker'
   );
 
-  const scenarios = [
-    {
-      label: 'missing ATC (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
-    },
-    {
-      label: 'cross-page missing ATC (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
-      tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl);
-  }
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+    'cross-page missing ATC (wm6-live-poll-cycle)',
+    'https://www.walmart.com/ip/mock-no-atc-cross/998'
+  );
 }
 
-/**
- * FIX-3 parity for wm6-live-poll-cycle on price guard + cross-page price guard named tags.
- */
-function runWm6PriceGuardLivePollCycleOfflineTests() {
+function assertWm6PriceGuardLivePollCycleSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
   assert.match(walmartSrc, /Price guard wait — no sacred lock/, 'wm6-price-guard-live-poll-cycle: price-guard log in source');
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle price guard timeout named tag.
+ */
+function runWm6PriceGuardLivePollCycleOfflineTests() {
+  assertWm6PriceGuardLivePollCycleSource();
 
   const priceGuardFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-price-guard-timeout.html'),
@@ -2747,6 +2782,19 @@ function runWm6PriceGuardLivePollCycleOfflineTests() {
     'wm6-price-guard-live-poll-cycle: price guard fixture marker'
   );
 
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    'price guard (wm6-live-poll-cycle)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-live-poll-cycle cross-page price guard named tag.
+ */
+function runWm6PriceGuardCrossLivePollCycleOfflineTests() {
+  assertWm6PriceGuardLivePollCycleSource();
+
   const priceGuardCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-price-guard-cross.html'),
     'utf8'
@@ -2754,42 +2802,46 @@ function runWm6PriceGuardLivePollCycleOfflineTests() {
   assert.match(
     priceGuardCrossFixture,
     /data-tch-fixture="walmart-product-price-guard-cross"/,
-    'wm6-price-guard-live-poll-cycle: cross-page price guard fixture marker'
+    'wm6-price-guard-cross-live-poll-cycle: cross-page price guard fixture marker'
   );
 
-  const scenarios = [
-    {
-      label: 'price guard (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
-    },
-    {
-      label: 'cross-page price guard (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
-      tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl);
-  }
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+    'cross-page price guard (wm6-live-poll-cycle)',
+    'https://www.walmart.com/ip/mock-price-guard-cross/993'
+  );
 }
 
-/**
- * FIX-3 parity for wm6-live-poll-cycle on PX hang-tight + #px-captcha + px-block + cross-page PX named tags.
- */
-function runWm6PxLivePollCycleOfflineTests() {
+function assertWm6PxLivePollCycleSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
   assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-px-live-poll-cycle: PX timeout helper in source');
+}
 
+/**
+ * FIX-3 parity for wm6-live-poll-cycle PX hang-tight named tag.
+ */
+function runWm6PxHangTightLivePollCycleOfflineTests() {
+  assertWm6PxLivePollCycleSource();
   const pxFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px.html'),
     'utf8'
   );
-  assert.match(pxFixture, /data-tch-fixture="walmart-product-px"/, 'wm6-px-live-poll-cycle: PX hang-tight fixture marker');
+  assert.match(pxFixture, /data-tch-fixture="walmart-product-px"/, 'wm6-px-hang-tight-live-poll-cycle: PX hang-tight fixture marker');
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-px/555',
+    'PX hang-tight (wm6-live-poll-cycle)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-live-poll-cycle PX captcha named tag.
+ */
+function runWm6PxCaptchaLivePollCycleOfflineTests() {
+  assertWm6PxLivePollCycleSource();
   const pxCaptchaFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-captcha.html'),
     'utf8'
@@ -2797,9 +2849,20 @@ function runWm6PxLivePollCycleOfflineTests() {
   assert.match(
     pxCaptchaFixture,
     /data-tch-fixture="walmart-product-px-captcha"/,
-    'wm6-px-live-poll-cycle: PX captcha fixture marker'
+    'wm6-px-captcha-live-poll-cycle: PX captcha fixture marker'
   );
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-px-captcha/556',
+    'PX captcha (wm6-live-poll-cycle)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-live-poll-cycle PX block named tag.
+ */
+function runWm6PxBlockLivePollCycleOfflineTests() {
+  assertWm6PxLivePollCycleSource();
   const pxBlockFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-block.html'),
     'utf8'
@@ -2807,9 +2870,20 @@ function runWm6PxLivePollCycleOfflineTests() {
   assert.match(
     pxBlockFixture,
     /data-tch-fixture="walmart-product-px-block"/,
-    'wm6-px-live-poll-cycle: PX block fixture marker'
+    'wm6-px-block-live-poll-cycle: PX block fixture marker'
   );
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-px-block/557',
+    'PX block (wm6-live-poll-cycle)',
+    null
+  );
+}
 
+/**
+ * FIX-3 parity for wm6-live-poll-cycle cross-page PX named tag.
+ */
+function runWm6PxCrossLivePollCycleOfflineTests() {
+  assertWm6PxLivePollCycleSource();
   const pxCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/walmart-product-px-cross.html'),
     'utf8'
@@ -2817,32 +2891,13 @@ function runWm6PxLivePollCycleOfflineTests() {
   assert.match(
     pxCrossFixture,
     /data-tch-fixture="walmart-product-px-cross"/,
-    'wm6-px-live-poll-cycle: cross-page PX fixture marker'
+    'wm6-px-cross-live-poll-cycle: cross-page PX fixture marker'
   );
-
-  const scenarios = [
-    {
-      label: 'PX hang-tight (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
-    },
-    {
-      label: 'PX captcha (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
-    },
-    {
-      label: 'PX block (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
-    },
-    {
-      label: 'cross-page PX (wm6-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
-      tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    assertWm6LivePollCycleScenario(monitorProductUrl, label, tabUrl);
-  }
+  assertWm6LivePollCycleScenario(
+    'https://www.walmart.com/ip/mock-px-cross-monitor/996',
+    'cross-page PX (wm6-live-poll-cycle)',
+    'https://www.walmart.com/ip/mock-px-cross/995'
+  );
 }
 
 /**
@@ -2929,10 +2984,7 @@ function runWm6CheckoutSpaCrossLivePollCycleOfflineTests() {
  * FIX-3 parity for wm6-poll-recovery-rearm and wm6-cart-checkout-missing named tags.
  * WM-6 error-path NAV_FAILED → poll re-arms navigationLock on recovery product (no sacred lock).
  */
-/**
- * FIX-3 parity for wm6-poll-recovery-rearm on missing ATC + cross-page missing ATC named tags.
- */
-function runWm6MissingAtcPollRecoveryRearmOfflineTests() {
+function assertWm6MissingAtcPollRecoveryRearmSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -2943,30 +2995,35 @@ function runWm6MissingAtcPollRecoveryRearmOfflineTests() {
     'wm6-missing-atc-poll-recovery-rearm: cross-page timeout uses settings.productUrl for poll recovery'
   );
   assert.match(walmartSrc, /wmAtcWaitTimeoutMs/, 'wm6-missing-atc-poll-recovery-rearm: ATC wait helper in source');
-
-  const scenarios = [
-    {
-      label: 'missing ATC (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
-    },
-    {
-      label: 'cross-page missing ATC (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-no-atc-cross-recovery/1000',
-      tabUrl: 'https://www.walmart.com/ip/mock-no-atc-cross/998',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
-    assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
-  }
 }
 
 /**
- * FIX-3 parity for wm6-poll-recovery-rearm on price guard + cross-page price guard named tags.
+ * FIX-3 parity for wm6-poll-recovery-rearm missing ATC named tag.
  */
-function runWm6PriceGuardPollRecoveryRearmOfflineTests() {
+function runWm6MissingAtcPollRecoveryRearmOfflineTests() {
+  assertWm6MissingAtcPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'missing ATC (wm6-poll-recovery-rearm)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm cross-page missing ATC named tag.
+ */
+function runWm6MissingAtcCrossPollRecoveryRearmOfflineTests() {
+  assertWm6MissingAtcPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-no-atc-cross-monitor/999',
+    'https://www.walmart.com/ip/mock-no-atc-cross-recovery/1000',
+    'cross-page missing ATC (wm6-poll-recovery-rearm)',
+    'https://www.walmart.com/ip/mock-no-atc-cross/998'
+  );
+}
+
+function assertWm6PriceGuardPollRecoveryRearmSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -2976,69 +3033,95 @@ function runWm6PriceGuardPollRecoveryRearmOfflineTests() {
     /Price guard wait — no sacred lock/,
     'wm6-price-guard-poll-recovery-rearm: no-sacred-lock log in source'
   );
-
-  const scenarios = [
-    {
-      label: 'price guard (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-price-guard-timeout/991',
-    },
-    {
-      label: 'cross-page price guard (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-price-guard-cross-recovery/994',
-      tabUrl: 'https://www.walmart.com/ip/mock-price-guard-cross/993',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
-    assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
-  }
 }
 
 /**
- * FIX-3 parity for wm6-poll-recovery-rearm on PX hang-tight + captcha + block + cross-page PX named tags.
+ * FIX-3 parity for wm6-poll-recovery-rearm price guard timeout named tag.
  */
-function runWm6PxPollRecoveryRearmOfflineTests() {
+function runWm6PriceGuardPollRecoveryRearmOfflineTests() {
+  assertWm6PriceGuardPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    'https://www.walmart.com/ip/mock-price-guard-timeout/991',
+    'price guard (wm6-poll-recovery-rearm)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm cross-page price guard named tag.
+ */
+function runWm6PriceGuardCrossPollRecoveryRearmOfflineTests() {
+  assertWm6PriceGuardPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-price-guard-cross-monitor/992',
+    'https://www.walmart.com/ip/mock-price-guard-cross-recovery/994',
+    'cross-page price guard (wm6-poll-recovery-rearm)',
+    'https://www.walmart.com/ip/mock-price-guard-cross/993'
+  );
+}
+
+function assertWm6PxPollRecoveryRearmSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
   assert.match(walmartSrc, /wmPxTimeoutMs/, 'wm6-px-poll-recovery-rearm: PX timeout helper in source');
-
-  const scenarios = [
-    {
-      label: 'PX hang-tight (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px/555',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px/555',
-    },
-    {
-      label: 'PX captcha (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px-captcha/556',
-    },
-    {
-      label: 'PX block (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px-block/557',
-    },
-    {
-      label: 'cross-page PX (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-px-cross-monitor/996',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-px-cross-recovery/997',
-      tabUrl: 'https://www.walmart.com/ip/mock-px-cross/995',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
-    assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
-  }
 }
 
 /**
- * FIX-3 parity for wm6-poll-recovery-rearm on cart checkout-missing + cross-page cart named tags.
+ * FIX-3 parity for wm6-poll-recovery-rearm PX hang-tight named tag.
  */
-function runWm6CartPollRecoveryRearmOfflineTests() {
+function runWm6PxHangTightPollRecoveryRearmOfflineTests() {
+  assertWm6PxPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-px/555',
+    'https://www.walmart.com/ip/mock-px/555',
+    'PX hang-tight (wm6-poll-recovery-rearm)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm PX captcha named tag.
+ */
+function runWm6PxCaptchaPollRecoveryRearmOfflineTests() {
+  assertWm6PxPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-px-captcha/556',
+    'https://www.walmart.com/ip/mock-px-captcha/556',
+    'PX captcha (wm6-poll-recovery-rearm)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm PX block named tag.
+ */
+function runWm6PxBlockPollRecoveryRearmOfflineTests() {
+  assertWm6PxPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-px-block/557',
+    'https://www.walmart.com/ip/mock-px-block/557',
+    'PX block (wm6-poll-recovery-rearm)',
+    null
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm cross-page PX named tag.
+ */
+function runWm6PxCrossPollRecoveryRearmOfflineTests() {
+  assertWm6PxPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-px-cross-monitor/996',
+    'https://www.walmart.com/ip/mock-px-cross-recovery/997',
+    'cross-page PX (wm6-poll-recovery-rearm)',
+    'https://www.walmart.com/ip/mock-px-cross/995'
+  );
+}
+
+function assertWm6CartPollRecoveryRearmSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -3048,55 +3131,66 @@ function runWm6CartPollRecoveryRearmOfflineTests() {
     /Checkout button not found on cart page — releasing navigation lock/,
     'wm6-cart-poll-recovery-rearm: cart checkout-missing log in source'
   );
-
-  const scenarios = [
-    {
-      label: 'cart checkout-missing (wm6-cart-checkout-missing)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-missing/888',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-no-atc/559',
-      tabUrl: 'https://www.walmart.com/cart/no-checkout',
-    },
-    {
-      label: 'cross-page cart checkout-missing (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-cart-cross-recovery/891',
-      tabUrl: 'https://www.walmart.com/cart/no-checkout-cross',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
-    assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
-  }
 }
 
 /**
- * FIX-3 parity for wm6-poll-recovery-rearm on checkout SPA + cross-page checkout SPA named tags.
+ * FIX-3 parity for wm6-poll-recovery-rearm cart checkout-missing named tag.
  */
-function runWm6CheckoutSpaPollRecoveryRearmOfflineTests() {
+function runWm6CartPollRecoveryRearmOfflineTests() {
+  assertWm6CartPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-cart-missing/888',
+    'https://www.walmart.com/ip/mock-no-atc/559',
+    'cart checkout-missing (wm6-cart-checkout-missing)',
+    'https://www.walmart.com/cart/no-checkout'
+  );
+}
+
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm cross-page cart checkout-missing named tag.
+ */
+function runWm6CartCrossPollRecoveryRearmOfflineTests() {
+  assertWm6CartPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-cart-cross-monitor/890',
+    'https://www.walmart.com/ip/mock-cart-cross-recovery/891',
+    'cross-page cart checkout-missing (wm6-poll-recovery-rearm)',
+    'https://www.walmart.com/cart/no-checkout-cross'
+  );
+}
+
+function assertWm6CheckoutSpaPollRecoveryRearmSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
   );
   assert.match(walmartSrc, /wmHandleCheckout/, 'wm6-checkout-spa-poll-recovery-rearm: checkout handler in source');
+}
 
-  const scenarios = [
-    {
-      label: 'checkout SPA timeout (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa/992',
-      tabUrl: 'https://www.walmart.com/checkout/spa-stall',
-    },
-    {
-      label: 'cross-page checkout SPA timeout (wm6-poll-recovery-rearm)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
-      recoveryProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-recovery/1005',
-      tabUrl: 'https://www.walmart.com/checkout/spa-stall-cross',
-    },
-  ];
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm checkout SPA timeout named tag.
+ */
+function runWm6CheckoutSpaPollRecoveryRearmOfflineTests() {
+  assertWm6CheckoutSpaPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-checkout-spa/992',
+    'https://www.walmart.com/ip/mock-checkout-spa/992',
+    'checkout SPA timeout (wm6-poll-recovery-rearm)',
+    'https://www.walmart.com/checkout/spa-stall'
+  );
+}
 
-  for (const { label, monitorProductUrl, recoveryProductUrl, tabUrl } of scenarios) {
-    assertWm6PollRecoveryRearm(monitorProductUrl, recoveryProductUrl, label, tabUrl);
-  }
+/**
+ * FIX-3 parity for wm6-poll-recovery-rearm cross-page checkout SPA timeout named tag.
+ */
+function runWm6CheckoutSpaCrossPollRecoveryRearmOfflineTests() {
+  assertWm6CheckoutSpaPollRecoveryRearmSource();
+  assertWm6PollRecoveryRearm(
+    'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1003',
+    'https://www.walmart.com/ip/mock-checkout-spa-cross-recovery/1005',
+    'cross-page checkout SPA timeout (wm6-poll-recovery-rearm)',
+    'https://www.walmart.com/checkout/spa-stall-cross'
+  );
 }
 
 /**
@@ -8878,23 +8972,39 @@ async function main() {
   runWm6MissingAtcRepeatedNavFailedOfflineTests();
   runWm6MissingAtcCrossRepeatedNavFailedOfflineTests();
   runWm6PriceGuardRepeatedNavFailedOfflineTests();
-  runWm6PxRepeatedNavFailedOfflineTests();
+  runWm6PxHangTightRepeatedNavFailedOfflineTests();
+  runWm6PxCaptchaRepeatedNavFailedOfflineTests();
+  runWm6PxBlockRepeatedNavFailedOfflineTests();
+  runWm6PxOverrideRepeatedNavFailedOfflineTests();
+  runWm6PxCrossRepeatedNavFailedOfflineTests();
   runWm6CartRepeatedNavFailedOfflineTests();
   runWm6CartCrossRepeatedNavFailedOfflineTests();
   runWm6CheckoutSpaRepeatedNavFailedOfflineTests();
   runWm6CheckoutSpaCrossRepeatedNavFailedOfflineTests();
   runWm6MissingAtcLivePollCycleOfflineTests();
+  runWm6MissingAtcCrossLivePollCycleOfflineTests();
   runWm6PriceGuardLivePollCycleOfflineTests();
-  runWm6PxLivePollCycleOfflineTests();
+  runWm6PriceGuardCrossLivePollCycleOfflineTests();
+  runWm6PxHangTightLivePollCycleOfflineTests();
+  runWm6PxCaptchaLivePollCycleOfflineTests();
+  runWm6PxBlockLivePollCycleOfflineTests();
+  runWm6PxCrossLivePollCycleOfflineTests();
   runWm6CartLivePollCycleOfflineTests();
   runWm6CartCrossLivePollCycleOfflineTests();
   runWm6CheckoutSpaLivePollCycleOfflineTests();
   runWm6CheckoutSpaCrossLivePollCycleOfflineTests();
   runWm6MissingAtcPollRecoveryRearmOfflineTests();
+  runWm6MissingAtcCrossPollRecoveryRearmOfflineTests();
   runWm6PriceGuardPollRecoveryRearmOfflineTests();
-  runWm6PxPollRecoveryRearmOfflineTests();
+  runWm6PriceGuardCrossPollRecoveryRearmOfflineTests();
+  runWm6PxHangTightPollRecoveryRearmOfflineTests();
+  runWm6PxCaptchaPollRecoveryRearmOfflineTests();
+  runWm6PxBlockPollRecoveryRearmOfflineTests();
+  runWm6PxCrossPollRecoveryRearmOfflineTests();
   runWm6CartPollRecoveryRearmOfflineTests();
+  runWm6CartCrossPollRecoveryRearmOfflineTests();
   runWm6CheckoutSpaPollRecoveryRearmOfflineTests();
+  runWm6CheckoutSpaCrossPollRecoveryRearmOfflineTests();
   runWm6CartCheckoutMissingElementOfflineTests();
   runWm6MissingAtcElementOfflineTests();
   runWm6PriceGuardTimeoutElementOfflineTests();
