@@ -1604,11 +1604,7 @@ function runWm4CheckoutTimeoutWithProducturlClearsSacredLockOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for wm5-checkout-spa-timeout-clears-sacred-lock named tag.
- * Checkout SPA stall with pre-armed sacred lock — timeout uses QUEUE_TIMEOUT (not NAV_FAILED).
- */
-function runWm5CheckoutSpaTimeoutClearsSacredLockOfflineTests() {
+function assertWm5CheckoutSpaTimeoutClearsSacredLockSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -1628,84 +1624,87 @@ function runWm5CheckoutSpaTimeoutClearsSacredLockOfflineTests() {
     /wmHandleCheckout timed out — releasing navigation lock/,
     'wm5-checkout-spa-timeout-clears-sacred-lock: contrast — no productUrl uses NAV_FAILED path'
   );
-
-  function assertCheckoutSpaTimeoutClearsSacredLock(monitorProductUrl, checkoutTabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
-    navigationLock.add(normMonitorUrl);
-    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: pre-armed sacred lock on monitor product`);
-    assert.ok(
-      !inQueueUrls.has(normCheckoutTabUrl),
-      `${label}: checkout SPA tab URL must not be sacred lock key`
-    );
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll blocked while sacred lock holds before timeout`
-    );
-
-    applyNavFailed(navigationLock, inQueueUrls, {
-      type: 'WALMART_NAV_FAILED',
-      url: monitorProductUrl,
-    });
-    assert.ok(
-      inQueueUrls.has(normMonitorUrl),
-      `${label}: NAV_FAILED alone must not clear sacred lock before checkout SPA timeout`
-    );
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll still blocked after NAV_FAILED before timeout`
-    );
-
-    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
-      type: 'WALMART_QUEUE_TIMEOUT',
-      url: monitorProductUrl,
-    });
-    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: checkout SPA timeout QUEUE_TIMEOUT clears inQueueUrls`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: checkout SPA timeout clears navigationLock`);
-    assert.ok(
-      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll may re-navigate after checkout SPA timeout releases sacred lock`
-    );
-
-    navigationLock.add(normCheckoutTabUrl);
-    applyNavFailed(navigationLock, inQueueUrls, {
-      type: 'WALMART_NAV_FAILED',
-      url: checkoutTabUrl,
-    });
-    assert.equal(
-      inQueueUrls.size,
-      0,
-      `${label}: contrast — unmonitored checkout SPA timeout must not arm sacred lock`
-    );
-  }
-
-  const scenarios = [
-    {
-      label: 'checkout SPA sacred (wm5-checkout-spa-timeout-clears-sacred-lock)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
-      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
-    },
-    {
-      label: 'cross-page checkout SPA sacred (wm5-checkout-spa-timeout-clears-sacred-lock)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
-      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, checkoutTabUrl } of scenarios) {
-    assertCheckoutSpaTimeoutClearsSacredLock(monitorProductUrl, checkoutTabUrl, label);
-  }
 }
 
-/**
- * FIX-3 parity for wm5-checkout-spa-live-poll-cycle named tag.
- * Pre-armed sacred lock survives reload + repeated NAV_FAILED before checkout SPA timeout.
- */
-function runWm5CheckoutSpaLivePollCycleOfflineTests() {
+function assertWm5CheckoutSpaTimeoutClearsSacredLockScenario({
+  label,
+  monitorProductUrl,
+  checkoutTabUrl,
+}) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+  navigationLock.add(normMonitorUrl);
+  assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: pre-armed sacred lock on monitor product`);
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    `${label}: checkout SPA tab URL must not be sacred lock key`
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll blocked while sacred lock holds before timeout`
+  );
+
+  applyNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: monitorProductUrl,
+  });
+  assert.ok(
+    inQueueUrls.has(normMonitorUrl),
+    `${label}: NAV_FAILED alone must not clear sacred lock before checkout SPA timeout`
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll still blocked after NAV_FAILED before timeout`
+  );
+
+  applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: monitorProductUrl,
+  });
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: checkout SPA timeout QUEUE_TIMEOUT clears inQueueUrls`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: checkout SPA timeout clears navigationLock`);
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll may re-navigate after checkout SPA timeout releases sacred lock`
+  );
+
+  navigationLock.add(normCheckoutTabUrl);
+  applyNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: checkoutTabUrl,
+  });
+  assert.equal(
+    inQueueUrls.size,
+    0,
+    `${label}: contrast — unmonitored checkout SPA timeout must not arm sacred lock`
+  );
+}
+
+/** FIX-3 parity for wm5-checkout-spa-timeout-clears-sacred-lock on same-page checkout SPA sacred. */
+function runWm5CheckoutSpaSacredTimeoutClearsSacredLockOfflineTests() {
+  assertWm5CheckoutSpaTimeoutClearsSacredLockSource();
+  assertWm5CheckoutSpaTimeoutClearsSacredLockScenario({
+    label: 'checkout SPA sacred (wm5-checkout-spa-timeout-clears-sacred-lock)',
+    monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+    checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+  });
+}
+
+/** FIX-3 parity for wm5-checkout-spa-timeout-clears-sacred-lock on cross-page checkout SPA sacred. */
+function runWm5CheckoutSpaCrossSacredTimeoutClearsSacredLockOfflineTests() {
+  assertWm5CheckoutSpaTimeoutClearsSacredLockSource();
+  assertWm5CheckoutSpaTimeoutClearsSacredLockScenario({
+    label: 'cross-page checkout SPA sacred (wm5-checkout-spa-timeout-clears-sacred-lock)',
+    monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-cross-monitor/1002',
+    checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred-cross',
+  });
+}
+
+function assertWm5CheckoutSpaLivePollCycleSource() {
   const walmartSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/walmart-content.js'),
     'utf8'
@@ -1715,81 +1714,85 @@ function runWm5CheckoutSpaLivePollCycleOfflineTests() {
     /releasing sacred lock for poll recovery/,
     'wm5-checkout-spa-live-poll-cycle: checkout timeout releases sacred lock (not before timeout)'
   );
+}
 
-  const scenarios = [
-    {
-      label: 'checkout SPA sacred (wm5-checkout-spa-live-poll-cycle)',
-      monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
-      checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
-    },
-  ];
-
+function assertWm5CheckoutSpaLivePollCycleScenario({ label, monitorProductUrl, checkoutTabUrl }) {
   const navFailTypes = ['WALMART_NAV_FAILED', 'NAV_FAILED', 'WALMART_NAV_FAILED', 'NAV_FAILED'];
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
 
-  for (const { label, monitorProductUrl, checkoutTabUrl } of scenarios) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
+  applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
+  assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: pre-armed sacred lock on monitor product`);
+  assert.ok(
+    !inQueueUrls.has(normCheckoutTabUrl),
+    `${label}: checkout SPA tab URL must not be sacred lock key`
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll blocked on monitor product before timeout`
+  );
 
-    applyWalmartInQueue(inQueueUrls, { type: 'WALMART_IN_QUEUE', url: monitorProductUrl });
-    assert.ok(inQueueUrls.has(normMonitorUrl), `${label}: pre-armed sacred lock on monitor product`);
-    assert.ok(
-      !inQueueUrls.has(normCheckoutTabUrl),
-      `${label}: checkout SPA tab URL must not be sacred lock key`
-    );
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll blocked on monitor product before timeout`
-    );
+  assert.ok(
+    inQueueUrls.has(normMonitorUrl),
+    `${label}: reload preserves sacred lock before checkout SPA timeout`
+  );
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll must skip after reload while sacred lock holds`
+  );
 
+  for (let i = 0; i < navFailTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
     assert.ok(
       inQueueUrls.has(normMonitorUrl),
-      `${label}: reload preserves sacred lock before checkout SPA timeout`
+      `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
     );
     assert.ok(
       pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll must skip after reload while sacred lock holds`
+      `${label}: poll blocked after ${navFailTypes[i]} before timeout`
     );
-
-    for (let i = 0; i < navFailTypes.length; i++) {
-      navigationLock.add(normMonitorUrl);
-      applyNavFailed(navigationLock, inQueueUrls, { type: navFailTypes[i], url: monitorProductUrl });
-      assert.ok(
-        inQueueUrls.has(normMonitorUrl),
-        `${label}: live poll cycle ${i + 1} must preserve sacred lock after ${navFailTypes[i]}`
+    if (normCheckoutTabUrl !== normMonitorUrl) {
+      assert.notEqual(
+        normCheckoutTabUrl,
+        normMonitorUrl,
+        `${label}: live poll cycle ${i + 1} sacred lock must key monitor productUrl not tab URL`
       );
-      assert.ok(
-        !navigationLock.has(normMonitorUrl),
-        `${label}: live poll cycle ${i + 1} must clear navigationLock after ${navFailTypes[i]}`
-      );
-      assert.ok(
-        pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label}: poll blocked after ${navFailTypes[i]} before timeout`
-      );
-      if (normCheckoutTabUrl !== normMonitorUrl) {
-        assert.notEqual(
-          normCheckoutTabUrl,
-          normMonitorUrl,
-          `${label}: live poll cycle ${i + 1} sacred lock must key monitor productUrl not tab URL`
-        );
-      }
     }
-
-    applyNavFailed(navigationLock, inQueueUrls, {
-      type: 'WALMART_NAV_FAILED',
-      url: monitorProductUrl,
-    });
-    assert.ok(
-      inQueueUrls.has(normMonitorUrl),
-      `${label}: NAV_FAILED alone must not clear sacred lock before checkout SPA timeout`
-    );
-    applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
-      type: 'WALMART_QUEUE_TIMEOUT',
-      url: monitorProductUrl,
-    });
-    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: checkout SPA timeout QUEUE_TIMEOUT clears sacred lock`);
   }
+
+  applyNavFailed(navigationLock, inQueueUrls, {
+    type: 'WALMART_NAV_FAILED',
+    url: monitorProductUrl,
+  });
+  assert.ok(
+    inQueueUrls.has(normMonitorUrl),
+    `${label}: NAV_FAILED alone must not clear sacred lock before checkout SPA timeout`
+  );
+  applyWalmartQueueTimeout(navigationLock, inQueueUrls, {
+    type: 'WALMART_QUEUE_TIMEOUT',
+    url: monitorProductUrl,
+  });
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: checkout SPA timeout QUEUE_TIMEOUT clears sacred lock`);
+}
+
+/**
+ * FIX-3 parity for wm5-checkout-spa-live-poll-cycle named tag.
+ * Pre-armed sacred lock survives reload + repeated NAV_FAILED before checkout SPA timeout.
+ */
+function runWm5CheckoutSpaLivePollCycleOfflineTests() {
+  assertWm5CheckoutSpaLivePollCycleSource();
+  assertWm5CheckoutSpaLivePollCycleScenario({
+    label: 'checkout SPA sacred (wm5-checkout-spa-live-poll-cycle)',
+    monitorProductUrl: 'https://www.walmart.com/ip/mock-checkout-spa-sacred/996',
+    checkoutTabUrl: 'https://www.walmart.com/checkout/spa-stall-sacred',
+  });
 }
 
 /**
@@ -9059,7 +9062,8 @@ async function main() {
   runWm5ProductQueueTimeoutClearsSacredLockOfflineTests();
   runWm4QpTimeoutWithProducturlClearsSacredLockOfflineTests();
   runWm4CheckoutTimeoutWithProducturlClearsSacredLockOfflineTests();
-  runWm5CheckoutSpaTimeoutClearsSacredLockOfflineTests();
+  runWm5CheckoutSpaSacredTimeoutClearsSacredLockOfflineTests();
+  runWm5CheckoutSpaCrossSacredTimeoutClearsSacredLockOfflineTests();
   runWm5CheckoutSpaLivePollCycleOfflineTests();
   runWm5CheckoutSpaCrossLivePollCycleOfflineTests();
   runWm5ProductQueueCrossLivePollCycleOfflineTests();
