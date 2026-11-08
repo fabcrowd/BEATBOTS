@@ -873,52 +873,79 @@ function assertWm4LivePollCycleScenario({ label, pageUrl, walmartProbeUrl }) {
   );
 }
 
+const WM4_QP_LIVE_POLL_PROBE_URL = 'https://www.walmart.com/ip/mock-wm4-qp-live/111';
+const WM4_CHECKOUT_LIVE_POLL_PROBE_URL = 'https://www.walmart.com/ip/mock-wm4-checkout-live/222';
+
 /**
- * FIX-3 parity for wm4-live-poll-cycle on unmonitored /qp routes named tag.
+ * FIX-3 parity for wm4-live-poll-cycle /qp unmonitored named tag.
  */
-function runWm4QpLivePollCycleOfflineTests() {
+function runWm4QpUnmonitoredLivePollCycleOfflineTests() {
   assertWm4LivePollCycleSource();
-  const qpProbeUrl = 'https://www.walmart.com/ip/mock-wm4-qp-live/111';
-  for (const { label, pageUrl } of [
-    {
-      label: 'wm4-live-poll-cycle /qp unmonitored',
-      pageUrl: 'https://www.walmart.com/qp/waiting-room',
-    },
-    {
-      label: 'wm4-live-poll-cycle /qp unmonitored timeout',
-      pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
-    },
-    {
-      label: 'wm4-live-poll-cycle /qp monitored timeout (Target-only unmonitored)',
-      pageUrl: 'https://www.walmart.com/qp/waiting-room-monitored-timeout',
-    },
-  ]) {
-    assertWm4LivePollCycleScenario({ label, pageUrl, walmartProbeUrl: qpProbeUrl });
-  }
+  assertWm4LivePollCycleScenario({
+    label: 'wm4-live-poll-cycle /qp unmonitored',
+    pageUrl: 'https://www.walmart.com/qp/waiting-room',
+    walmartProbeUrl: WM4_QP_LIVE_POLL_PROBE_URL,
+  });
 }
 
 /**
- * FIX-3 parity for wm4-live-poll-cycle on unmonitored /checkout routes named tag.
+ * FIX-3 parity for wm4-live-poll-cycle /qp unmonitored timeout named tag.
  */
-function runWm4CheckoutLivePollCycleOfflineTests() {
+function runWm4QpUnmonitoredTimeoutLivePollCycleOfflineTests() {
   assertWm4LivePollCycleSource();
-  const checkoutProbeUrl = 'https://www.walmart.com/ip/mock-wm4-checkout-live/222';
-  for (const { label, pageUrl } of [
-    {
-      label: 'wm4-live-poll-cycle /checkout unmonitored',
-      pageUrl: 'https://www.walmart.com/checkout/unmonitored',
-    },
-    {
-      label: 'wm4-live-poll-cycle /checkout unmonitored timeout',
-      pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
-    },
-    {
-      label: 'wm4-live-poll-cycle /checkout monitored timeout (Target-only unmonitored)',
-      pageUrl: 'https://www.walmart.com/checkout/monitored-timeout',
-    },
-  ]) {
-    assertWm4LivePollCycleScenario({ label, pageUrl, walmartProbeUrl: checkoutProbeUrl });
-  }
+  assertWm4LivePollCycleScenario({
+    label: 'wm4-live-poll-cycle /qp unmonitored timeout',
+    pageUrl: 'https://www.walmart.com/qp/waiting-room-timeout',
+    walmartProbeUrl: WM4_QP_LIVE_POLL_PROBE_URL,
+  });
+}
+
+/**
+ * FIX-3 parity for wm4-live-poll-cycle /qp monitored timeout (Target-only unmonitored) named tag.
+ */
+function runWm4QpMonitoredTimeoutLivePollCycleOfflineTests() {
+  assertWm4LivePollCycleSource();
+  assertWm4LivePollCycleScenario({
+    label: 'wm4-live-poll-cycle /qp monitored timeout (Target-only unmonitored)',
+    pageUrl: 'https://www.walmart.com/qp/waiting-room-monitored-timeout',
+    walmartProbeUrl: WM4_QP_LIVE_POLL_PROBE_URL,
+  });
+}
+
+/**
+ * FIX-3 parity for wm4-live-poll-cycle /checkout unmonitored named tag.
+ */
+function runWm4CheckoutUnmonitoredLivePollCycleOfflineTests() {
+  assertWm4LivePollCycleSource();
+  assertWm4LivePollCycleScenario({
+    label: 'wm4-live-poll-cycle /checkout unmonitored',
+    pageUrl: 'https://www.walmart.com/checkout/unmonitored',
+    walmartProbeUrl: WM4_CHECKOUT_LIVE_POLL_PROBE_URL,
+  });
+}
+
+/**
+ * FIX-3 parity for wm4-live-poll-cycle /checkout unmonitored timeout named tag.
+ */
+function runWm4CheckoutUnmonitoredTimeoutLivePollCycleOfflineTests() {
+  assertWm4LivePollCycleSource();
+  assertWm4LivePollCycleScenario({
+    label: 'wm4-live-poll-cycle /checkout unmonitored timeout',
+    pageUrl: 'https://www.walmart.com/checkout/unmonitored-timeout',
+    walmartProbeUrl: WM4_CHECKOUT_LIVE_POLL_PROBE_URL,
+  });
+}
+
+/**
+ * FIX-3 parity for wm4-live-poll-cycle /checkout monitored timeout (Target-only unmonitored) named tag.
+ */
+function runWm4CheckoutMonitoredTimeoutLivePollCycleOfflineTests() {
+  assertWm4LivePollCycleSource();
+  assertWm4LivePollCycleScenario({
+    label: 'wm4-live-poll-cycle /checkout monitored timeout (Target-only unmonitored)',
+    pageUrl: 'https://www.walmart.com/checkout/monitored-timeout',
+    walmartProbeUrl: WM4_CHECKOUT_LIVE_POLL_PROBE_URL,
+  });
 }
 
 /**
@@ -5124,11 +5151,7 @@ function runTgt4ReviewCrossLivePollCycleOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for sc3-disabled-atc named tag (element-only, not live-poll-cycle).
- * Sam's Club SC-3: disabled ATC wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
- */
-function runSc3DisabledAtcElementOfflineTests() {
+function assertSc3DisabledAtcElementSource() {
   const samsSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
     'utf8'
@@ -5155,6 +5178,47 @@ function runSc3DisabledAtcElementOfflineTests() {
     /WALMART_IN_QUEUE/,
     'sc3-disabled-atc: Sam\'s product page must not emit Walmart queue semantics'
   );
+}
+
+function assertSc3DisabledAtcNavFailed(monitorProductUrl, tabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+  if (normMonitorUrl !== normTabUrl) {
+    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+  }
+
+  for (let i = 0; i < 3; i++) {
+    const inQueueUrls = new Set();
+    const navigationLock = new Set([normMonitorUrl]);
+    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+    assert.equal(inQueueUrls.size, 0, `${label} cycle ${i + 1}: disabled ATC must not arm inQueueUrls`);
+    assert.ok(
+      !inQueueUrls.has(normTabUrl),
+      `${label} cycle ${i + 1}: tab URL must stay out of inQueueUrls`
+    );
+    assert.ok(
+      !navigationLock.has(normMonitorUrl),
+      `${label} cycle ${i + 1}: disabled ATC must clear navigationLock`
+    );
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label} cycle ${i + 1}: poll may retry after disabled ATC timeout (no sacred lock)`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it`
+  );
+}
+
+/**
+ * FIX-3 parity for sc3-disabled-atc named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-3: disabled ATC wait timeout → SAMS_NAV_FAILED, no sacred lock, no click.
+ */
+function runSc3DisabledAtcOfflineTests() {
+  assertSc3DisabledAtcElementSource();
 
   const disabledFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-disabled.html'),
@@ -5170,6 +5234,20 @@ function runSc3DisabledAtcElementOfflineTests() {
     /data-tch-atc-wait-ms="750"/,
     'sc3-disabled-atc: fixture ATC wait override'
   );
+
+  assertSc3DisabledAtcNavFailed(
+    'https://www.samsclub.com/p/mock-fcfs-disabled/792',
+    'https://www.samsclub.com/p/mock-fcfs-disabled/792',
+    'disabled ATC (sc3-disabled-atc)'
+  );
+}
+
+/**
+ * FIX-3 parity for sc3-disabled-atc-cross named tag (element-only, cross-page monitor keying).
+ */
+function runSc3DisabledAtcCrossOfflineTests() {
+  assertSc3DisabledAtcElementSource();
+
   const disabledCrossFixture = fs.readFileSync(
     path.resolve(__dirname, 'fixtures/samsclub-product-fcfs-disabled-cross.html'),
     'utf8'
@@ -5180,44 +5258,6 @@ function runSc3DisabledAtcElementOfflineTests() {
     'sc3-disabled-atc: cross-page fixture marker'
   );
 
-  function assertSc3DisabledAtcNavFailed(monitorProductUrl, tabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normTabUrl = normalizeProductUrl(tabUrl);
-    if (normMonitorUrl !== normTabUrl) {
-      assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
-    }
-
-    for (let i = 0; i < 3; i++) {
-      const inQueueUrls = new Set();
-      const navigationLock = new Set([normMonitorUrl]);
-      applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-      assert.equal(inQueueUrls.size, 0, `${label} cycle ${i + 1}: disabled ATC must not arm inQueueUrls`);
-      assert.ok(
-        !inQueueUrls.has(normTabUrl),
-        `${label} cycle ${i + 1}: tab URL must stay out of inQueueUrls`
-      );
-      assert.ok(
-        !navigationLock.has(normMonitorUrl),
-        `${label} cycle ${i + 1}: disabled ATC must clear navigationLock`
-      );
-      assert.ok(
-        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label} cycle ${i + 1}: poll may retry after disabled ATC timeout (no sacred lock)`
-      );
-    }
-
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-4 — sacred lock would block poll; disabled ATC wait does not arm it`
-    );
-  }
-
-  assertSc3DisabledAtcNavFailed(
-    'https://www.samsclub.com/p/mock-fcfs-disabled/792',
-    'https://www.samsclub.com/p/mock-fcfs-disabled/792',
-    'disabled ATC (sc3-disabled-atc)'
-  );
   assertSc3DisabledAtcNavFailed(
     'https://www.samsclub.com/p/mock-fcfs-disabled-cross-monitor/809',
     'https://www.samsclub.com/p/mock-fcfs-disabled-cross/810',
@@ -8975,8 +9015,12 @@ async function main() {
   runWm5ProductQueueLivePollCycleOfflineTests();
   runWm5QpLivePollCycleOfflineTests();
   runWm5CheckoutLivePollCycleOfflineTests();
-  runWm4QpLivePollCycleOfflineTests();
-  runWm4CheckoutLivePollCycleOfflineTests();
+  runWm4QpUnmonitoredLivePollCycleOfflineTests();
+  runWm4QpUnmonitoredTimeoutLivePollCycleOfflineTests();
+  runWm4QpMonitoredTimeoutLivePollCycleOfflineTests();
+  runWm4CheckoutUnmonitoredLivePollCycleOfflineTests();
+  runWm4CheckoutUnmonitoredTimeoutLivePollCycleOfflineTests();
+  runWm4CheckoutMonitoredTimeoutLivePollCycleOfflineTests();
   runWm4CrossLivePollCycleOfflineTests();
   runWm4UnmonitoredQueueTimeoutOfflineTests();
   runWm4QpPollRecoveryRearmOfflineTests();
@@ -9069,7 +9113,8 @@ async function main() {
   runTgt4ManualReviewElementOfflineTests();
   runTgt4LivePollCycleOfflineTests();
   runTgt4ReviewCrossLivePollCycleOfflineTests();
-  runSc3DisabledAtcElementOfflineTests();
+  runSc3DisabledAtcOfflineTests();
+  runSc3DisabledAtcCrossOfflineTests();
   runSc6InvisibleAtcOfflineTests();
   runSc6InvisibleAtcCrossOfflineTests();
   runSc6RestockOfflineTests();
