@@ -7009,6 +7009,75 @@ function runSc4ReviewCrossPollRecoveryRearmOfflineTests() {
   );
 }
 
+const SC4_LIVE_POLL_SIGNAL_TYPES = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
+
+function assertSc4LivePollCycleSource() {
+  const samsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
+    'utf8'
+  );
+  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-live-poll-cycle: review reached log in source');
+  assert.match(
+    samsSrc,
+    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
+    'sc4-live-poll-cycle: cross-page timeout uses settings.productUrl for poll recovery'
+  );
+  assert.doesNotMatch(
+    samsSrc,
+    /WALMART_IN_QUEUE/,
+    'sc4-live-poll-cycle: Sam\'s checkout must not emit Walmart queue semantics'
+  );
+}
+
+function assertSc4LivePollCycleScenario(monitorProductUrl, checkoutTabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const liveSignalTypes = SC4_LIVE_POLL_SIGNAL_TYPES;
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+
+  navigationLock.add(normMonitorUrl);
+  assert.equal(inQueueUrls.size, 0, `${label}: reload during live poll must not arm inQueueUrls`);
+
+  for (let i = 0; i < liveSignalTypes.length; i++) {
+    navigationLock.add(normMonitorUrl);
+    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
+    } else {
+      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+    }
+    assert.equal(
+      inQueueUrls.size,
+      0,
+      `${label} ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+    );
+    if (navigationLock.has(normMonitorUrl)) {
+      assert.ok(
+        !inQueueUrls.has(normMonitorUrl),
+        `${label} ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+      );
+    }
+    assert.ok(
+      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+      `${label} ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+    );
+    assert.ok(
+      !inQueueUrls.has(normCheckoutTabUrl),
+      `${label} ${i + 1}: checkout tab URL must not become sacred lock key`
+    );
+  }
+
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it`
+  );
+}
+
 /**
  * FIX-3 parity for sc4-live-poll-cycle on /checkout/review-cross named tag.
  * Sam's Club SC-4: cross-page checkout review reload + repeated SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
@@ -7023,65 +7092,11 @@ function runSc4ReviewCrossLivePollCycleOfflineTests() {
     /data-tch-fixture="samsclub-checkout-review-cross"/,
     'sc4-review-cross-live-poll-cycle: cross-page review fixture marker'
   );
-
-  const samsSrc = fs.readFileSync(
-    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
-    'utf8'
-  );
-  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-review-cross-live-poll-cycle: review reached log in source');
-  assert.match(
-    samsSrc,
-    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
-    'sc4-review-cross-live-poll-cycle: cross-page timeout uses settings.productUrl for poll recovery'
-  );
-
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796';
-  const checkoutTabUrl = 'https://www.samsclub.com/checkout/review-cross';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-  const inQueueUrls = new Set();
-  const navigationLock = new Set();
-  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
-
-  assert.equal(inQueueUrls.size, 0, 'sc4-review-cross-live-poll-cycle: must not arm sacred lock on start');
-  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), 'sc4-review-cross-live-poll-cycle: checkout tab URL must not be sacred lock key');
-  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, 'sc4-review-cross-live-poll-cycle: monitor productUrl must differ from checkout tab URL');
-
-  navigationLock.add(normMonitorUrl);
-  assert.equal(inQueueUrls.size, 0, 'sc4-review-cross-live-poll-cycle: reload during live poll must not arm inQueueUrls');
-
-  for (let i = 0; i < liveSignalTypes.length; i++) {
-    navigationLock.add(normMonitorUrl);
-    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
-      applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
-    } else {
-      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
-    }
-    assert.equal(
-      inQueueUrls.size,
-      0,
-      `sc4-review-cross-live-poll-cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
-    );
-    if (navigationLock.has(normMonitorUrl)) {
-      assert.ok(
-        !inQueueUrls.has(normMonitorUrl),
-        `sc4-review-cross-live-poll-cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
-      );
-    }
-    assert.ok(
-      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `sc4-review-cross-live-poll-cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
-    );
-    assert.ok(
-      !inQueueUrls.has(normCheckoutTabUrl),
-      `sc4-review-cross-live-poll-cycle ${i + 1}: checkout tab URL must not become sacred lock key`
-    );
-  }
-
-  const wmSacredLock = new Set([normMonitorUrl]);
-  assert.ok(
-    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc4-review-cross-live-poll-cycle: contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it'
+  assertSc4LivePollCycleSource();
+  assertSc4LivePollCycleScenario(
+    'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+    'https://www.samsclub.com/checkout/review-cross',
+    'cross-page checkout review (sc4-live-poll-cycle)'
   );
 }
 
@@ -8183,81 +8198,16 @@ function runSc6DisabledAtcCrossRepeatedNavFailedOfflineTests() {
 }
 
 /**
- * FIX-3 parity for sc4-live-poll-cycle named tag.
+ * FIX-3 parity for sc4-live-poll-cycle on /checkout review named tag.
  * Sam's Club SC-4: checkout review reload + SAMS_NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
  */
 function runSc4LivePollCycleOfflineTests() {
-  const samsSrc = fs.readFileSync(
-    path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
-    'utf8'
+  assertSc4LivePollCycleSource();
+  assertSc4LivePollCycleScenario(
+    'https://www.samsclub.com/p/mock-fcfs/789',
+    'https://www.samsclub.com/checkout',
+    'checkout review (sc4-live-poll-cycle)'
   );
-  assert.match(samsSrc, /\[SC\] review reached/, 'sc4-live-poll-cycle: review reached log in source');
-  assert.match(
-    samsSrc,
-    /scSignalNavFailed\(settings\.productUrl \|\| location\.href\)/,
-    'sc4-live-poll-cycle: cross-page timeout uses settings.productUrl for poll recovery'
-  );
-
-  function assertSc4LivePollCycle(monitorProductUrl, checkoutTabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-    const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED'];
-    const inQueueUrls = new Set();
-    const navigationLock = new Set();
-
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
-    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
-    assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
-
-    navigationLock.add(normMonitorUrl);
-    assert.equal(inQueueUrls.size, 0, `${label}: reload during live poll must not arm inQueueUrls`);
-
-    for (let i = 0; i < liveSignalTypes.length; i++) {
-      navigationLock.add(normMonitorUrl);
-      if (liveSignalTypes[i] === 'ATC_SUCCESS') {
-        applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
-      } else {
-        applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
-      }
-      assert.equal(
-        inQueueUrls.size,
-        0,
-        `${label} ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
-      );
-      if (navigationLock.has(normMonitorUrl)) {
-        assert.ok(
-          !inQueueUrls.has(normMonitorUrl),
-          `${label} ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
-        );
-      }
-      assert.ok(
-        !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-        `${label} ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
-      );
-      assert.ok(
-        !inQueueUrls.has(normCheckoutTabUrl),
-        `${label} ${i + 1}: checkout tab URL must not become sacred lock key`
-      );
-    }
-
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; Sam checkout review does not arm it`
-    );
-  }
-
-  const scenarios = [
-    {
-      label: 'checkout review (sc4-live-poll-cycle)',
-      monitorProductUrl: 'https://www.samsclub.com/p/mock-fcfs/789',
-      checkoutTabUrl: 'https://www.samsclub.com/checkout',
-    },
-  ];
-
-  for (const { label, monitorProductUrl, checkoutTabUrl } of scenarios) {
-    assertSc4LivePollCycle(monitorProductUrl, checkoutTabUrl, label);
-  }
 }
 
 /**
