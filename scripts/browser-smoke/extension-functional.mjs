@@ -4968,11 +4968,7 @@ function runTgt4CheckoutSigninElementOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for tgt4-checkout-spa-timeout named tag (element-only, not live-poll-cycle).
- * Target TGT-4: checkout SPA stall timeout → NAV_FAILED, no sacred lock.
- */
-function runTgt4CheckoutSpaTimeoutElementOfflineTests() {
+function assertTgt4CheckoutSpaTimeoutSource() {
   const targetSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/content.js'),
     'utf8'
@@ -5002,45 +4998,75 @@ function runTgt4CheckoutSpaTimeoutElementOfflineTests() {
     /WALMART_IN_QUEUE/,
     'tgt4-checkout-spa-timeout: Target checkout must not emit Walmart queue semantics'
   );
+}
 
-  const scenarios = [
-    {
-      label: 'checkout SPA timeout (tgt4-checkout-spa-timeout)',
-      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
-      tabUrl: 'https://www.target.com/checkout/spa-stall',
-    },
-    {
-      label: 'cross-page checkout SPA timeout (tgt4-checkout-spa-timeout)',
-      monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
-      tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
-    },
-  ];
+function assertTgt4CheckoutSpaTimeoutScenario({ label, monitorProductUrl, tabUrl }) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
 
-  for (const { label, monitorProductUrl, tabUrl } of scenarios) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normTabUrl = normalizeProductUrl(tabUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set([normMonitorUrl]);
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on checkout stall`);
+  assert.ok(!inQueueUrls.has(normTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+  assert.ok(isInCheckoutFlow(tabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
 
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on checkout stall`);
-    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
-    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
-    assert.ok(isInCheckoutFlow(tabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm inQueueUrls`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED clears navigationLock`);
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll may retry monitor product after timeout (no sacred lock)`
+  );
 
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'NAV_FAILED', url: monitorProductUrl });
-    assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm inQueueUrls`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED clears navigationLock`);
-    assert.ok(
-      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll may retry monitor product after timeout (no sacred lock)`
-    );
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; checkout stall without queue does not arm it`
+  );
+}
 
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; checkout stall without queue does not arm it`
-    );
-  }
+/**
+ * FIX-3 parity for tgt4-checkout-spa-timeout named tag (element-only, not live-poll-cycle).
+ * Target TGT-4: checkout SPA stall timeout → NAV_FAILED, no sacred lock.
+ */
+function runTgt4CheckoutSpaTimeoutElementOfflineTests() {
+  assertTgt4CheckoutSpaTimeoutSource();
+  const checkoutSpaFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-spa-timeout.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaFixture,
+    /data-tch-fixture="target-checkout-spa-timeout"/,
+    'tgt4-checkout-spa-timeout: checkout SPA stall fixture marker'
+  );
+  assertTgt4CheckoutSpaTimeoutScenario({
+    label: 'checkout SPA timeout (tgt4-checkout-spa-timeout)',
+    monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-stall/794',
+    tabUrl: 'https://www.target.com/checkout/spa-stall',
+  });
+}
+
+/**
+ * FIX-3 parity for tgt4-checkout-spa-timeout on /checkout/spa-stall-cross named tag (element-only).
+ */
+function runTgt4CheckoutSpaCrossTimeoutElementOfflineTests() {
+  assertTgt4CheckoutSpaTimeoutSource();
+  const checkoutSpaCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/target-checkout-spa-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaCrossFixture,
+    /data-tch-fixture="target-checkout-spa-cross"/,
+    'tgt4-checkout-spa-cross-timeout: cross-page checkout SPA fixture marker'
+  );
+  assertTgt4CheckoutSpaTimeoutScenario({
+    label: 'cross-page checkout SPA timeout (tgt4-checkout-spa-timeout)',
+    monitorProductUrl: 'https://www.target.com/p/mock-checkout-spa-cross-monitor/A-880092',
+    tabUrl: 'https://www.target.com/checkout/spa-stall-cross',
+  });
 }
 
 /**
@@ -9177,6 +9203,7 @@ async function main() {
   runTgtCheckoutSpaPollRecoveryRearmOfflineTests();
   runTgt4CheckoutSigninElementOfflineTests();
   runTgt4CheckoutSpaTimeoutElementOfflineTests();
+  runTgt4CheckoutSpaCrossTimeoutElementOfflineTests();
   runTgt4ManualReviewElementOfflineTests();
   runTgt4LivePollCycleOfflineTests();
   runTgt4ReviewCrossLivePollCycleOfflineTests();
