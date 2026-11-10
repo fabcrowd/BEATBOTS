@@ -3084,6 +3084,7 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       refreshInterval: 1,
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
+      errorRetryDelayMs: 500,
     });
 
     await new Promise((r) => setTimeout(r, 2000));

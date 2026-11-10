@@ -690,7 +690,10 @@ async function runBackgroundPoll() {
     let hadApiError = false;
     if (hasTargetWork) {
       const tcins = targetProducts.map(p => extractTcin(p.url)).filter(Boolean);
-      if (tcins.length) {
+      // Skip-monitoring mode treats Target products as in-stock below — RedSky is not needed.
+      const targetSkipStockOnly =
+        !!monitor.skipMonitoring && dropArmed && tcins.length > 0;
+      if (tcins.length && !targetSkipStockOnly) {
         const streakBefore = redskyErrorStreak;
         const targetMap = await checkTcinsStock(tcins, cachedApiKey, cachedRedskyBase);
         if (redskyErrorStreak > streakBefore) hadApiError = true;
@@ -876,6 +879,10 @@ async function runBackgroundPoll() {
       if (inQueueUrls.has(normUrl)) break;
       navigationLock.add(normUrl);
       console.log(`[TCH bg] Navigation lock set for ${normUrl}`);
+      const lockedTabId = urlToTabId[normUrl];
+      if (lockedTabId) {
+        chrome.tabs.sendMessage(lockedTabId, { type: 'MONITOR_UPDATED' }).catch(() => {});
+      }
       // Avoid hammering the same product multiple times per cycle.
       break;
     }
@@ -1130,7 +1137,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'STOP_MONITOR':
-      stopMonitor().then(() => sendResponse({ ok: true }));
+      stopMonitor({ keepTabs: !!message.keepTabs }).then(() => sendResponse({ ok: true }));
       return true;
 
     case 'NAV_FAILED':
@@ -1536,11 +1543,13 @@ function notifyTargetTabsMonitorChanged() {
     // Re-ping after new monitor tabs finish loading — avoids poll-recovery flake when
     // MONITOR_UPDATED fires before the content script listener is registered.
     if (tabIds.length) {
-      setTimeout(() => {
-        for (const tabId of tabIds) {
-          chrome.tabs.sendMessage(tabId, { type: 'MONITOR_UPDATED' }).catch(() => {});
-        }
-      }, 1500);
+      for (const delayMs of [1500, 2800, 4200]) {
+        setTimeout(() => {
+          for (const tabId of tabIds) {
+            chrome.tabs.sendMessage(tabId, { type: 'MONITOR_UPDATED' }).catch(() => {});
+          }
+        }, delayMs);
+      }
     }
   });
 }
@@ -1592,7 +1601,9 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   // Open one background tab per product for the content-script ATC click
   // after the background poll navigates it on restock detection.
   const tabResults = await Promise.allSettled(
-    products.map(p => chrome.tabs.create({ url: p.url, active: false }))
+    products.map((p) =>
+      chrome.tabs.create({ url: p.url, active: false })
+    )
   );
   monitor.tabIds = [];
   monitor.urlToTabId = {};
@@ -1616,7 +1627,8 @@ async function startMonitor(products, refreshInterval, dropExpectedAt, skipMonit
   notifyTargetTabsMonitorChanged();
 }
 
-async function stopMonitor() {
+async function stopMonitor(opts = {}) {
+  const keepTabs = !!opts.keepTabs;
   bgPollActive = false;
   lastHarvestKeepaliveRunMs = 0;
   inQueueUrls.clear();
@@ -1625,8 +1637,10 @@ async function stopMonitor() {
   const { monitor } = await chrome.storage.local.get('monitor');
   if (!monitor) return;
 
-  for (const tabId of monitor.tabIds || []) {
-    try { await chrome.tabs.remove(tabId); } catch {}
+  if (!keepTabs) {
+    for (const tabId of monitor.tabIds || []) {
+      try { await chrome.tabs.remove(tabId); } catch {}
+    }
   }
 
   urlToTabId = {};

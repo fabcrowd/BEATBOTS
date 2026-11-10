@@ -7211,11 +7211,7 @@ function runSc5RepeatedAtcSuccessElementOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for sc4-manual-review named tag (element-only, not live-poll-cycle).
- * Sam's Club SC-4 / TGT-4: review step → manual stop, no Place Order click, no sacred lock.
- */
-function runSc4ManualReviewElementOfflineTests() {
+function assertSc4ManualReviewSource() {
   const samsSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
     'utf8'
@@ -7238,31 +7234,38 @@ function runSc4ManualReviewElementOfflineTests() {
     /WALMART_IN_QUEUE/,
     'sc4-manual-review: Sam\'s checkout must not emit Walmart queue semantics'
   );
+}
 
-  function assertSc4ManualReviewOffline(monitorProductUrl, checkoutTabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-    const inQueueUrls = new Set();
+function assertSc4ManualReviewScenario(monitorProductUrl, checkoutTabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
 
-    assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
-    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
-    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
-    assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
-    assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+  assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+  assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
 
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it`
-    );
-  }
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; FCFS review does not arm it`
+  );
+}
 
-  assertSc4ManualReviewOffline(
+/**
+ * FIX-3 parity for sc4-manual-review named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4 / TGT-4: review step → manual stop, no Place Order click, no sacred lock.
+ */
+function runSc4ManualReviewElementOfflineTests() {
+  assertSc4ManualReviewSource();
+  assertSc4ManualReviewScenario(
     'https://www.samsclub.com/p/mock-fcfs/789',
     'https://www.samsclub.com/checkout',
     'sc4-manual-review'
   );
-  assertSc4ManualReviewOffline(
+  assertSc4ManualReviewScenario(
     'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
     'https://www.samsclub.com/checkout/review-cross',
     'sc4-manual-review cross-page'

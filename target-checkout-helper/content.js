@@ -2134,20 +2134,32 @@ async function handleMonitoredATC(monitor, product) {
     const started = Date.now();
     const maxWait = productAtcWaitMs();
     const pollMs = productAtcPollMs();
-    let fixtureBtn = null;
-    while (Date.now() - started < maxWait) {
-      const btn = findFirstEnabledAtcButton()
-        || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC);
-      if (btn && !btn.disabled) {
-        fixtureBtn = btn;
-        break;
-      }
-      await sleep(pollMs);
-    }
-    if (!fixtureBtn || fixtureBtn.disabled || pageOOS) {
+    const failSafeMs = maxWait + 500;
+    let releasedNavLock = false;
+    const releaseNavLock = () => {
+      if (releasedNavLock) return;
+      releasedNavLock = true;
       console.warn('[TCH] ATC button not found or disabled — releasing navigation lock');
       signalNavFailed(normUrl);
-      return;
+    };
+    const failSafeId = setTimeout(releaseNavLock, failSafeMs);
+    let fixtureBtn = null;
+    try {
+      while (Date.now() - started < maxWait) {
+        const btn = findFirstEnabledAtcButton()
+          || findFirst(SEL.shipIt, SEL.pickup, SEL.preorder, SEL.stickyATC);
+        if (btn && !btn.disabled) {
+          fixtureBtn = btn;
+          break;
+        }
+        await sleep(pollMs);
+      }
+      if (!fixtureBtn || fixtureBtn.disabled || pageOOS) {
+        releaseNavLock();
+        return;
+      }
+    } finally {
+      clearTimeout(failSafeId);
     }
   }
 
