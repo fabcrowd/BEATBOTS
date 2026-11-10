@@ -5069,11 +5069,7 @@ function runTgt4CheckoutSpaCrossTimeoutElementOfflineTests() {
   });
 }
 
-/**
- * FIX-3 parity for tgt4-manual-review named tag (element-only, not live-poll-cycle).
- * Target TGT-4: review step → manual stop, no Place Order click, no sacred lock.
- */
-function runTgt4ManualReviewElementOfflineTests() {
+function assertTgt4ManualReviewSource() {
   const targetSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/content.js'),
     'utf8'
@@ -5096,31 +5092,38 @@ function runTgt4ManualReviewElementOfflineTests() {
     /WALMART_IN_QUEUE/,
     'tgt4-manual-review: Target checkout must not emit Walmart queue semantics'
   );
+}
 
-  function assertTgt4ManualReviewOffline(monitorProductUrl, checkoutTabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
-    const inQueueUrls = new Set();
+function assertTgt4ManualReviewScenario(monitorProductUrl, checkoutTabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
+  const inQueueUrls = new Set();
 
-    assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
-    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
-    assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
-    assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
-    assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
+  assert.equal(inQueueUrls.size, 0, `${label}: review step must not populate inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normCheckoutTabUrl), `${label}: checkout tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+  assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout tab is in checkout flow (MON-3 guard)`);
 
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-5 — sacred lock would block poll; Target review does not arm it`
-    );
-  }
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; Target review does not arm it`
+  );
+}
 
-  assertTgt4ManualReviewOffline(
+/**
+ * FIX-3 parity for tgt4-manual-review named tag (element-only, not live-poll-cycle).
+ * Target TGT-4: review step → manual stop, no Place Order click, no sacred lock.
+ */
+function runTgt4ManualReviewElementOfflineTests() {
+  assertTgt4ManualReviewSource();
+  assertTgt4ManualReviewScenario(
     'https://www.target.com/p/mock-product',
     'https://www.target.com/checkout',
     'tgt4-manual-review'
   );
-  assertTgt4ManualReviewOffline(
+  assertTgt4ManualReviewScenario(
     'https://www.target.com/p/mock-review-cross-monitor/A-880101',
     'https://www.target.com/checkout/review-cross',
     'tgt4-manual-review cross-page'
