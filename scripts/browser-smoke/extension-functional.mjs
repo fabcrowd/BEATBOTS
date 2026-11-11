@@ -7493,24 +7493,9 @@ function assertSc2CartCheckoutScenario(monitorProductUrl, cartTabUrl, label) {
   );
 }
 
-/**
- * FIX-3 parity for sc2-cart-checkout named tag (element-only, not live-poll-cycle).
- * Sam's Club SC-2: cart happy path clicks checkout — no sacred lock, no NAV_FAILED.
- */
-function runSc2CartCheckoutElementOfflineTests() {
-  assertSc2CartCheckoutSource();
-  assertSc2CartCheckoutScenario(
-    'https://www.samsclub.com/p/mock-fcfs/789',
-    'https://www.samsclub.com/cart',
-    'sc2-cart-checkout'
-  );
-}
+const SC2_CART_LIVE_POLL_SIGNAL_TYPES = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
 
-/**
- * FIX-3 parity for sc2-cart-live-poll-cycle named tag.
- * Sam's Club SC-2: cart happy path reload + live poll signals — no sacred lock.
- */
-function runSc2CartLivePollCycleOfflineTests() {
+function assertSc2CartLivePollCycleSource() {
   const samsSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
     'utf8'
@@ -7524,59 +7509,62 @@ function runSc2CartLivePollCycleOfflineTests() {
     'sc2-cart-live-poll-cycle: Sam\'s cart must not emit Walmart queue semantics'
   );
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
-  const cartTabUrl = 'https://www.samsclub.com/cart';
+  const cartFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-cart.html'),
+    'utf8'
+  );
+  assert.match(cartFixture, /data-tch-fixture="samsclub-cart"/, 'sc2-cart-live-poll-cycle: cart fixture marker');
+  assert.match(cartFixture, /checkout-btn/, 'sc2-cart-live-poll-cycle: cart fixture checkout control');
+}
+
+function assertSc2CartLivePollCycleScenario(monitorProductUrl, cartTabUrl, label) {
   const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
   const normCartTabUrl = normalizeProductUrl(cartTabUrl);
   const inQueueUrls = new Set();
   const navigationLock = new Set();
-  const liveSignalTypes = ['SAMS_NAV_FAILED', 'ATC_SUCCESS', 'SAMS_NAV_FAILED', 'ATC_SUCCESS'];
 
-  assert.equal(inQueueUrls.size, 0, 'sc2-cart-live-poll-cycle: must not arm sacred lock on start');
-  assert.ok(!inQueueUrls.has(normCartTabUrl), 'sc2-cart-live-poll-cycle: cart tab URL must not be sacred lock key');
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+  assert.ok(!inQueueUrls.has(normCartTabUrl), `${label}: cart tab URL must not be sacred lock key`);
 
   navigationLock.add(normMonitorUrl);
   applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-  assert.equal(inQueueUrls.size, 0, 'sc2-cart-live-poll-cycle: reload signal must not arm sacred lock');
-  assert.ok(!navigationLock.has(normMonitorUrl), 'sc2-cart-live-poll-cycle: reload signal releases navigationLock');
+  assert.equal(inQueueUrls.size, 0, `${label}: reload signal must not arm sacred lock`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: reload signal releases navigationLock`);
 
-  for (let i = 0; i < liveSignalTypes.length; i++) {
+  for (let i = 0; i < SC2_CART_LIVE_POLL_SIGNAL_TYPES.length; i++) {
+    const sig = SC2_CART_LIVE_POLL_SIGNAL_TYPES[i];
     navigationLock.add(normMonitorUrl);
-    if (liveSignalTypes[i] === 'ATC_SUCCESS') {
+    if (sig === 'ATC_SUCCESS') {
       applyAtcSuccess(navigationLock, inQueueUrls, { type: 'ATC_SUCCESS', url: monitorProductUrl });
     } else {
-      applyNavFailed(navigationLock, inQueueUrls, { type: liveSignalTypes[i], url: monitorProductUrl });
+      applyNavFailed(navigationLock, inQueueUrls, { type: sig, url: monitorProductUrl });
     }
     assert.equal(
       inQueueUrls.size,
       0,
-      `sc2-cart-live-poll-cycle: live poll cycle ${i + 1} must not arm inQueueUrls after ${liveSignalTypes[i]}`
+      `${label}: live poll cycle ${i + 1} must not arm inQueueUrls after ${sig}`
     );
     if (navigationLock.has(normMonitorUrl)) {
       assert.ok(
         !inQueueUrls.has(normMonitorUrl),
-        `sc2-cart-live-poll-cycle: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${liveSignalTypes[i]}`
+        `${label}: live poll cycle ${i + 1} navigationLock alone must not imply sacred lock after ${sig}`
       );
     }
     assert.ok(
       !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `sc2-cart-live-poll-cycle: live poll cycle ${i + 1} allows poll retry after ${liveSignalTypes[i]} (no sacred lock)`
+      `${label}: live poll cycle ${i + 1} allows poll retry after ${sig} (no sacred lock)`
     );
-    assert.notEqual(normMonitorUrl, normCartTabUrl, 'sc2-cart-live-poll-cycle: live poll keys monitor productUrl not tab URL');
+    assert.notEqual(normMonitorUrl, normCartTabUrl, `${label}: live poll keys monitor productUrl not tab URL`);
   }
 
   const wmSacredLock = new Set([normMonitorUrl]);
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc2-cart-live-poll-cycle: contrast WM-5 — sacred lock would block poll; FCFS cart happy path does not arm it'
+    `${label}: contrast WM-5 — sacred lock would block poll; FCFS cart happy path does not arm it`
   );
 }
 
-/**
- * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
- * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
- */
-function runSc2CartCheckoutMissingElementOfflineTests() {
+function assertSc2CartCheckoutMissingSource() {
   const samsSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
     'utf8'
@@ -7600,39 +7588,91 @@ function runSc2CartCheckoutMissingElementOfflineTests() {
     'sc2-cart-checkout-missing: Sam\'s cart page must not emit Walmart queue semantics'
   );
 
-  function assertSc2CartCheckoutMissingOffline(monitorProductUrl, cartTabUrl, label) {
-    const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-    const normCartTabUrl = normalizeProductUrl(cartTabUrl);
-    const inQueueUrls = new Set();
-    const navigationLock = new Set([normMonitorUrl]);
+  const cartFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-cart-no-checkout.html'),
+    'utf8'
+  );
+  assert.match(
+    cartFixture,
+    /data-tch-fixture="samsclub-cart-no-checkout"/,
+    'sc2-cart-checkout-missing: cart checkout-missing fixture marker'
+  );
+  const cartCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-cart-no-checkout-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    cartCrossFixture,
+    /data-tch-fixture="samsclub-cart-no-checkout-cross"/,
+    'sc2-cart-checkout-missing: cross-page cart checkout-missing fixture marker'
+  );
+}
 
-    assert.equal(inQueueUrls.size, 0, `${label}: cart page must not populate inQueueUrls`);
-    assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
-    assert.ok(!inQueueUrls.has(normCartTabUrl), `${label}: cart tab URL must not be sacred lock key`);
-    assert.notEqual(normMonitorUrl, normCartTabUrl, `${label}: monitor productUrl must differ from cart tab URL`);
-    assert.ok(isInCheckoutFlow(cartTabUrl), `${label}: cart tab is in checkout flow (MON-3 guard)`);
+function assertSc2CartCheckoutMissingScenario(monitorProductUrl, cartTabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normCartTabUrl = normalizeProductUrl(cartTabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set([normMonitorUrl]);
 
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-    assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
-    assert.ok(!navigationLock.has(normMonitorUrl), `${label}: releases navigationLock`);
-    assert.ok(
-      !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
-      `${label}: poll may retry after NAV_FAILED (no sacred lock)`
-    );
+  assert.equal(inQueueUrls.size, 0, `${label}: cart page must not populate inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normCartTabUrl), `${label}: cart tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normCartTabUrl, `${label}: monitor productUrl must differ from cart tab URL`);
+  assert.ok(isInCheckoutFlow(cartTabUrl), `${label}: cart tab is in checkout flow (MON-3 guard)`);
 
-    const wmSacredLock = new Set([normMonitorUrl]);
-    assert.ok(
-      pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-      `${label}: contrast WM-4 — sacred lock would block poll; FCFS cart checkout-missing does not arm it`
-    );
-  }
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock`);
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: releases navigationLock`);
+  assert.ok(
+    !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, navigationLock),
+    `${label}: poll may retry after NAV_FAILED (no sacred lock)`
+  );
 
-  assertSc2CartCheckoutMissingOffline(
+  const wmSacredLock = new Set([normMonitorUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-4 — sacred lock would block poll; FCFS cart checkout-missing does not arm it`
+  );
+}
+
+/**
+ * FIX-3 parity for sc2-cart-checkout named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-2: cart happy path clicks checkout — no sacred lock, no NAV_FAILED.
+ */
+function runSc2CartCheckoutElementOfflineTests() {
+  assertSc2CartCheckoutSource();
+  assertSc2CartCheckoutScenario(
+    'https://www.samsclub.com/p/mock-fcfs/789',
+    'https://www.samsclub.com/cart',
+    'sc2-cart-checkout'
+  );
+}
+
+/**
+ * FIX-3 parity for sc2-cart-live-poll-cycle named tag.
+ * Sam's Club SC-2: cart happy path reload + live poll signals — no sacred lock.
+ */
+function runSc2CartLivePollCycleOfflineTests() {
+  assertSc2CartLivePollCycleSource();
+  assertSc2CartLivePollCycleScenario(
+    'https://www.samsclub.com/p/mock-fcfs/789',
+    'https://www.samsclub.com/cart',
+    'sc2-cart-live-poll-cycle'
+  );
+}
+
+/**
+ * FIX-3 parity for sc2-cart-checkout-missing named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-2: cart checkout button missing → SAMS_NAV_FAILED, no sacred lock.
+ */
+function runSc2CartCheckoutMissingElementOfflineTests() {
+  assertSc2CartCheckoutMissingSource();
+  assertSc2CartCheckoutMissingScenario(
     'https://www.samsclub.com/p/mock-fcfs-cart-missing/792',
     'https://www.samsclub.com/cart/no-checkout',
     'sc2-cart-checkout-missing'
   );
-  assertSc2CartCheckoutMissingOffline(
+  assertSc2CartCheckoutMissingScenario(
     'https://www.samsclub.com/p/mock-fcfs-cart-cross-monitor/794',
     'https://www.samsclub.com/cart/no-checkout-cross',
     'sc2-cart-checkout-missing cross-page'
