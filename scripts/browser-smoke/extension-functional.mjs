@@ -7448,11 +7448,7 @@ function runSc4CheckoutSpaCrossTimeoutElementOfflineTests() {
   });
 }
 
-/**
- * FIX-3 parity for sc2-cart-checkout named tag (element-only, not live-poll-cycle).
- * Sam's Club SC-2: cart happy path clicks checkout — no sacred lock, no NAV_FAILED.
- */
-function runSc2CartCheckoutElementOfflineTests() {
+function assertSc2CartCheckoutSource() {
   const samsSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
     'utf8'
@@ -7472,28 +7468,41 @@ function runSc2CartCheckoutElementOfflineTests() {
   );
   assert.match(cartFixture, /data-tch-fixture="samsclub-cart"/, 'sc2-cart-checkout: cart fixture marker');
   assert.match(cartFixture, /checkout-btn/, 'sc2-cart-checkout: cart fixture checkout control');
+}
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
-  const cartTabUrl = 'https://www.samsclub.com/cart';
+function assertSc2CartCheckoutScenario(monitorProductUrl, cartTabUrl, label) {
   const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
   const normCartTabUrl = normalizeProductUrl(cartTabUrl);
   const inQueueUrls = new Set();
 
-  assert.equal(inQueueUrls.size, 0, 'sc2-cart-checkout: cart happy path must not populate inQueueUrls');
-  assert.ok(!inQueueUrls.has(normMonitorUrl), 'sc2-cart-checkout: monitor productUrl must stay out of inQueueUrls');
-  assert.ok(!inQueueUrls.has(normCartTabUrl), 'sc2-cart-checkout: cart tab URL must not be sacred lock key');
-  assert.notEqual(normMonitorUrl, normCartTabUrl, 'sc2-cart-checkout: monitor productUrl must differ from cart tab URL');
-  assert.ok(isInCheckoutFlow(cartTabUrl), 'sc2-cart-checkout: cart tab is in checkout flow (MON-3 guard)');
+  assert.equal(inQueueUrls.size, 0, `${label}: cart happy path must not populate inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normCartTabUrl), `${label}: cart tab URL must not be sacred lock key`);
+  assert.notEqual(normMonitorUrl, normCartTabUrl, `${label}: monitor productUrl must differ from cart tab URL`);
+  assert.ok(isInCheckoutFlow(cartTabUrl), `${label}: cart tab is in checkout flow (MON-3 guard)`);
 
   assert.ok(
     !pollWouldSkipNavigation(normMonitorUrl, inQueueUrls, new Set()),
-    'sc2-cart-checkout: FCFS cart checkout must not block poll via sacred lock (inQueueUrls)'
+    `${label}: FCFS cart checkout must not block poll via sacred lock (inQueueUrls)`
   );
 
   const wmSacredLock = new Set([normMonitorUrl]);
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc2-cart-checkout: contrast WM-4 — sacred lock would block poll; FCFS cart checkout does not arm it'
+    `${label}: contrast WM-4 — sacred lock would block poll; FCFS cart checkout does not arm it`
+  );
+}
+
+/**
+ * FIX-3 parity for sc2-cart-checkout named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-2: cart happy path clicks checkout — no sacred lock, no NAV_FAILED.
+ */
+function runSc2CartCheckoutElementOfflineTests() {
+  assertSc2CartCheckoutSource();
+  assertSc2CartCheckoutScenario(
+    'https://www.samsclub.com/p/mock-fcfs/789',
+    'https://www.samsclub.com/cart',
+    'sc2-cart-checkout'
   );
 }
 
