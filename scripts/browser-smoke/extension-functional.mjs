@@ -5132,6 +5132,25 @@ function runTgt4ManualReviewElementOfflineTests() {
 
 const TGT4_LIVE_POLL_SIGNAL_TYPES = ['NAV_FAILED', 'ATC_SUCCESS', 'NAV_FAILED'];
 
+function assertTgt4LivePollCycleSource() {
+  const targetSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
+    'utf8'
+  );
+  assert.match(targetSrc, /\[TCH\] review reached/, 'tgt4-live-poll-cycle: review reached log in source');
+  assert.match(targetSrc, /handleReviewStep/, 'tgt4-live-poll-cycle: handleReviewStep in source');
+  assert.match(
+    targetSrc,
+    /if \(settings\.autoPlaceOrder\)/,
+    'tgt4-live-poll-cycle: autoPlaceOrder guard at review in source'
+  );
+  assert.doesNotMatch(
+    targetSrc,
+    /WALMART_IN_QUEUE/,
+    'tgt4-live-poll-cycle: Target checkout must not emit Walmart queue semantics'
+  );
+}
+
 function assertTgt4LivePollCycleScenario(monitorProductUrl, checkoutTabUrl, label) {
   const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
   const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
@@ -5190,22 +5209,7 @@ function assertTgt4LivePollCycleScenario(monitorProductUrl, checkoutTabUrl, labe
  * Target TGT-4: checkout review reload + NAV_FAILED/ATC_SUCCESS during live poll, no sacred lock.
  */
 function runTgt4LivePollCycleOfflineTests() {
-  const targetSrc = fs.readFileSync(
-    path.resolve(__dirname, '../../target-checkout-helper/content.js'),
-    'utf8'
-  );
-  assert.match(targetSrc, /\[TCH\] review reached/, 'tgt4-live-poll-cycle: review reached log in source');
-  assert.match(targetSrc, /handleReviewStep/, 'tgt4-live-poll-cycle: handleReviewStep in source');
-  assert.match(
-    targetSrc,
-    /if \(settings\.autoPlaceOrder\)/,
-    'tgt4-live-poll-cycle: autoPlaceOrder guard at review in source'
-  );
-  assert.doesNotMatch(
-    targetSrc,
-    /WALMART_IN_QUEUE/,
-    'tgt4-live-poll-cycle: Target checkout must not emit Walmart queue semantics'
-  );
+  assertTgt4LivePollCycleSource();
 
   assertTgt4LivePollCycleScenario(
     'https://www.target.com/p/mock-product',
@@ -5227,6 +5231,7 @@ function runTgt4ReviewCrossLivePollCycleOfflineTests() {
     /data-tch-fixture="target-checkout-review-cross"/,
     'tgt4-review-cross-live-poll-cycle: cross-page review fixture marker'
   );
+  assertTgt4LivePollCycleSource();
   assertTgt4LivePollCycleScenario(
     'https://www.target.com/p/mock-review-cross-monitor/A-880101',
     'https://www.target.com/checkout/review-cross',
@@ -7275,11 +7280,7 @@ function runSc4ManualReviewElementOfflineTests() {
   );
 }
 
-/**
- * FIX-3 parity for sc4-shipping-payment-review named tag (element-only, not live-poll-cycle).
- * Sam's Club SC-4: checkout SPA shipping → payment → review happy path, no sacred lock.
- */
-function runSc4ShippingPaymentReviewElementOfflineTests() {
+function assertSc4ShippingPaymentReviewSource() {
   const samsSrc = fs.readFileSync(
     path.resolve(__dirname, '../../target-checkout-helper/samsclub-content.js'),
     'utf8'
@@ -7303,36 +7304,39 @@ function runSc4ShippingPaymentReviewElementOfflineTests() {
     /WALMART_IN_QUEUE/,
     'sc4-shipping-payment-review: Sam\'s checkout must not emit Walmart queue semantics'
   );
+}
 
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-fcfs/789';
-  const checkoutTabUrl = 'https://www.samsclub.com/checkout/spa';
+function assertSc4ShippingPaymentReviewScenario(monitorProductUrl, checkoutTabUrl, label) {
   const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
   const normCheckoutTabUrl = normalizeProductUrl(checkoutTabUrl);
   const inQueueUrls = new Set();
 
-  assert.equal(inQueueUrls.size, 0, 'sc4-shipping-payment-review: SPA happy path must not populate inQueueUrls');
-  assert.ok(
-    !inQueueUrls.has(normMonitorUrl),
-    'sc4-shipping-payment-review: monitor productUrl must stay out of inQueueUrls'
-  );
+  assert.equal(inQueueUrls.size, 0, `${label}: SPA happy path must not populate inQueueUrls`);
+  assert.ok(!inQueueUrls.has(normMonitorUrl), `${label}: monitor productUrl must stay out of inQueueUrls`);
   assert.ok(
     !inQueueUrls.has(normCheckoutTabUrl),
-    'sc4-shipping-payment-review: checkout SPA tab URL must not be sacred lock key'
+    `${label}: checkout SPA tab URL must not be sacred lock key`
   );
-  assert.notEqual(
-    normMonitorUrl,
-    normCheckoutTabUrl,
-    'sc4-shipping-payment-review: monitor productUrl must differ from checkout tab URL'
-  );
-  assert.ok(
-    isInCheckoutFlow(checkoutTabUrl),
-    'sc4-shipping-payment-review: checkout SPA tab is in checkout flow (MON-3 guard)'
-  );
+  assert.notEqual(normMonitorUrl, normCheckoutTabUrl, `${label}: monitor productUrl must differ from checkout tab URL`);
+  assert.ok(isInCheckoutFlow(checkoutTabUrl), `${label}: checkout SPA tab is in checkout flow (MON-3 guard)`);
 
   const wmSacredLock = new Set([normMonitorUrl]);
   assert.ok(
     pollWouldSkipNavigation(normMonitorUrl, wmSacredLock, new Set()),
-    'sc4-shipping-payment-review: contrast WM-5 — sacred lock would block poll; FCFS SPA does not arm it'
+    `${label}: contrast WM-5 — sacred lock would block poll; FCFS SPA does not arm it`
+  );
+}
+
+/**
+ * FIX-3 parity for sc4-shipping-payment-review named tag (element-only, not live-poll-cycle).
+ * Sam's Club SC-4: checkout SPA shipping → payment → review happy path, no sacred lock.
+ */
+function runSc4ShippingPaymentReviewElementOfflineTests() {
+  assertSc4ShippingPaymentReviewSource();
+  assertSc4ShippingPaymentReviewScenario(
+    'https://www.samsclub.com/p/mock-fcfs/789',
+    'https://www.samsclub.com/checkout/spa',
+    'sc4-shipping-payment-review'
   );
 }
 

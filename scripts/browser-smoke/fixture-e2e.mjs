@@ -20,6 +20,11 @@ let fixtureServer;
 /** Set in main() — used to recover popup extension context if chrome.runtime is lost mid-run. */
 let extensionContext = { extensionId: null, timeout: 60000 };
 
+/** Poll-recovery rearm: arm → NAV_FAILED clears lock → re-arm can slip past 18s on cloud VMs. */
+const POLL_RECOVERY_ARM_WAIT_MS = 3000;
+const POLL_RECOVERY_STATUS_CYCLES = 44;
+const POLL_RECOVERY_STATUS_INTERVAL_MS = 500;
+
 function normalizeProductUrl(url) {
   try {
     const u = new URL(url);
@@ -2986,16 +2991,17 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       refreshInterval: 1,
       dropExpectedAt: '',
       walmartSkipMonitoring: true,
+      errorRetryDelayMs: 500,
     });
 
     // Match wm4/wm6 poll-recovery: allow monitor tab + content script to load before sampling.
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, POLL_RECOVERY_ARM_WAIT_MS));
 
     let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;
-    for (let i = 0; i < 36; i++) {
-      await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < POLL_RECOVERY_STATUS_CYCLES; i++) {
+      await new Promise((r) => setTimeout(r, POLL_RECOVERY_STATUS_INTERVAL_MS));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
       const cycleNavLock = cycle?.navigationLock || [];
@@ -3087,13 +3093,13 @@ async function assertRouteInvariants(popup, route, logs, page, port) {
       errorRetryDelayMs: 500,
     });
 
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, POLL_RECOVERY_ARM_WAIT_MS));
 
     let sawLockArmed = false;
     let sawLockCleared = false;
     let sawLockRearmed = false;
-    for (let i = 0; i < 36; i++) {
-      await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < POLL_RECOVERY_STATUS_CYCLES; i++) {
+      await new Promise((r) => setTimeout(r, POLL_RECOVERY_STATUS_INTERVAL_MS));
       const cycle = await sendBg(popup, { type: 'GET_MONITOR_STATUS' });
       const cycleInQueue = cycle?.inQueueUrls || [];
       const cycleNavLock = cycle?.navigationLock || [];
