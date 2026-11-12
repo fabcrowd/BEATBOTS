@@ -6437,6 +6437,18 @@ function assertSc4ReviewCrossFixtureMarker(label) {
   );
 }
 
+function assertSc4CheckoutSpaCrossFixtureMarker(label) {
+  const checkoutSpaCrossFixture = fs.readFileSync(
+    path.resolve(__dirname, 'fixtures/samsclub-checkout-spa-cross.html'),
+    'utf8'
+  );
+  assert.match(
+    checkoutSpaCrossFixture,
+    /data-tch-fixture="samsclub-checkout-spa-cross"/,
+    `${label}: cross-page checkout SPA fixture marker`
+  );
+}
+
 function assertSc4ReviewCrossPollRecoveryRearmSource(label) {
   assertSc4ReviewCrossFixtureMarker(label);
   const samsSrc = fs.readFileSync(
@@ -6550,58 +6562,18 @@ function assertSc3DisabledAtcLivePollCycleScenario(monitorProductUrl, tabUrl, la
 }
 
 /**
- * FIX-3 parity for sc4-repeated-nav-failed on /checkout/spa-stall-cross named tag.
+ * FIX-3 parity for sc4-checkout-spa-cross-repeated-nav-failed named tag.
  * Sam's Club SC-4: cross-page checkout SPA timeout repeated SAMS_NAV_FAILED, no sacred lock.
  */
 function runSc4CheckoutSpaCrossRepeatedNavFailedOfflineTests() {
-  const checkoutSpaCrossFixture = fs.readFileSync(
-    path.resolve(__dirname, 'fixtures/samsclub-checkout-spa-cross.html'),
-    'utf8'
-  );
-  assert.match(
-    checkoutSpaCrossFixture,
-    /data-tch-fixture="samsclub-checkout-spa-cross"/,
-    'sc4-repeated-nav-failed: cross-page checkout SPA fixture marker'
-  );
-
+  const label = 'sc4-checkout-spa-cross-repeated-nav-failed';
+  assertSc4CheckoutSpaCrossFixtureMarker(label);
   assertSc4CheckoutSpaStallTimeoutSource();
-
-  const crossMonitor = 'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796';
-  const normCrossMonitor = normalizeProductUrl(crossMonitor);
-  const normCrossTab = normalizeProductUrl('https://www.samsclub.com/checkout/spa-stall-cross');
-
-  for (let i = 0; i < 3; i++) {
-    const inQueueUrls = new Set();
-    const navigationLock = new Set([normCrossMonitor]);
-    applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: crossMonitor });
-    assert.equal(
-      inQueueUrls.size,
-      0,
-      `sc4-repeated-nav-failed cycle ${i + 1}: must not arm inQueueUrls`
-    );
-    assert.ok(
-      !navigationLock.has(normCrossMonitor),
-      `sc4-repeated-nav-failed cycle ${i + 1}: must clear navigationLock`
-    );
-    assert.ok(
-      !pollWouldSkipNavigation(normCrossMonitor, inQueueUrls, navigationLock),
-      `sc4-repeated-nav-failed cycle ${i + 1}: allows poll retry (no sacred lock)`
-    );
-    assert.notEqual(
-      normCrossMonitor,
-      normCrossTab,
-      `sc4-repeated-nav-failed cycle ${i + 1}: monitor productUrl must differ from tab URL`
-    );
-    assert.ok(
-      !inQueueUrls.has(normCrossTab),
-      `sc4-repeated-nav-failed cycle ${i + 1}: tab URL must not be sacred lock key`
-    );
-  }
-
-  const crossWmSacredLock = new Set([normCrossMonitor]);
-  assert.ok(
-    pollWouldSkipNavigation(normCrossMonitor, crossWmSacredLock, new Set()),
-    'sc4-repeated-nav-failed: contrast WM-5 — sacred lock would block poll; SC-4 checkout SPA timeout does not arm it'
+  assertSc4CrossPageRepeatedNavFailedScenario(
+    'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+    'https://www.samsclub.com/checkout/spa-stall-cross',
+    label,
+    'SC-4 checkout SPA timeout does not arm it'
   );
 }
 
