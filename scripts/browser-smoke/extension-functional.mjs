@@ -6369,6 +6369,56 @@ function assertScCrossPagePollRecoveryProductUrlSource(contextLabel) {
   );
 }
 
+function assertSc4CheckoutSpaPollRecoveryRearmSource(fixtureFileName, fixtureMarker, label) {
+  const checkoutSpaFixture = fs.readFileSync(path.resolve(__dirname, `fixtures/${fixtureFileName}`), 'utf8');
+  assert.match(checkoutSpaFixture, fixtureMarker, `${label}: checkout SPA stall fixture marker`);
+  assertSc4CheckoutSpaStallTimeoutSource();
+}
+
+function assertSc4CheckoutSpaPollRecoveryRearmScenario(monitorProductUrl, recoveryProductUrl, tabUrl, label) {
+  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
+  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
+  const normTabUrl = normalizeProductUrl(tabUrl);
+  const inQueueUrls = new Set();
+  const navigationLock = new Set();
+
+  assert.equal(inQueueUrls.size, 0, `${label}: must not arm sacred lock on start`);
+
+  navigationLock.add(normMonitorUrl);
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
+  assert.ok(!navigationLock.has(normMonitorUrl), `${label}: NAV_FAILED releases navigationLock on monitor product`);
+  assert.equal(inQueueUrls.size, 0, `${label}: NAV_FAILED must not arm sacred lock`);
+  if (normTabUrl) {
+    assert.notEqual(normMonitorUrl, normTabUrl, `${label}: monitor productUrl must differ from tab URL`);
+    assert.ok(!inQueueUrls.has(normTabUrl), `${label}: tab URL must not be sacred lock key`);
+  }
+
+  navigationLock.add(normRecoveryUrl);
+  assert.ok(
+    navigationLock.has(normRecoveryUrl),
+    `${label}: poll recovery re-arms navigationLock on recovery product`
+  );
+  assert.equal(inQueueUrls.size, 0, `${label}: poll recovery must not arm sacred lock`);
+  assert.ok(!inQueueUrls.has(normRecoveryUrl), `${label}: recovery product must not be in sacred lock`);
+
+  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
+  assert.ok(
+    !navigationLock.has(normRecoveryUrl),
+    `${label}: NAV_FAILED during poll recovery releases recovery lock for retry`
+  );
+  assert.equal(inQueueUrls.size, 0, `${label}: poll recovery NAV_FAILED must not arm sacred lock`);
+  assert.ok(
+    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
+    `${label}: poll may retry after poll recovery NAV_FAILED (no sacred lock)`
+  );
+
+  const wmSacredLock = new Set([normRecoveryUrl]);
+  assert.ok(
+    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
+    `${label}: contrast WM-5 — sacred lock would block poll; SC-4 checkout SPA timeout does not arm it`
+  );
+}
+
 /**
  * FIX-3 parity for sc4-repeated-nav-failed on /checkout/spa-stall-cross named tag.
  * Sam's Club SC-4: cross-page checkout SPA timeout repeated SAMS_NAV_FAILED, no sacred lock.
@@ -8465,61 +8515,35 @@ function runSc4CheckoutSpaRepeatedNavFailedOfflineTests() {
  * Sam's Club SC-4: checkout SPA stall SAMS_NAV_FAILED → poll re-arms on recovery product, no sacred lock.
  */
 function runSc4PollRecoveryRearmOfflineTests() {
-  const checkoutSpaFixture = fs.readFileSync(
-    path.resolve(__dirname, 'fixtures/samsclub-checkout-spa-timeout.html'),
-    'utf8'
-  );
-  assert.match(
-    checkoutSpaFixture,
+  const label = 'sc4-poll-recovery-rearm';
+  assertSc4CheckoutSpaPollRecoveryRearmSource(
+    'samsclub-checkout-spa-timeout.html',
     /data-tch-fixture="samsclub-checkout-spa-timeout"/,
-    'sc4-poll-recovery-rearm: checkout SPA stall fixture marker'
+    label
   );
-
-  assertSc4CheckoutSpaStallTimeoutSource();
-
-  const monitorProductUrl = 'https://www.samsclub.com/p/mock-checkout-spa-stall/793';
-  const recoveryProductUrl = 'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791';
-  const tabUrl = 'https://www.samsclub.com/checkout/spa-stall';
-  const normMonitorUrl = normalizeProductUrl(monitorProductUrl);
-  const normRecoveryUrl = normalizeProductUrl(recoveryProductUrl);
-  const normTabUrl = normalizeProductUrl(tabUrl);
-  const inQueueUrls = new Set();
-  const navigationLock = new Set();
-
-  assert.equal(inQueueUrls.size, 0, 'sc4-poll-recovery-rearm: must not arm sacred lock on start');
-
-  navigationLock.add(normMonitorUrl);
-  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: monitorProductUrl });
-  assert.ok(!navigationLock.has(normMonitorUrl), 'sc4-poll-recovery-rearm: NAV_FAILED releases navigationLock on monitor product');
-  assert.equal(inQueueUrls.size, 0, 'sc4-poll-recovery-rearm: NAV_FAILED must not arm sacred lock');
-  if (normTabUrl) {
-    assert.notEqual(normMonitorUrl, normTabUrl, 'sc4-poll-recovery-rearm: monitor productUrl must differ from tab URL');
-    assert.ok(!inQueueUrls.has(normTabUrl), 'sc4-poll-recovery-rearm: tab URL must not be sacred lock key');
-  }
-
-  navigationLock.add(normRecoveryUrl);
-  assert.ok(
-    navigationLock.has(normRecoveryUrl),
-    'sc4-poll-recovery-rearm: poll recovery re-arms navigationLock on recovery product'
+  assertSc4CheckoutSpaPollRecoveryRearmScenario(
+    'https://www.samsclub.com/p/mock-checkout-spa-stall/793',
+    'https://www.samsclub.com/p/mock-fcfs-invisible-atc/791',
+    'https://www.samsclub.com/checkout/spa-stall',
+    label
   );
-  assert.equal(inQueueUrls.size, 0, 'sc4-poll-recovery-rearm: poll recovery must not arm sacred lock');
-  assert.ok(!inQueueUrls.has(normRecoveryUrl), 'sc4-poll-recovery-rearm: recovery product must not be in sacred lock');
+}
 
-  applyNavFailed(navigationLock, inQueueUrls, { type: 'SAMS_NAV_FAILED', url: recoveryProductUrl });
-  assert.ok(
-    !navigationLock.has(normRecoveryUrl),
-    'sc4-poll-recovery-rearm: NAV_FAILED during poll recovery releases recovery lock for retry'
+/**
+ * FIX-3 parity for sc4-poll-recovery-rearm on /checkout/spa-stall-cross (cross-page tab, same invariant tag).
+ */
+function runSc4CheckoutSpaCrossPollRecoveryRearmOfflineTests() {
+  const label = 'sc4-poll-recovery-rearm cross-page';
+  assertSc4CheckoutSpaPollRecoveryRearmSource(
+    'samsclub-checkout-spa-cross.html',
+    /data-tch-fixture="samsclub-checkout-spa-cross"/,
+    label
   );
-  assert.equal(inQueueUrls.size, 0, 'sc4-poll-recovery-rearm: poll recovery NAV_FAILED must not arm sacred lock');
-  assert.ok(
-    !pollWouldSkipNavigation(normRecoveryUrl, inQueueUrls, navigationLock),
-    'sc4-poll-recovery-rearm: poll may retry after poll recovery NAV_FAILED (no sacred lock)'
-  );
-
-  const wmSacredLock = new Set([normRecoveryUrl]);
-  assert.ok(
-    pollWouldSkipNavigation(normRecoveryUrl, wmSacredLock, new Set()),
-    'sc4-poll-recovery-rearm: contrast WM-5 — sacred lock would block poll; SC-4 checkout SPA timeout does not arm it'
+  assertSc4CheckoutSpaPollRecoveryRearmScenario(
+    'https://www.samsclub.com/p/mock-checkout-spa-cross-monitor/796',
+    'https://www.samsclub.com/p/mock-checkout-spa-cross-recovery/797',
+    'https://www.samsclub.com/checkout/spa-stall-cross',
+    label
   );
 }
 
@@ -9194,6 +9218,7 @@ async function main() {
   runSc6DisabledAtcCrossRepeatedNavFailedOfflineTests();
   runSc4LivePollCycleOfflineTests();
   runSc4PollRecoveryRearmOfflineTests();
+  runSc4CheckoutSpaCrossPollRecoveryRearmOfflineTests();
   runSc6RestockRepeatedNavFailedOfflineTests();
   runSc6InvisibleAtcRepeatedNavFailedOfflineTests();
   runSc6DisabledAtcRepeatedNavFailedOfflineTests();
